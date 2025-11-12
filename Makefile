@@ -1,4 +1,4 @@
-.PHONY: build test clean install run fmt vet lint
+.PHONY: build test clean install run fmt vet lint build-linux-amd64 build-darwin-arm64 build-all-platforms
 
 # Build variables
 BINARY_NAME=logwatch-analyzer
@@ -18,6 +18,23 @@ build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
 	@mkdir -p $(BUILD_DIR)
 	$(GO) build -ldflags="-s -w" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
+
+# Build for Linux AMD64 (Debian 12/Ubuntu 24)
+build-linux-amd64:
+	@echo "Building $(BINARY_NAME) for Linux AMD64..."
+	@mkdir -p $(BUILD_DIR)
+	GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-s -w" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/analyzer
+
+# Build for macOS ARM64 (Apple Silicon)
+build-darwin-arm64:
+	@echo "Building $(BINARY_NAME) for macOS ARM64..."
+	@mkdir -p $(BUILD_DIR)
+	GOOS=darwin GOARCH=arm64 $(GO) build -ldflags="-s -w" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/analyzer
+
+# Build for all platforms
+build-all-platforms: build-linux-amd64 build-darwin-arm64
+	@echo "All platform builds complete!"
+	@ls -lh $(BUILD_DIR)/$(BINARY_NAME)-*
 
 # Run tests
 test:
@@ -74,14 +91,17 @@ deps:
 # Display help
 help:
 	@echo "Available targets:"
-	@echo "  build         - Build the application"
-	@echo "  build-prod    - Build optimized production binary"
-	@echo "  test          - Run tests"
-	@echo "  test-coverage - Run tests with coverage report"
-	@echo "  fmt           - Format code"
-	@echo "  vet           - Run go vet"
-	@echo "  clean         - Remove build artifacts"
-	@echo "  install       - Install to $(INSTALL_DIR)"
-	@echo "  run           - Build and run the application"
-	@echo "  deps          - Download and tidy dependencies"
-	@echo "  help          - Show this help message"
+	@echo "  build              - Build the application"
+	@echo "  build-prod         - Build optimized production binary"
+	@echo "  build-linux-amd64  - Build for Linux AMD64 (Debian 12/Ubuntu 24)"
+	@echo "  build-darwin-arm64 - Build for macOS ARM64 (Apple Silicon)"
+	@echo "  build-all-platforms- Build for all platforms"
+	@echo "  test               - Run tests"
+	@echo "  test-coverage      - Run tests with coverage report"
+	@echo "  fmt                - Format code"
+	@echo "  vet                - Run go vet"
+	@echo "  clean              - Remove build artifacts"
+	@echo "  install            - Install to $(INSTALL_DIR)"
+	@echo "  run                - Build and run the application"
+	@echo "  deps               - Download and tidy dependencies"
+	@echo "  help               - Show this help message"
