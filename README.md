@@ -1,0 +1,310 @@
+# Logwatch AI Analyzer (Go)
+
+An intelligent system log analyzer that uses Claude AI to analyze logwatch reports and send actionable insights via Telegram. This is a Go port of the original Node.js [logwatch-ai](https://github.com/olegiv/logwatch-ai) project.
+
+## Features
+
+- **AI-Powered Analysis**: Uses Anthropic's Claude Sonnet 4.5 to analyze logwatch reports
+- **Smart Notifications**: Dual-channel Telegram notifications (archive + alerts)
+- **Historical Tracking**: SQLite database stores analysis history for trend detection
+- **Intelligent Preprocessing**: Handles large log files (up to 800KB-1MB) with smart content reduction
+- **Cost Optimization**: Implements Claude prompt caching (16-30% cost savings)
+- **Proxy Support**: Full HTTP/HTTPS proxy support for corporate environments
+- **Pure Go**: No CGO dependencies, easy cross-platform deployment
+
+## Quick Start
+
+### Prerequisites
+
+- Go 1.21+ (for building from source)
+- Logwatch installed and configured
+- Anthropic API key
+- Telegram bot token and channel IDs
+
+### Installation
+
+1. **Clone the repository**
+```bash
+git clone https://github.com/olegiv/logwatch-ai-go.git
+cd logwatch-ai-go
+```
+
+2. **Build the application**
+```bash
+make build
+```
+
+3. **Configure environment**
+```bash
+cp configs/.env.example .env
+# Edit .env with your credentials
+```
+
+4. **Install system-wide** (optional)
+```bash
+sudo make install
+```
+
+### Configuration
+
+Create a `.env` file with the following settings:
+
+```bash
+# AI Provider
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+CLAUDE_MODEL=claude-sonnet-4-5-20250929
+
+# Telegram
+TELEGRAM_BOT_TOKEN=1234567890:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+TELEGRAM_CHANNEL_ARCHIVE_ID=-1001234567890    # Required
+TELEGRAM_CHANNEL_ALERTS_ID=-1009876543210     # Optional
+
+# Paths
+LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt
+MAX_LOG_SIZE_MB=10
+
+# Application
+LOG_LEVEL=info
+ENABLE_DATABASE=true
+DATABASE_PATH=./data/summaries.db
+
+# Preprocessing
+ENABLE_PREPROCESSING=true
+MAX_PREPROCESSING_TOKENS=150000
+
+# Proxy (optional)
+HTTP_PROXY=http://proxy.example.com:8080
+HTTPS_PROXY=http://proxy.example.com:8080
+```
+
+### Setting up Telegram
+
+1. **Create a Telegram bot**:
+   - Message [@BotFather](https://t.me/BotFather)
+   - Send `/newbot` and follow the instructions
+   - Save the bot token
+
+2. **Create Telegram channel(s)**:
+   - Create a channel for archives
+   - (Optional) Create a separate channel for alerts
+   - Add your bot as an administrator to both channels
+
+3. **Get channel IDs**:
+   - Forward a message from your channel to [@userinfobot](https://t.me/userinfobot)
+   - The bot will reply with the channel ID (should start with `-100`)
+
+### Cron Setup
+
+Run logwatch analysis daily at 2:00 AM:
+
+**Root crontab** (generate logwatch report):
+```bash
+0 2 * * * /opt/logwatch-ai/scripts/generate-logwatch.sh
+```
+
+**User crontab** (run analyzer):
+```bash
+15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer >> logs/cron.log 2>&1
+```
+
+See [docs/CRON_SETUP.md](docs/CRON_SETUP.md) for detailed setup instructions.
+
+## Usage
+
+### Manual Run
+
+```bash
+# From the project directory
+./bin/logwatch-analyzer
+
+# Or if installed system-wide
+logwatch-analyzer
+```
+
+### Build Options
+
+```bash
+make build          # Development build
+make build-prod     # Production build (optimized, smaller binary)
+make test           # Run tests
+make test-coverage  # Run tests with coverage
+make clean          # Clean build artifacts
+make install        # Install to /opt/logwatch-ai
+```
+
+## Architecture
+
+### Project Structure
+
+```
+logwatch-ai-go/
+├── cmd/
+│   └── analyzer/           # Main application entry point
+├── internal/
+│   ├── ai/                 # Claude AI client and prompts
+│   ├── config/             # Configuration management
+│   ├── logwatch/           # Log file reading and preprocessing
+│   ├── notification/       # Telegram notifications
+│   └── storage/            # SQLite database operations
+├── pkg/
+│   └── logger/             # Logging utilities
+├── scripts/                # Helper scripts
+├── configs/                # Configuration templates
+├── docs/                   # Documentation
+└── Makefile               # Build automation
+```
+
+### How It Works
+
+1. **Logwatch Generation**: Root cron runs `generate-logwatch.sh` to create daily report
+2. **File Reading**: Application reads and validates the logwatch output
+3. **Preprocessing**: Large files are intelligently compressed while preserving critical info
+4. **Historical Context**: Retrieves last 7 days of analysis from database
+5. **AI Analysis**: Claude Sonnet 4.5 analyzes logs with prompt caching
+6. **Storage**: Results saved to SQLite database
+7. **Notifications**: Sent to Telegram (archive channel always, alerts channel conditionally)
+8. **Cleanup**: Old database entries (>90 days) are removed
+
+## Cost Estimation
+
+### Claude AI Pricing (Sonnet 4.5)
+
+- Input: $3.00 per million tokens
+- Output: $15.00 per million tokens
+- Cache write: $3.75 per million tokens
+- Cache read: $0.30 per million tokens (90% savings)
+
+### Typical Costs
+
+- **First run**: $0.0160-0.0220 (cache creation)
+- **Cached run**: $0.0107-0.0154 (cache hits)
+- **Monthly (daily)**: ~$0.47/month
+- **Yearly**: ~$5.64/year
+
+## Telegram Notification Format
+
+```
+🔍 Logwatch Analysis Report
+🖥 Host: server01
+📅 Date: 2025-11-12 02:15:00
+🟢 Status: Good
+
+📋 Execution Stats
+• Critical Issues: 0
+• Warnings: 2
+• Recommendations: 3
+• Cost: $0.0154
+• Duration: 12.62s
+
+📊 Summary
+System is operating normally with minor warnings...
+
+⚡ Warnings (2)
+1. Disk usage at 85% on /var partition
+2. 5 failed SSH attempts from 192.168.1.50
+
+💡 Recommendations
+1. Clean up old log files in /var/log
+2. Monitor IP 192.168.1.50 for activity
+
+📈 Key Metrics
+• Failed Logins: 5
+• Disk Usage: 85% on /var
+• Error Count: 0
+```
+
+## Differences from Node.js Version
+
+This Go implementation provides feature parity with the original Node.js version while offering:
+
+### Advantages
+
+- **Pure Go**: No CGO dependencies (using modernc.org/sqlite)
+- **Simpler Deployment**: Single binary, no runtime dependencies
+- **Better Performance**: Faster startup and lower memory usage
+- **Type Safety**: Compile-time type checking
+- **Smaller Binary**: ~10-15MB (vs ~120MB Node.js SEA)
+- **Easier Cross-Compilation**: Build for any platform
+
+### Maintained Features
+
+- ✅ Identical AI prompts and analysis logic
+- ✅ Same database schema (compatible with Node.js version)
+- ✅ Same preprocessing algorithm
+- ✅ Same notification format and dual-channel logic
+- ✅ Same cost tracking and token estimation
+- ✅ Prompt caching support
+- ✅ Proxy configuration
+
+## Development
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Run with coverage
+make test-coverage
+
+# Run specific package tests
+go test -v ./internal/ai
+go test -v ./internal/logwatch
+```
+
+### Project Dependencies
+
+- **github.com/liushuangls/go-anthropic/v2** - Anthropic Claude SDK
+- **github.com/go-telegram-bot-api/telegram-bot-api/v5** - Telegram Bot API
+- **modernc.org/sqlite** - Pure Go SQLite implementation
+- **github.com/spf13/viper** - Configuration management
+- **github.com/rs/zerolog** - Structured logging
+- **gopkg.in/natefinch/lumberjack.v2** - Log rotation
+
+## Troubleshooting
+
+### Common Issues
+
+**"Configuration validation failed: ANTHROPIC_API_KEY is required"**
+- Ensure `.env` file exists and contains valid API key
+
+**"Logwatch file is too old"**
+- Check if logwatch cron is running: `sudo crontab -l`
+- Verify logwatch output exists: `ls -lh /tmp/logwatch-output.txt`
+
+**"Failed to send to archive channel"**
+- Verify bot is added as admin to the channel
+- Check channel ID starts with `-100`
+- Test bot token: `curl https://api.telegram.org/bot<TOKEN>/getMe`
+
+**Database locked errors**
+- Ensure only one instance is running
+- Check file permissions on `data/` directory
+
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more solutions.
+
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Original [logwatch-ai](https://github.com/olegiv/logwatch-ai) Node.js implementation
+- [Anthropic](https://www.anthropic.com/) for Claude AI
+- The Go community for excellent libraries
+
+## Support
+
+- **Issues**: [GitHub Issues](https://github.com/olegiv/logwatch-ai-go/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/olegiv/logwatch-ai-go/discussions)
+- **Original Project**: [logwatch-ai](https://github.com/olegiv/logwatch-ai)
