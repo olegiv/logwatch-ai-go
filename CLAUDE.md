@@ -25,9 +25,20 @@ make vet            # Run go vet
 
 ### Production
 ```bash
-make build-prod     # Optimized production build (-ldflags="-s -w")
+make build-prod     # Optimized production build (-ldflags="-s -w" -trimpath)
 make install        # Install to /opt/logwatch-ai (requires sudo)
 ```
+
+### Cross-Platform Builds
+```bash
+make build-linux-amd64    # Build for Linux AMD64 (Debian 12/Ubuntu 24)
+make build-darwin-arm64   # Build for macOS ARM64 (Apple Silicon)
+make build-all-platforms  # Build for all platforms at once
+```
+
+All cross-platform builds use production optimizations:
+- `-ldflags="-s -w"` - Strip symbols and debug information
+- `-trimpath` - Remove file system paths from binary
 
 ### Testing
 ```bash
@@ -204,11 +215,14 @@ When testing with actual Anthropic/Telegram APIs:
 
 ### Building for Different Platforms
 ```bash
-# Build for Linux (on macOS)
-GOOS=linux GOARCH=amd64 go build -o bin/logwatch-analyzer-linux ./cmd/analyzer
+# Use Makefile targets for cross-platform builds
+make build-linux-amd64       # Linux AMD64 binary
+make build-darwin-arm64      # macOS ARM64 binary
+make build-all-platforms     # Build all platforms
 
-# Build for production with optimizations
-make build-prod
+# Manual cross-compilation (if needed for other platforms)
+GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -trimpath -o bin/logwatch-analyzer-linux ./cmd/analyzer
+GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -trimpath -o bin/logwatch-analyzer-linux-arm64 ./cmd/analyzer
 ```
 
 ## Critical Implementation Details

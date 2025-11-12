@@ -92,7 +92,10 @@ logwatch-ai-go/
 
 #### Makefile Targets
 - `make build` - Development build
-- `make build-prod` - Optimized production build
+- `make build-prod` - Optimized production build with `-ldflags="-s -w" -trimpath`
+- `make build-linux-amd64` - Cross-compile for Linux AMD64 (Debian 12/Ubuntu 24)
+- `make build-darwin-arm64` - Cross-compile for macOS ARM64 (Apple Silicon)
+- `make build-all-platforms` - Build for all supported platforms
 - `make test` - Run tests
 - `make test-coverage` - Tests with coverage report
 - `make fmt` - Format code

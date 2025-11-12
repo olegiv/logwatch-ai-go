@@ -124,13 +124,43 @@ logwatch-analyzer
 ### Build Options
 
 ```bash
-make build          # Development build
-make build-prod     # Production build (optimized, smaller binary)
-make test           # Run tests
-make test-coverage  # Run tests with coverage
-make clean          # Clean build artifacts
-make install        # Install to /opt/logwatch-ai
+make build                # Development build
+make build-prod           # Production build (optimized, smaller binary)
+make build-linux-amd64    # Build for Linux AMD64 (Debian 12/Ubuntu 24)
+make build-darwin-arm64   # Build for macOS ARM64 (Apple Silicon)
+make build-all-platforms  # Build for all platforms
+make test                 # Run tests
+make test-coverage        # Run tests with coverage
+make clean                # Clean build artifacts
+make install              # Install to /opt/logwatch-ai
 ```
+
+### Cross-Platform Builds
+
+Go's built-in cross-compilation makes it easy to build for different platforms:
+
+**Linux AMD64** (Debian 12, Ubuntu 24, most Linux distributions):
+```bash
+make build-linux-amd64
+# Output: bin/logwatch-analyzer-linux-amd64
+```
+
+**macOS ARM64** (Apple Silicon - M1, M2, M3):
+```bash
+make build-darwin-arm64
+# Output: bin/logwatch-analyzer-darwin-arm64
+```
+
+**All platforms at once**:
+```bash
+make build-all-platforms
+# Outputs both binaries and shows file sizes
+```
+
+All cross-platform builds include production optimizations:
+- `-ldflags="-s -w"` - Strips symbols and debug information
+- `-trimpath` - Removes file system paths from binary
+- Result: Smaller binaries (~20-40% size reduction) and improved security
 
 ## Architecture
 
