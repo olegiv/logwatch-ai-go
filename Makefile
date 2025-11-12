@@ -17,7 +17,7 @@ build:
 build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -ldflags="-s -w" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
+	$(GO) build -ldflags="-s -w" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
 
 # Run tests
 test:
