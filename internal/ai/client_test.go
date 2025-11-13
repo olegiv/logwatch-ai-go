@@ -163,8 +163,9 @@ func TestCalculateStats(t *testing.T) {
 			cacheReadCost := float64(tt.cacheRead) / 1000000 * 0.30
 			expectedCost := inputCost + outputCost + cacheWriteCost + cacheReadCost
 
-			// Verify the calculation logic matches our expectations
-			if expectedCost < tt.expectedCostMin || expectedCost > tt.expectedCostMax {
+			// Verify the calculation logic matches our expectations (with tolerance for floating-point precision)
+			const tolerance = 0.0001
+			if expectedCost < tt.expectedCostMin-tolerance || expectedCost > tt.expectedCostMax+tolerance {
 				t.Errorf("Expected cost between %.4f and %.4f, calculated %.4f",
 					tt.expectedCostMin, tt.expectedCostMax, expectedCost)
 			}
