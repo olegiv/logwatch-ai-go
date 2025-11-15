@@ -67,10 +67,12 @@ internal/              - Private application packages (not importable)
   ├── logwatch/       - Log reading, preprocessing, token estimation
   ├── notification/   - Telegram client and message formatting
   └── storage/        - SQLite operations (summaries table)
-pkg/logger/           - Reusable structured logger (zerolog + lumberjack)
 scripts/              - Shell scripts (install.sh, generate-logwatch.sh)
 configs/              - Configuration templates (.env.example)
 ```
+
+**External Dependencies:**
+- `github.com/olegiv/go-logger` - Reusable structured logger (zerolog + lumberjack)
 
 ### Key Design Patterns
 
@@ -78,7 +80,7 @@ configs/              - Configuration templates (.env.example)
 ```
 main() → run() → runAnalyzer()
   1. Load config (internal/config)
-  2. Initialize logger (pkg/logger)
+  2. Initialize logger (github.com/olegiv/go-logger)
   3. Initialize storage (internal/storage) - SQLite connection
   4. Initialize Telegram client (internal/notification)
   5. Initialize Claude client (internal/ai)

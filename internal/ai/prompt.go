@@ -112,7 +112,7 @@ func GetUserPrompt(logwatchContent, historicalContext string) string {
 // ParseAnalysis extracts and parses the JSON analysis from Claude's response
 func ParseAnalysis(response string) (*Analysis, error) {
 	// Extract JSON from response (handles cases where Claude adds extra text)
-	jsonRegex := regexp.MustCompile(`\{[\s\S]*\}`)
+	jsonRegex := regexp.MustCompile(`\{[\s\S]*}`)
 	jsonMatch := jsonRegex.FindString(response)
 
 	if jsonMatch == "" {
@@ -140,11 +140,11 @@ func validateAnalysis(analysis *Analysis) error {
 	}
 
 	validStatuses := map[string]bool{
-		"Excellent":     true,
-		"Good":          true,
-		"Satisfactory":  true,
-		"Bad":           true,
-		"Awful":         true,
+		"Excellent":    true,
+		"Good":         true,
+		"Satisfactory": true,
+		"Bad":          true,
+		"Awful":        true,
 	}
 
 	if !validStatuses[analysis.SystemStatus] {

@@ -8,12 +8,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/olegiv/go-logger"
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 	"github.com/olegiv/logwatch-ai-go/internal/config"
 	"github.com/olegiv/logwatch-ai-go/internal/logwatch"
 	"github.com/olegiv/logwatch-ai-go/internal/notification"
 	"github.com/olegiv/logwatch-ai-go/internal/storage"
-	"github.com/olegiv/logwatch-ai-go/pkg/logger"
 )
 
 const (
@@ -40,7 +40,7 @@ func run() int {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
 		return exitFailure
 	}
 
@@ -81,7 +81,12 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logger.Logger) er
 		if err != nil {
 			return fmt.Errorf("failed to initialize storage: %w", err)
 		}
-		defer store.Close()
+		defer func(store *storage.Storage) {
+			err = store.Close()
+			if err != nil {
+				log.Warn().Err(err).Msg("Failed to close database")
+			}
+		}(store)
 		log.Info().Str("path", cfg.DatabasePath).Msg("Database initialized")
 	}
 
@@ -94,7 +99,12 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logger.Logger) er
 	if err != nil {
 		return fmt.Errorf("failed to initialize Telegram client: %w", err)
 	}
-	defer telegramClient.Close()
+	defer func(telegramClient *notification.TelegramClient) {
+		err = telegramClient.Close()
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to close Telegram client")
+		}
+	}(telegramClient)
 
 	botInfo := telegramClient.GetBotInfo()
 	log.Info().
