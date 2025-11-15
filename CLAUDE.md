@@ -12,6 +12,12 @@ Logwatch AI Analyzer is an intelligent system log analyzer that uses Claude AI t
 - Telegram Bot API
 - SQLite for analysis history
 
+**Production Status:**
+- ✅ **Production Ready** - Successfully deployed to Integration, QA, and Pre-Production environments
+- ✅ **Tested on Linux Debian 12** - Primary deployment platform validated
+- ✅ **Real API Testing** - Validated with live Claude AI and Telegram Bot APIs
+- ✅ **End-to-End Validation** - Full workflow tested with actual logwatch data
+
 ## Build Commands
 
 ### Development
@@ -169,10 +175,14 @@ Both `HTTP_PROXY` and `HTTPS_PROXY` are supported:
 - Only fail fast on: config validation, file reading, Claude API, Telegram send
 
 ### Testing Approach
-- Unit tests for formatting logic (see `internal/notification/telegram_test.go`)
-- Use table-driven tests for multiple scenarios
-- Mock external dependencies (Telegram API, Claude API)
-- Test MarkdownV2 escaping thoroughly
+- ✅ Unit tests for formatting logic (see `internal/notification/telegram_test.go`)
+- ✅ Table-driven tests for multiple scenarios
+- ✅ Real API integration testing (Claude AI + Telegram Bot)
+- ✅ End-to-end testing with actual logwatch output
+- ✅ Multi-environment validation (Integration → QA → Pre-Production)
+- ✅ Linux Debian 12 deployment testing
+- ⏳ Comprehensive mock-based unit tests (pending full coverage)
+- ✅ MarkdownV2 escaping validated
 
 ### Code Style
 - Use zerolog for structured logging: `log.Info().Str("key", value).Msg("message")`
@@ -214,6 +224,33 @@ When testing with actual Anthropic/Telegram APIs:
 2. Fill in real credentials
 3. Run: `./bin/logwatch-analyzer` (after `make build`)
 4. Check logs in `./logs/` directory
+
+### Deployment Environments
+
+**Validated Platforms:**
+- ✅ **Linux Debian 12** - Primary production platform
+- ✅ **macOS (Darwin 25.1.0)** - Development platform
+
+**Deployment Pipeline:**
+```
+Development (macOS) → Integration (Debian 12) → QA (Debian 12) → Pre-Production (Debian 12) → Production
+```
+
+**Deployment Checklist:**
+1. Build for target platform: `make build-linux-amd64`
+2. Transfer binary to target system
+3. Run installation script: `sudo ./scripts/install.sh`
+4. Configure `.env` with environment-specific credentials
+5. Test manual run: `/opt/logwatch-ai/logwatch-analyzer`
+6. Verify Telegram notifications received
+7. Set up cron jobs (see `docs/CRON_SETUP.md`)
+8. Monitor logs in `/opt/logwatch-ai/logs/`
+
+**Environment-Specific Configuration:**
+- Use separate Telegram channels for different environments
+- Use different database paths to avoid conflicts
+- Adjust `LOG_LEVEL` (debug for dev/integration, info for qa/prod)
+- Consider using environment-specific `.env` files
 
 ### Building for Different Platforms
 ```bash
@@ -326,6 +363,42 @@ stats, err := store.GetStatistics()
 - Default timeout: 120 seconds
 - Large logs may take longer to analyze
 - Consider increasing preprocessing aggressiveness
+
+## Production Deployment Best Practices
+
+### Pre-Deployment Validation
+1. ✅ **Build for target platform**: Use `make build-linux-amd64` for Debian/Ubuntu
+2. ✅ **Test in staging**: Deploy to pre-production environment first
+3. ✅ **Verify credentials**: Test with actual API keys in isolated environment
+4. ✅ **Check cron configuration**: Ensure logwatch runs before analyzer
+5. ✅ **Monitor logs**: Watch `/opt/logwatch-ai/logs/` for first few runs
+
+### Monitoring Recommendations
+- **Log files**: Check `logs/analyzer.log` for errors and warnings
+- **Database size**: Monitor `data/summaries.db` growth (cleanup runs every 90 days)
+- **Telegram delivery**: Verify messages arrive in both archive and alerts channels
+- **API costs**: Track cost_usd in database for budget monitoring
+- **Cron execution**: Use cron logging to verify scheduled runs
+
+### Security Considerations
+- **API keys**: Store `.env` with restricted permissions (600)
+- **Log files**: Contains sensitive system information, restrict access
+- **Database**: Contains historical analysis, ensure proper file permissions
+- **Network**: Use HTTPS proxy in corporate environments
+- **Updates**: Regularly update dependencies for security patches
+
+### Performance Tuning
+- **Preprocessing**: Adjust `MAX_PREPROCESSING_TOKENS` based on log size
+- **Historical context**: Default 7 days, reduce if logs are consistent
+- **Database cleanup**: Default 90 days, adjust based on retention needs
+- **Log rotation**: Analyzer logs rotate at 10MB, adjust in logger config
+
+### Troubleshooting in Production
+1. **Check logs first**: `/opt/logwatch-ai/logs/analyzer.log`
+2. **Verify cron**: `grep CRON /var/log/syslog` or `journalctl -u cron`
+3. **Test manually**: Run `/opt/logwatch-ai/logwatch-analyzer` as same user as cron
+4. **Check database**: `sqlite3 /opt/logwatch-ai/data/summaries.db "SELECT COUNT(*) FROM summaries;"`
+5. **Validate environment**: Ensure `.env` is in `/opt/logwatch-ai/` directory
 
 ## Cost Optimization
 

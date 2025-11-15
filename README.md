@@ -176,8 +176,6 @@ logwatch-ai-go/
 │   ├── logwatch/           # Log file reading and preprocessing
 │   ├── notification/       # Telegram notifications
 │   └── storage/            # SQLite database operations
-├── pkg/
-│   └── logger/             # Logging utilities
 ├── scripts/                # Helper scripts
 ├── configs/                # Configuration templates
 ├── docs/                   # Documentation
