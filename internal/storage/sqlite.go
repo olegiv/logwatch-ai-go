@@ -160,7 +160,12 @@ func (s *Storage) GetRecentSummaries(days int) ([]*Summary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query summaries: %w", err)
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err = rows.Close()
+		if err != nil {
+			fmt.Printf("Failed to close database rows: %v\n", err)
+		}
+	}(rows)
 
 	var summaries []*Summary
 	for rows.Next() {
@@ -246,7 +251,12 @@ func (s *Storage) GetStatistics() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err = rows.Close()
+		if err != nil {
+			fmt.Printf("Failed to close database rows: %v\n", err)
+		}
+	}(rows)
 
 	statusDist := make(map[string]int)
 	for rows.Next() {
@@ -273,13 +283,13 @@ func (s *Storage) GetStatistics() (map[string]interface{}, error) {
 // scanSummary scans a database row into a Summary struct
 func (s *Storage) scanSummary(rows *sql.Rows) (*Summary, error) {
 	var (
-		id                                                      int64
-		timestamp                                               string
-		systemStatus, summaryText                               string
-		criticalIssuesJSON, warningsJSON, recommendationsJSON   string
-		metricsJSON                                             string
-		inputTokens, outputTokens                               int
-		costUSD                                                 float64
+		id                                                    int64
+		timestamp                                             string
+		systemStatus, summaryText                             string
+		criticalIssuesJSON, warningsJSON, recommendationsJSON string
+		metricsJSON                                           string
+		inputTokens, outputTokens                             int
+		costUSD                                               float64
 	)
 
 	err := rows.Scan(

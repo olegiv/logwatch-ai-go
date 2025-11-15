@@ -64,6 +64,9 @@ func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Sta
 
 // formatMessage formats the analysis into a Telegram message
 func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats) string {
+
+	const formattedListTemplate = "%d\\. %s\n"
+
 	var msg strings.Builder
 
 	// Header
@@ -96,7 +99,7 @@ func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats) s
 	if len(analysis.CriticalIssues) > 0 {
 		msg.WriteString(fmt.Sprintf("🔴 *Critical Issues* \\(%d\\)\n", len(analysis.CriticalIssues)))
 		for i, issue := range analysis.CriticalIssues {
-			msg.WriteString(fmt.Sprintf("%d\\. %s\n", i+1, escapeMarkdown(issue)))
+			msg.WriteString(fmt.Sprintf(formattedListTemplate, i+1, escapeMarkdown(issue)))
 		}
 		msg.WriteString("\n")
 	}
@@ -105,7 +108,7 @@ func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats) s
 	if len(analysis.Warnings) > 0 {
 		msg.WriteString(fmt.Sprintf("⚡ *Warnings* \\(%d\\)\n", len(analysis.Warnings)))
 		for i, warning := range analysis.Warnings {
-			msg.WriteString(fmt.Sprintf("%d\\. %s\n", i+1, escapeMarkdown(warning)))
+			msg.WriteString(fmt.Sprintf(formattedListTemplate, i+1, escapeMarkdown(warning)))
 		}
 		msg.WriteString("\n")
 	}
@@ -114,7 +117,7 @@ func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats) s
 	if len(analysis.Recommendations) > 0 {
 		msg.WriteString("💡 *Recommendations*\n")
 		for i, rec := range analysis.Recommendations {
-			msg.WriteString(fmt.Sprintf("%d\\. %s\n", i+1, escapeMarkdown(rec)))
+			msg.WriteString(fmt.Sprintf(formattedListTemplate, i+1, escapeMarkdown(rec)))
 		}
 		msg.WriteString("\n")
 	}
