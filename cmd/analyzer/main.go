@@ -8,12 +8,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/olegiv/go-logger"
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 	"github.com/olegiv/logwatch-ai-go/internal/config"
 	"github.com/olegiv/logwatch-ai-go/internal/logwatch"
 	"github.com/olegiv/logwatch-ai-go/internal/notification"
 	"github.com/olegiv/logwatch-ai-go/internal/storage"
-	"github.com/olegiv/logwatch-ai-go/pkg/logger"
 )
 
 const (

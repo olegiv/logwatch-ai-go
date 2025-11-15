@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `internal/logwatch` - Log file reading and intelligent preprocessing
 - `internal/notification` - Telegram Bot API integration with MarkdownV2 formatting
 - `internal/storage` - SQLite database operations with pure Go driver
-- `pkg/logger` - Structured logging with zerolog and log rotation
+- `github.com/olegiv/go-logger` - External structured logging library with zerolog and log rotation
 
 #### Documentation
 - Comprehensive README.md with quick start guide

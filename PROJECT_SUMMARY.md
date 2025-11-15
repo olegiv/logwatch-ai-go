@@ -18,7 +18,6 @@ logwatch-ai-go/
 │   ├── logwatch/         # Log file reading and preprocessing
 │   ├── notification/     # Telegram notification client
 │   └── storage/          # SQLite database operations
-├── pkg/logger/           # Reusable logging package
 ├── scripts/              # Installation and helper scripts
 ├── configs/              # Configuration templates
 ├── docs/                 # Documentation
@@ -39,11 +38,12 @@ logwatch-ai-go/
 - ✅ Proxy configuration support
 - ✅ Sensible defaults
 
-#### Logger Package (`pkg/logger/`)
-- ✅ Structured logging with zerolog
+#### Logger Package (`github.com/olegiv/go-logger`)
+- ✅ External structured logging library with zerolog
 - ✅ File rotation (10MB max, 5 backups)
 - ✅ Console and file output
 - ✅ Configurable log levels (debug, info, warn, error)
+- ✅ Reusable across multiple Go projects
 
 #### Storage Package (`internal/storage/`)
 - ✅ Pure Go SQLite implementation (modernc.org/sqlite)
