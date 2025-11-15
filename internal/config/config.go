@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
@@ -40,13 +39,15 @@ type Config struct {
 }
 
 // Load loads configuration from .env file and environment variables
+// Priority: .env file > OS environment variables
 func Load() (*Config, error) {
-	// Try to load .env file (ignore error if it doesn't exist)
-	_ = godotenv.Load()
-
-	// Set up viper
+	// Set up viper first to read OS environment variables
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// Load .env file to override OS environment variables
+	// godotenv.Load() sets OS env vars from .env, which viper will then read
+	_ = godotenv.Load()
 
 	// Set defaults
 	setDefaults()
@@ -64,8 +65,8 @@ func Load() (*Config, error) {
 		DatabasePath:           viper.GetString("DATABASE_PATH"),
 		EnablePreprocessing:    viper.GetBool("ENABLE_PREPROCESSING"),
 		MaxPreprocessingTokens: viper.GetInt("MAX_PREPROCESSING_TOKENS"),
-		HTTPProxy:              os.Getenv("HTTP_PROXY"),
-		HTTPSProxy:             os.Getenv("HTTPS_PROXY"),
+		HTTPProxy:              viper.GetString("HTTP_PROXY"),
+		HTTPSProxy:             viper.GetString("HTTPS_PROXY"),
 	}
 
 	// Validate configuration
