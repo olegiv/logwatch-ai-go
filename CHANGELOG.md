@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-11-15
+
+### Added
+- Production deployment documentation for Integration, QA, and Pre-Production environments
+- Production best practices section in CLAUDE.md covering monitoring, security, performance tuning, and troubleshooting
+- Deployment pipeline documentation with environment-specific configuration guidance
+- Dependency Review GitHub Action workflow for automated vulnerability scanning in pull requests
+- Validated production readiness across multiple Linux Debian 12 environments
+
+### Changed
+- **BREAKING**: Configuration priority now favors .env file variables over OS environment variables
+  - Previously: OS env vars > .env file
+  - Now: .env file > OS env vars
+  - **Migration**: Users relying on OS environment variables to override .env settings must update their deployment configurations
+- Extracted logger to external reusable module `github.com/olegiv/go-logger` for sharing across multiple Go projects
+- HTTP_PROXY and HTTPS_PROXY configuration now uses `viper.GetString()` for consistency with other config values
+- Updated PROJECT_SUMMARY.md to reflect production-ready status with completed validations
+- Enhanced CLAUDE.md with comprehensive deployment checklist and troubleshooting guides
+
+### Fixed
+- Error handling in deferred cleanup operations (store.Close, telegramClient.Close)
+- GitHub Actions workflow permissions for code scanning compliance
+- Code formatting and alignment in prompt.go, telegram.go, and sqlite.go
+- Proper error capture in deferred functions to prevent variable shadowing
+
+### Removed
+- `pkg/logger/` directory (moved to external module `github.com/olegiv/go-logger`)
+  - Removed logger.go (128 lines)
+  - Removed logger_test.go (465 lines)
+
+### Migration Guide
+
+**Configuration Priority Change:**
+If you're using OS environment variables to override .env file settings, you'll need to either:
+1. Remove or comment out conflicting entries in your .env file, OR
+2. Update your deployment scripts to set environment variables after loading .env
+
+**Logger Module Change:**
+The logger has been extracted to an external module. Update your imports:
+- Old: `github.com/olegiv/logwatch-ai-go/pkg/logger`
+- New: `github.com/olegiv/go-logger`
+
+This change is transparent for binary users (no action required).
+
 ## [0.1.0] - 2025-11-13
 
 ### Added
@@ -108,5 +152,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
+[0.2.0]: https://github.com/olegiv/logwatch-ai-go/releases/tag/v0.2.0
 [0.1.0]: https://github.com/olegiv/logwatch-ai-go/releases/tag/v0.1.0
 [0.0.0]: https://github.com/olegiv/logwatch-ai-go/releases/tag/v0.0.0
