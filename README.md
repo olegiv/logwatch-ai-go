@@ -1,5 +1,9 @@
 # Logwatch AI Analyzer (Go)
 
+[![Go](https://github.com/olegiv/logwatch-ai-go/actions/workflows/go.yml/badge.svg)](https://github.com/olegiv/logwatch-ai-go/actions/workflows/go.yml)
+[![CodeQL](https://github.com/olegiv/logwatch-ai-go/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/olegiv/logwatch-ai-go/actions/workflows/github-code-scanning/codeql)
+[![Dependency review](https://github.com/olegiv/logwatch-ai-go/actions/workflows/dependency-review.yml/badge.svg)](https://github.com/olegiv/logwatch-ai-go/actions/workflows/dependency-review.yml)
+
 An intelligent system log analyzer that uses Claude AI to analyze logwatch reports and send actionable insights via Telegram. This is a Go port of the original Node.js [logwatch-ai](https://github.com/olegiv/logwatch-ai) project.
 
 ## Features
