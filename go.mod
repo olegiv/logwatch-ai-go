@@ -6,7 +6,7 @@ require (
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/joho/godotenv v1.5.1
 	github.com/liushuangls/go-anthropic/v2 v2.16.2
-	github.com/olegiv/go-logger v0.0.0
+	github.com/olegiv/go-logger v0.1.0
 	github.com/spf13/viper v1.21.0
 	modernc.org/sqlite v1.40.0
 )

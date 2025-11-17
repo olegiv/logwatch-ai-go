@@ -48,6 +48,7 @@ func run() int {
 	log := logger.New(logger.Config{
 		Level:      cfg.LogLevel,
 		LogDir:     "./logs",
+		Filename:   "analyzer.log",
 		MaxSizeMB:  10,
 		MaxBackups: 5,
 		Console:    true,
