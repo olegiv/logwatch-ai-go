@@ -8,6 +8,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
+	internalerrors "github.com/olegiv/logwatch-ai-go/internal/errors"
 )
 
 const maxMessageLength = 4096
@@ -24,7 +25,8 @@ type TelegramClient struct {
 func NewTelegramClient(botToken string, archiveChannel, alertsChannel int64) (*TelegramClient, error) {
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Telegram bot: %w", err)
+		// Sanitize error to prevent bot token from appearing in error messages (M-01 fix)
+		return nil, internalerrors.Wrapf(err, "failed to create Telegram bot")
 	}
 
 	// Get hostname for reports
@@ -158,7 +160,8 @@ func (t *TelegramClient) sendToChannel(channelID int64, message string) error {
 		}
 
 		if lastErr != nil {
-			return fmt.Errorf("failed to send message after retries: %w", lastErr)
+			// Sanitize error to prevent credentials from appearing in error messages (M-01 fix)
+			return internalerrors.Wrapf(lastErr, "failed to send message after retries")
 		}
 	}
 

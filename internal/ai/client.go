@@ -9,6 +9,7 @@ import (
 	"time"
 
 	anthropic "github.com/liushuangls/go-anthropic/v2"
+	internalerrors "github.com/olegiv/logwatch-ai-go/internal/errors"
 )
 
 // Client wraps the Anthropic API client
@@ -139,7 +140,8 @@ func (c *Client) callAPI(ctx context.Context, systemPrompt, userPrompt string) (
 
 	response, err := c.client.CreateMessages(ctx, request)
 	if err != nil {
-		return anthropic.MessagesResponse{}, fmt.Errorf("API call failed: %w", err)
+		// Sanitize error to prevent credentials from appearing in error messages (M-01 fix)
+		return anthropic.MessagesResponse{}, internalerrors.Wrapf(err, "API call failed")
 	}
 
 	return response, nil
