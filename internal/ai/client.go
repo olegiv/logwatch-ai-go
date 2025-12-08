@@ -38,6 +38,11 @@ func NewClient(apiKey, model, proxyURL string) (*Client, error) {
 			return nil, fmt.Errorf("invalid proxy URL: %w", err)
 		}
 
+		// Validate proxy URL scheme for security
+		if proxyURLParsed.Scheme != "http" && proxyURLParsed.Scheme != "https" {
+			return nil, fmt.Errorf("proxy URL must use http or https scheme, got: %s", proxyURLParsed.Scheme)
+		}
+
 		httpClient = &http.Client{
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(proxyURLParsed),

@@ -48,3 +48,6 @@ Thumbs.db
 # Temporary files
 /tmp/
 *.tmp
+
+# Audit files
+.audit

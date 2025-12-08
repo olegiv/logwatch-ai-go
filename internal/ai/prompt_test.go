@@ -399,6 +399,99 @@ func TestShouldTriggerAlert(t *testing.T) {
 	}
 }
 
+func TestExtractJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Simple JSON",
+			input:    `{"key": "value"}`,
+			expected: `{"key": "value"}`,
+		},
+		{
+			name:     "JSON with text before",
+			input:    `Here is the result: {"key": "value"}`,
+			expected: `{"key": "value"}`,
+		},
+		{
+			name:     "JSON with text after",
+			input:    `{"key": "value"} That's all!`,
+			expected: `{"key": "value"}`,
+		},
+		{
+			name:     "JSON with text before and after",
+			input:    `Analysis: {"systemStatus": "Good", "summary": "All OK"} End of analysis.`,
+			expected: `{"systemStatus": "Good", "summary": "All OK"}`,
+		},
+		{
+			name:     "Nested JSON",
+			input:    `{"outer": {"inner": "value"}}`,
+			expected: `{"outer": {"inner": "value"}}`,
+		},
+		{
+			name:     "JSON with braces in strings",
+			input:    `{"message": "Use {brackets} carefully"}`,
+			expected: `{"message": "Use {brackets} carefully"}`,
+		},
+		{
+			name:     "JSON with escaped quotes",
+			input:    `{"message": "He said \"hello\""}`,
+			expected: `{"message": "He said \"hello\""}`,
+		},
+		{
+			name:     "Multiple JSON objects - returns first",
+			input:    `{"first": 1} some text {"second": 2}`,
+			expected: `{"first": 1}`,
+		},
+		{
+			name:     "No JSON",
+			input:    `This is just plain text`,
+			expected: ``,
+		},
+		{
+			name:     "Empty string",
+			input:    ``,
+			expected: ``,
+		},
+		{
+			name:     "Unbalanced braces",
+			input:    `{"key": "value"`,
+			expected: ``,
+		},
+		{
+			name:     "Complex nested structure",
+			input:    `Result: {"metrics": {"disk": {"used": 80}, "memory": {"used": 50}}, "status": "ok"}`,
+			expected: `{"metrics": {"disk": {"used": 80}, "memory": {"used": 50}}, "status": "ok"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractJSON(tt.input)
+			if result != tt.expected {
+				t.Errorf("extractJSON(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseAnalysis_SizeLimit(t *testing.T) {
+	// Test that extremely large JSON responses are rejected
+	// Create a valid JSON structure that exceeds the size limit
+	largeContent := strings.Repeat("x", maxJSONResponseSize+1000)
+	largeJSON := `{"systemStatus": "Good", "summary": "` + largeContent + `"}`
+
+	_, err := ParseAnalysis(largeJSON)
+	if err == nil {
+		t.Error("Expected error for oversized JSON response")
+	}
+	if err != nil && !strings.Contains(err.Error(), "too large") {
+		t.Errorf("Expected 'too large' error, got: %v", err)
+	}
+}
+
 func TestAnalysisJSONSerialization(t *testing.T) {
 	// Test that Analysis can be marshaled and unmarshaled correctly
 	original := &Analysis{

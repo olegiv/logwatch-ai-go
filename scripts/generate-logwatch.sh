@@ -90,9 +90,9 @@ if "$LOGWATCH_BIN" \
 
     log "Logwatch report generated successfully"
 
-    # Set permissions so the analyzer can read it (world-readable)
-    if chmod 644 "$OUTPUT_PATH" 2>/dev/null; then
-        log "File permissions set to 644"
+    # Set permissions so the analyzer can read it (owner+group readable, not world-readable)
+    if chmod 640 "$OUTPUT_PATH" 2>/dev/null; then
+        log "File permissions set to 640"
     else
         log "WARNING: Failed to set file permissions on $OUTPUT_PATH"
     fi

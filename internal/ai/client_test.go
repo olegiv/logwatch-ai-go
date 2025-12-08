@@ -42,6 +42,27 @@ func TestNewClient(t *testing.T) {
 			proxyURL:    "://invalid-url",
 			expectError: true,
 		},
+		{
+			name:        "Invalid proxy scheme - socks5",
+			apiKey:      "sk-ant-test-key",
+			model:       "claude-sonnet-4.5",
+			proxyURL:    "socks5://proxy.example.com:1080",
+			expectError: true,
+		},
+		{
+			name:        "Invalid proxy scheme - ftp",
+			apiKey:      "sk-ant-test-key",
+			model:       "claude-sonnet-4.5",
+			proxyURL:    "ftp://proxy.example.com:21",
+			expectError: true,
+		},
+		{
+			name:        "Invalid proxy scheme - file",
+			apiKey:      "sk-ant-test-key",
+			model:       "claude-sonnet-4.5",
+			proxyURL:    "file:///etc/passwd",
+			expectError: true,
+		},
 	}
 
 	for _, tt := range tests {

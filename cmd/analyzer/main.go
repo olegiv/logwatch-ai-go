@@ -161,7 +161,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logger.Logger) er
 	log.Info().Msg("Analyzing with Claude AI...")
 	analysis, stats, err := claudeClient.AnalyzeLogwatch(ctx, logwatchContent, historicalContext)
 	if err != nil {
-		return fmt.Errorf("Claude analysis failed: %w", err)
+		return fmt.Errorf("claude analysis failed: %w", err)
 	}
 
 	log.Info().

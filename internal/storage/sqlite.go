@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -33,9 +34,9 @@ type Summary struct {
 
 // New creates a new storage instance
 func New(dbPath string) (*Storage, error) {
-	// Create directory if it doesn't exist
+	// Create directory if it doesn't exist (0700 for security - owner only)
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
@@ -163,7 +164,7 @@ func (s *Storage) GetRecentSummaries(days int) ([]*Summary, error) {
 	defer func(rows *sql.Rows) {
 		err = rows.Close()
 		if err != nil {
-			fmt.Printf("Failed to close database rows: %v\n", err)
+			log.Printf("storage: failed to close database rows: %v", err)
 		}
 	}(rows)
 
@@ -254,7 +255,7 @@ func (s *Storage) GetStatistics() (map[string]interface{}, error) {
 	defer func(rows *sql.Rows) {
 		err = rows.Close()
 		if err != nil {
-			fmt.Printf("Failed to close database rows: %v\n", err)
+			log.Printf("storage: failed to close database rows: %v", err)
 		}
 	}(rows)
 

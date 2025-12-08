@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **H-02**: Tightened logwatch output file permissions from 644 to 640 to prevent world-readable sensitive system information
+- **H-03**: Changed database directory permissions from 0755 to 0700 for secure storage of historical analysis data
+- **M-03**: Added proxy URL scheme validation to only allow http/https schemes, preventing potential traffic redirection
+- **M-05**: Added JSON response size limit (1MB) to prevent memory exhaustion from malicious API responses
+- **M-06**: Replaced greedy regex with balanced brace matching for more reliable JSON extraction from API responses
+- **L-05**: Replaced fmt.Printf with proper log.Printf for consistent error handling in storage package
+
+### Added
+
+- Security audit report in `.audit/SECURITY_AUDIT_REPORT.md`
+- Tests for proxy URL scheme validation (socks5, ftp, file schemes)
+- Tests for JSON extraction function (`extractJSON`)
+- Tests for JSON response size limits
+
+### Changed
+
+- `scripts/generate-logwatch.sh`: File permissions changed from 644 to 640
+- `internal/storage/sqlite.go`: Directory permissions changed from 0755 to 0700
+- `internal/ai/client.go`: Added scheme validation for proxy URLs
+- `internal/ai/prompt.go`: Improved JSON parsing with size limits and balanced brace matching
+
 ## [0.2.0] - 2025-11-15
 
 ### Added

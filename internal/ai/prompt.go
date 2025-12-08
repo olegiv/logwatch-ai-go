@@ -3,7 +3,6 @@ package ai
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -109,14 +108,21 @@ func GetUserPrompt(logwatchContent, historicalContext string) string {
 	return prompt.String()
 }
 
+// Maximum allowed JSON response size (1MB) to prevent memory exhaustion
+const maxJSONResponseSize = 1024 * 1024
+
 // ParseAnalysis extracts and parses the JSON analysis from Claude's response
 func ParseAnalysis(response string) (*Analysis, error) {
-	// Extract JSON from response (handles cases where Claude adds extra text)
-	jsonRegex := regexp.MustCompile(`\{[\s\S]*}`)
-	jsonMatch := jsonRegex.FindString(response)
+	// Extract JSON from response using balanced brace matching
+	jsonMatch := extractJSON(response)
 
 	if jsonMatch == "" {
 		return nil, fmt.Errorf("no JSON object found in response")
+	}
+
+	// Check JSON size limit to prevent memory exhaustion (M-05)
+	if len(jsonMatch) > maxJSONResponseSize {
+		return nil, fmt.Errorf("JSON response too large: %d bytes (max: %d)", len(jsonMatch), maxJSONResponseSize)
 	}
 
 	// Parse JSON
@@ -196,4 +202,53 @@ func ShouldTriggerAlert(status string) bool {
 		"Awful":        true,
 	}
 	return alertStatuses[status]
+}
+
+// extractJSON extracts the first balanced JSON object from a response string.
+// This is more reliable than greedy regex matching (M-06 fix).
+func extractJSON(response string) string {
+	// Find the first opening brace
+	startIdx := strings.Index(response, "{")
+	if startIdx == -1 {
+		return ""
+	}
+
+	// Track brace depth to find matching closing brace
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := startIdx; i < len(response); i++ {
+		char := response[i]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if char == '\\' && inString {
+			escaped = true
+			continue
+		}
+
+		if char == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if char == '{' {
+			depth++
+		} else if char == '}' {
+			depth--
+			if depth == 0 {
+				return response[startIdx : i+1]
+			}
+		}
+	}
+
+	return ""
 }
