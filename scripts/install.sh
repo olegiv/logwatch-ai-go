@@ -3,6 +3,9 @@
 
 set -e
 
+# Set restrictive umask for security (owner: rwx, group: rx, others: none)
+umask 027
+
 # Source helper functions
 . "$(dirname "$0")/helper.sh"
 
@@ -19,11 +22,11 @@ fi
 
 echo_info "Installing Logwatch AI Analyzer to $INSTALL_DIR"
 
-# Create installation directory
+# Create installation directory with secure permissions
 echo_info "Creating installation directory..."
-mkdir -p "$INSTALL_DIR"
-mkdir -p "$INSTALL_DIR/data"
-mkdir -p "$INSTALL_DIR/logs"
+mkdir -p -m 750 "$INSTALL_DIR"
+mkdir -p -m 750 "$INSTALL_DIR/data"
+mkdir -p -m 750 "$INSTALL_DIR/logs"
 
 # Copy binary
 if [ -f "bin/$BINARY_NAME" ]; then
@@ -41,12 +44,15 @@ echo_info "Copying scripts..."
 cp -r scripts "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/scripts"/*.sh
 
-# Create .env file
+# Create .env file with restrictive permissions
 if [ ! -f "$INSTALL_DIR/.env" ]; then
     echo_info "Creating .env configuration file..."
     cp "configs/.env.example" "$INSTALL_DIR/.env"
+    chmod 600 "$INSTALL_DIR/.env"
 else
     echo_info ".env file already exists, skipping"
+    # Ensure existing .env has secure permissions
+    chmod 600 "$INSTALL_DIR/.env"
 fi
 
 # Set ownership
