@@ -48,6 +48,7 @@ func New(dbPath string) (*Storage, error) {
 
 	// Test connection
 	if err := db.Ping(); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -55,6 +56,7 @@ func New(dbPath string) (*Storage, error) {
 
 	// Initialize schema
 	if err := storage.initSchema(); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
