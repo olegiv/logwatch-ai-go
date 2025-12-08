@@ -2,9 +2,30 @@ package ai
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+// assertAnalysisFieldsEqual compares two Analysis structs and reports differences
+func assertAnalysisFieldsEqual(t *testing.T, got, want *Analysis) {
+	t.Helper()
+	if got.SystemStatus != want.SystemStatus {
+		t.Errorf("SystemStatus mismatch: got %s, want %s", got.SystemStatus, want.SystemStatus)
+	}
+	if got.Summary != want.Summary {
+		t.Errorf("Summary mismatch: got %s, want %s", got.Summary, want.Summary)
+	}
+	if !reflect.DeepEqual(got.CriticalIssues, want.CriticalIssues) {
+		t.Errorf("CriticalIssues mismatch: got %v, want %v", got.CriticalIssues, want.CriticalIssues)
+	}
+	if !reflect.DeepEqual(got.Warnings, want.Warnings) {
+		t.Errorf("Warnings mismatch: got %v, want %v", got.Warnings, want.Warnings)
+	}
+	if !reflect.DeepEqual(got.Recommendations, want.Recommendations) {
+		t.Errorf("Recommendations mismatch: got %v, want %v", got.Recommendations, want.Recommendations)
+	}
+}
 
 func TestGetSystemPrompt(t *testing.T) {
 	prompt := GetSystemPrompt()
@@ -529,23 +550,5 @@ func TestAnalysisJSONSerialization(t *testing.T) {
 	}
 
 	// Verify fields
-	if restored.SystemStatus != original.SystemStatus {
-		t.Errorf("SystemStatus mismatch: got %s, want %s", restored.SystemStatus, original.SystemStatus)
-	}
-
-	if restored.Summary != original.Summary {
-		t.Errorf("Summary mismatch: got %s, want %s", restored.Summary, original.Summary)
-	}
-
-	if len(restored.CriticalIssues) != len(original.CriticalIssues) {
-		t.Errorf("CriticalIssues length mismatch: got %d, want %d", len(restored.CriticalIssues), len(original.CriticalIssues))
-	}
-
-	if len(restored.Warnings) != len(original.Warnings) {
-		t.Errorf("Warnings length mismatch: got %d, want %d", len(restored.Warnings), len(original.Warnings))
-	}
-
-	if len(restored.Recommendations) != len(original.Recommendations) {
-		t.Errorf("Recommendations length mismatch: got %d, want %d", len(restored.Recommendations), len(original.Recommendations))
-	}
+	assertAnalysisFieldsEqual(t, &restored, original)
 }

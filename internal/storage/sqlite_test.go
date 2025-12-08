@@ -2,10 +2,40 @@ package storage
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+// assertSummaryFieldsEqual compares two Summary structs and reports differences
+func assertSummaryFieldsEqual(t *testing.T, got, want *Summary) {
+	t.Helper()
+	if got.SystemStatus != want.SystemStatus {
+		t.Errorf("SystemStatus mismatch: got %s, want %s", got.SystemStatus, want.SystemStatus)
+	}
+	if got.Summary != want.Summary {
+		t.Errorf("Summary mismatch: got %s, want %s", got.Summary, want.Summary)
+	}
+	if !reflect.DeepEqual(got.CriticalIssues, want.CriticalIssues) {
+		t.Errorf("CriticalIssues mismatch: got %v, want %v", got.CriticalIssues, want.CriticalIssues)
+	}
+	if !reflect.DeepEqual(got.Warnings, want.Warnings) {
+		t.Errorf("Warnings mismatch: got %v, want %v", got.Warnings, want.Warnings)
+	}
+	if !reflect.DeepEqual(got.Recommendations, want.Recommendations) {
+		t.Errorf("Recommendations mismatch: got %v, want %v", got.Recommendations, want.Recommendations)
+	}
+	if got.InputTokens != want.InputTokens {
+		t.Errorf("InputTokens mismatch: got %d, want %d", got.InputTokens, want.InputTokens)
+	}
+	if got.OutputTokens != want.OutputTokens {
+		t.Errorf("OutputTokens mismatch: got %d, want %d", got.OutputTokens, want.OutputTokens)
+	}
+	if got.CostUSD != want.CostUSD {
+		t.Errorf("CostUSD mismatch: got %.4f, want %.4f", got.CostUSD, want.CostUSD)
+	}
+}
 
 func TestNew(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -555,39 +585,9 @@ func TestSaveAndRetrieveSummary(t *testing.T) {
 	retrieved := summaries[0]
 
 	// Verify all fields match
-	if retrieved.SystemStatus != original.SystemStatus {
-		t.Errorf("SystemStatus mismatch: got %s, want %s", retrieved.SystemStatus, original.SystemStatus)
-	}
+	assertSummaryFieldsEqual(t, retrieved, original)
 
-	if retrieved.Summary != original.Summary {
-		t.Errorf("Summary mismatch: got %s, want %s", retrieved.Summary, original.Summary)
-	}
-
-	if len(retrieved.CriticalIssues) != len(original.CriticalIssues) {
-		t.Errorf("CriticalIssues length mismatch: got %d, want %d", len(retrieved.CriticalIssues), len(original.CriticalIssues))
-	}
-
-	if len(retrieved.Warnings) != len(original.Warnings) {
-		t.Errorf("Warnings length mismatch: got %d, want %d", len(retrieved.Warnings), len(original.Warnings))
-	}
-
-	if len(retrieved.Recommendations) != len(original.Recommendations) {
-		t.Errorf("Recommendations length mismatch: got %d, want %d", len(retrieved.Recommendations), len(original.Recommendations))
-	}
-
-	if retrieved.InputTokens != original.InputTokens {
-		t.Errorf("InputTokens mismatch: got %d, want %d", retrieved.InputTokens, original.InputTokens)
-	}
-
-	if retrieved.OutputTokens != original.OutputTokens {
-		t.Errorf("OutputTokens mismatch: got %d, want %d", retrieved.OutputTokens, original.OutputTokens)
-	}
-
-	if retrieved.CostUSD != original.CostUSD {
-		t.Errorf("CostUSD mismatch: got %.4f, want %.4f", retrieved.CostUSD, original.CostUSD)
-	}
-
-	// Verify metrics
+	// Verify metrics separately (map comparison with type assertions)
 	if failedLogins, ok := retrieved.Metrics["failedLogins"].(float64); !ok || failedLogins != 10 {
 		t.Error("Metrics not restored correctly")
 	}
