@@ -7,23 +7,11 @@ import (
 	"testing"
 )
 
-// assertAnalysisFieldsEqual compares two Analysis structs and reports differences
-func assertAnalysisFieldsEqual(t *testing.T, got, want *Analysis) {
+// assertAnalysisEqual compares two Analysis structs using reflect.DeepEqual
+func assertAnalysisEqual(t *testing.T, got, want *Analysis) {
 	t.Helper()
-	if got.SystemStatus != want.SystemStatus {
-		t.Errorf("SystemStatus mismatch: got %s, want %s", got.SystemStatus, want.SystemStatus)
-	}
-	if got.Summary != want.Summary {
-		t.Errorf("Summary mismatch: got %s, want %s", got.Summary, want.Summary)
-	}
-	if !reflect.DeepEqual(got.CriticalIssues, want.CriticalIssues) {
-		t.Errorf("CriticalIssues mismatch: got %v, want %v", got.CriticalIssues, want.CriticalIssues)
-	}
-	if !reflect.DeepEqual(got.Warnings, want.Warnings) {
-		t.Errorf("Warnings mismatch: got %v, want %v", got.Warnings, want.Warnings)
-	}
-	if !reflect.DeepEqual(got.Recommendations, want.Recommendations) {
-		t.Errorf("Recommendations mismatch: got %v, want %v", got.Recommendations, want.Recommendations)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Analysis mismatch:\ngot:  %+v\nwant: %+v", got, want)
 	}
 }
 
@@ -550,5 +538,5 @@ func TestAnalysisJSONSerialization(t *testing.T) {
 	}
 
 	// Verify fields
-	assertAnalysisFieldsEqual(t, &restored, original)
+	assertAnalysisEqual(t, &restored, original)
 }
