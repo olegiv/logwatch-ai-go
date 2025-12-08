@@ -300,9 +300,9 @@ func TestFormatMessage_AllStatuses(t *testing.T) {
 			}
 
 			stats := &ai.Stats{
-				InputTokens:  1000,
-				OutputTokens: 500,
-				CostUSD:      0.01,
+				InputTokens:     1000,
+				OutputTokens:    500,
+				CostUSD:         0.01,
 				DurationSeconds: 5.0,
 			}
 
@@ -371,9 +371,9 @@ func TestFormatMessage_MultipleIssues(t *testing.T) {
 	}
 
 	stats := &ai.Stats{
-		InputTokens:  2000,
-		OutputTokens: 1000,
-		CostUSD:      0.02,
+		InputTokens:     2000,
+		OutputTokens:    1000,
+		CostUSD:         0.02,
 		DurationSeconds: 8.5,
 	}
 

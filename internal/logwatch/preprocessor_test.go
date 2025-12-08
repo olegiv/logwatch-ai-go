@@ -22,10 +22,10 @@ func TestEstimateTokens(t *testing.T) {
 	preprocessor := NewPreprocessor(150000)
 
 	tests := []struct {
-		name           string
-		content        string
-		expectedMin    int
-		expectedMax    int
+		name        string
+		content     string
+		expectedMin int
+		expectedMax int
 	}{
 		{
 			name:        "Empty content",
@@ -74,8 +74,8 @@ func TestParseSections(t *testing.T) {
 	preprocessor := NewPreprocessor(150000)
 
 	tests := []struct {
-		name            string
-		content         string
+		name             string
+		content          string
 		expectedSections int
 	}{
 		{
@@ -88,13 +88,13 @@ Usage: 85%`,
 			expectedSections: 2,
 		},
 		{
-			name:            "Content without sections",
-			content:         "Just some plain text without section headers",
+			name:             "Content without sections",
+			content:          "Just some plain text without section headers",
 			expectedSections: 1,
 		},
 		{
-			name:            "Empty content",
-			content:         "",
+			name:             "Empty content",
+			content:          "",
 			expectedSections: 1,
 		},
 		{
@@ -265,10 +265,10 @@ func TestDeduplicateContent(t *testing.T) {
 	preprocessor := NewPreprocessor(150000)
 
 	tests := []struct {
-		name                string
-		content             string
-		shouldContain       string
-		shouldNotContain    string
+		name             string
+		content          string
+		shouldContain    string
+		shouldNotContain string
 	}{
 		{
 			name: "Duplicate log lines",
@@ -296,8 +296,8 @@ Line 3`,
 			shouldNotContain: "occurred",
 		},
 		{
-			name: "No duplicates",
-			content: strings.Repeat("Unique line ", 20),
+			name:             "No duplicates",
+			content:          strings.Repeat("Unique line ", 20),
 			shouldContain:    "Unique line",
 			shouldNotContain: "occurred",
 		},

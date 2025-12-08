@@ -8,9 +8,9 @@ import (
 
 func TestValidate(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      *Config
-		expectError bool
+		name          string
+		config        *Config
+		expectError   bool
 		errorContains string
 	}{
 		{
@@ -36,7 +36,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "ANTHROPIC_API_KEY is required",
 		},
 		{
@@ -49,7 +49,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "must start with 'sk-ant-'",
 		},
 		{
@@ -61,7 +61,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "TELEGRAM_BOT_TOKEN is required",
 		},
 		{
@@ -74,7 +74,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "invalid format",
 		},
 		{
@@ -86,7 +86,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:       10,
 				LogLevel:           "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "TELEGRAM_CHANNEL_ARCHIVE_ID is required",
 		},
 		{
@@ -99,7 +99,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "must be a supergroup/channel ID",
 		},
 		{
@@ -113,7 +113,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "TELEGRAM_CHANNEL_ALERTS_ID must be a supergroup/channel ID",
 		},
 		{
@@ -125,7 +125,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "LOGWATCH_OUTPUT_PATH is required",
 		},
 		{
@@ -138,7 +138,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           0,
 				LogLevel:               "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "must be between 1 and 100",
 		},
 		{
@@ -151,7 +151,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           101,
 				LogLevel:               "info",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "must be between 1 and 100",
 		},
 		{
@@ -164,7 +164,7 @@ func TestValidate(t *testing.T) {
 				MaxLogSizeMB:           10,
 				LogLevel:               "invalid",
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "must be one of: debug, info, warn, error",
 		},
 		{
@@ -215,7 +215,7 @@ func TestValidate(t *testing.T) {
 				EnablePreprocessing:    true,
 				MaxPreprocessingTokens: 5000,
 			},
-			expectError: true,
+			expectError:   true,
 			errorContains: "must be at least 10000",
 		},
 		{
@@ -437,8 +437,8 @@ func TestConfigStructure(t *testing.T) {
 
 func TestTelegramTokenRegex(t *testing.T) {
 	tests := []struct {
-		name      string
-		token     string
+		name        string
+		token       string
 		shouldMatch bool
 	}{
 		{"Valid token", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz", true},
@@ -501,15 +501,10 @@ func TestLogLevelCaseInsensitive(t *testing.T) {
 }
 
 func TestLoad(t *testing.T) {
-	// Set environment variables for the test
-	os.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-1234567890")
-	os.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
-	os.Setenv("TELEGRAM_CHANNEL_ARCHIVE_ID", "-1001234567890")
-	defer func() {
-		os.Unsetenv("ANTHROPIC_API_KEY")
-		os.Unsetenv("TELEGRAM_BOT_TOKEN")
-		os.Unsetenv("TELEGRAM_CHANNEL_ARCHIVE_ID")
-	}()
+	// Set environment variables for the test (t.Setenv automatically cleans up)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-1234567890")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+	t.Setenv("TELEGRAM_CHANNEL_ARCHIVE_ID", "-1001234567890")
 
 	config, err := Load()
 	if err != nil {

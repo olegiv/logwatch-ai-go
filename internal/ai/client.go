@@ -133,7 +133,7 @@ func (c *Client) callAPI(ctx context.Context, systemPrompt, userPrompt string) (
 				},
 			},
 		},
-		System: systemPrompt,
+		System:    systemPrompt,
 		MaxTokens: 8000,
 	}
 

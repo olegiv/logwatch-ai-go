@@ -111,64 +111,64 @@ func TestCalculateStats(t *testing.T) {
 	}
 
 	tests := []struct {
-		name             string
-		inputTokens      int
-		outputTokens     int
-		cacheCreate      int
-		cacheRead        int
-		durationSeconds  float64
-		expectedCostMin  float64
-		expectedCostMax  float64
+		name            string
+		inputTokens     int
+		outputTokens    int
+		cacheCreate     int
+		cacheRead       int
+		durationSeconds float64
+		expectedCostMin float64
+		expectedCostMax float64
 	}{
 		{
-			name:             "Basic calculation without cache",
-			inputTokens:      1000,
-			outputTokens:     500,
-			cacheCreate:      0,
-			cacheRead:        0,
-			durationSeconds:  5.0,
-			expectedCostMin:  0.0105,  // (1000*3 + 500*15)/1000000
-			expectedCostMax:  0.0105,
+			name:            "Basic calculation without cache",
+			inputTokens:     1000,
+			outputTokens:    500,
+			cacheCreate:     0,
+			cacheRead:       0,
+			durationSeconds: 5.0,
+			expectedCostMin: 0.0105, // (1000*3 + 500*15)/1000000
+			expectedCostMax: 0.0105,
 		},
 		{
-			name:             "With cache creation",
-			inputTokens:      1000,
-			outputTokens:     500,
-			cacheCreate:      2000,
-			cacheRead:        0,
-			durationSeconds:  5.0,
-			expectedCostMin:  0.0179,  // (1000*3 + 500*15 + 2000*3.75)/1000000
-			expectedCostMax:  0.0181,
+			name:            "With cache creation",
+			inputTokens:     1000,
+			outputTokens:    500,
+			cacheCreate:     2000,
+			cacheRead:       0,
+			durationSeconds: 5.0,
+			expectedCostMin: 0.0179, // (1000*3 + 500*15 + 2000*3.75)/1000000
+			expectedCostMax: 0.0181,
 		},
 		{
-			name:             "With cache read",
-			inputTokens:      1000,
-			outputTokens:     500,
-			cacheCreate:      0,
-			cacheRead:        5000,
-			durationSeconds:  3.0,
-			expectedCostMin:  0.0120,  // (1000*3 + 500*15 + 5000*0.30)/1000000
-			expectedCostMax:  0.0120,
+			name:            "With cache read",
+			inputTokens:     1000,
+			outputTokens:    500,
+			cacheCreate:     0,
+			cacheRead:       5000,
+			durationSeconds: 3.0,
+			expectedCostMin: 0.0120, // (1000*3 + 500*15 + 5000*0.30)/1000000
+			expectedCostMax: 0.0120,
 		},
 		{
-			name:             "Large tokens",
-			inputTokens:      100000,
-			outputTokens:     50000,
-			cacheCreate:      10000,
-			cacheRead:        80000,
-			durationSeconds:  15.0,
-			expectedCostMin:  1.08,    // (100000*3 + 50000*15 + 10000*3.75 + 80000*0.30)/1000000
-			expectedCostMax:  1.12,
+			name:            "Large tokens",
+			inputTokens:     100000,
+			outputTokens:    50000,
+			cacheCreate:     10000,
+			cacheRead:       80000,
+			durationSeconds: 15.0,
+			expectedCostMin: 1.08, // (100000*3 + 50000*15 + 10000*3.75 + 80000*0.30)/1000000
+			expectedCostMax: 1.12,
 		},
 		{
-			name:             "Zero tokens",
-			inputTokens:      0,
-			outputTokens:     0,
-			cacheCreate:      0,
-			cacheRead:        0,
-			durationSeconds:  1.0,
-			expectedCostMin:  0.0,
-			expectedCostMax:  0.0,
+			name:            "Zero tokens",
+			inputTokens:     0,
+			outputTokens:    0,
+			cacheCreate:     0,
+			cacheRead:       0,
+			durationSeconds: 1.0,
+			expectedCostMin: 0.0,
+			expectedCostMax: 0.0,
 		},
 	}
 
@@ -371,8 +371,8 @@ func TestClientStructure(t *testing.T) {
 func TestCostCalculationPrecision(t *testing.T) {
 	// Test cost calculation with various token counts to ensure precision
 	tests := []struct {
-		name        string
-		inputTokens int
+		name         string
+		inputTokens  int
 		outputTokens int
 		expectedCost float64
 	}{

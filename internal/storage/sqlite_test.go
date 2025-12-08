@@ -15,7 +15,7 @@ func TestNew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	if storage == nil {
 		t.Fatal("Expected storage to be created")
@@ -34,7 +34,7 @@ func TestNewCreatesDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	if storage == nil {
 		t.Fatal("Expected storage to be created with nested directories")
@@ -49,7 +49,7 @@ func TestSaveSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	summary := &Summary{
 		Timestamp:    time.Now(),
@@ -92,7 +92,7 @@ func TestGetRecentSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	// Save multiple summaries with different timestamps
 	now := time.Now()
@@ -165,7 +165,7 @@ func TestGetHistoricalContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	// Save a summary
 	now := time.Now()
@@ -227,7 +227,7 @@ func TestGetHistoricalContext_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	// Get historical context with no data
 	context, err := storage.GetHistoricalContext(7)
@@ -248,7 +248,7 @@ func TestCleanupOldSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	// Save summaries with different ages
 	now := time.Now()
@@ -318,7 +318,7 @@ func TestGetStatistics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	// Save summaries with different statuses
 	summaries := []*Summary{
@@ -416,7 +416,7 @@ func TestGetStatistics_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	stats, err := storage.GetStatistics()
 	if err != nil {
@@ -509,7 +509,7 @@ func TestSaveAndRetrieveSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	// Save a summary
 	original := &Summary{
@@ -601,7 +601,7 @@ func TestCleanupOldSummaries_NoData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	affected, err := storage.CleanupOldSummaries(90)
 	if err != nil {
@@ -621,7 +621,7 @@ func TestInitSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	// Verify that the table was created by trying to insert
 	summary := &Summary{

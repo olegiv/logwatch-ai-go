@@ -38,7 +38,7 @@ func TestReadLogwatchOutput_FileNotFound(t *testing.T) {
 	_, err := reader.ReadLogwatchOutput("/nonexistent/file.txt")
 
 	if err == nil {
-		t.Error("Expected error for nonexistent file")
+		t.Fatal("Expected error for nonexistent file")
 	}
 
 	if !strings.Contains(err.Error(), "not found") {
@@ -84,7 +84,7 @@ func TestReadLogwatchOutput_FileTooBig(t *testing.T) {
 	_, err = reader.ReadLogwatchOutput(testFile)
 
 	if err == nil {
-		t.Error("Expected error for file exceeding size limit")
+		t.Fatal("Expected error for file exceeding size limit")
 	}
 
 	if !strings.Contains(err.Error(), "exceeds maximum size") {
@@ -113,7 +113,7 @@ func TestReadLogwatchOutput_FileTooOld(t *testing.T) {
 	_, err = reader.ReadLogwatchOutput(testFile)
 
 	if err == nil {
-		t.Error("Expected error for old file")
+		t.Fatal("Expected error for old file")
 	}
 
 	if !strings.Contains(err.Error(), "too old") {
@@ -134,7 +134,7 @@ func TestReadLogwatchOutput_EmptyFile(t *testing.T) {
 	_, err = reader.ReadLogwatchOutput(testFile)
 
 	if err == nil {
-		t.Error("Expected error for empty file")
+		t.Fatal("Expected error for empty file")
 	}
 
 	if !strings.Contains(err.Error(), "empty") {
@@ -156,7 +156,7 @@ func TestReadLogwatchOutput_FileTooSmall(t *testing.T) {
 	_, err = reader.ReadLogwatchOutput(testFile)
 
 	if err == nil {
-		t.Error("Expected error for file too small")
+		t.Fatal("Expected error for file too small")
 	}
 
 	if !strings.Contains(err.Error(), "too small") {
@@ -357,13 +357,13 @@ func TestReadLogwatchOutput_NotReadableFile(t *testing.T) {
 	}
 
 	// Ensure cleanup
-	defer os.Chmod(testFile, 0644)
+	defer func() { _ = os.Chmod(testFile, 0644) }()
 
 	reader := NewReader(10, false, 150000)
 	_, err = reader.ReadLogwatchOutput(testFile)
 
 	if err == nil {
-		t.Error("Expected error for unreadable file")
+		t.Fatal("Expected error for unreadable file")
 	}
 
 	if !strings.Contains(err.Error(), "not readable") {

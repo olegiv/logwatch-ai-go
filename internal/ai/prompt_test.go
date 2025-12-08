@@ -36,11 +36,11 @@ func TestGetSystemPrompt(t *testing.T) {
 
 func TestGetUserPrompt(t *testing.T) {
 	tests := []struct {
-		name               string
-		logwatchContent    string
-		historicalContext  string
-		shouldContainLog   bool
-		shouldContainHist  bool
+		name              string
+		logwatchContent   string
+		historicalContext string
+		shouldContainLog  bool
+		shouldContainHist bool
 	}{
 		{
 			name:              "With logwatch only",
