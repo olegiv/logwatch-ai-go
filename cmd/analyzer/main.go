@@ -11,6 +11,7 @@ import (
 	"github.com/olegiv/go-logger"
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 	"github.com/olegiv/logwatch-ai-go/internal/config"
+	"github.com/olegiv/logwatch-ai-go/internal/logging"
 	"github.com/olegiv/logwatch-ai-go/internal/logwatch"
 	"github.com/olegiv/logwatch-ai-go/internal/notification"
 	"github.com/olegiv/logwatch-ai-go/internal/storage"
@@ -44,8 +45,8 @@ func run() int {
 		return exitFailure
 	}
 
-	// Initialize logger
-	log := logger.New(logger.Config{
+	// Initialize logger with credential sanitization (M-02 fix)
+	baseLog := logger.New(logger.Config{
 		Level:      cfg.LogLevel,
 		LogDir:     "./logs",
 		Filename:   "analyzer.log",
@@ -53,6 +54,7 @@ func run() int {
 		MaxBackups: 5,
 		Console:    true,
 	})
+	log := logging.NewSecure(baseLog)
 	defer func() {
 		if err := log.Close(); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
@@ -72,7 +74,7 @@ func run() int {
 	return exitSuccess
 }
 
-func runAnalyzer(ctx context.Context, cfg *config.Config, log *logger.Logger) error {
+func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLogger) error {
 	startTime := time.Now()
 
 	// Initialize components

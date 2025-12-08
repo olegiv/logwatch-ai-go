@@ -70,6 +70,8 @@ cmd/analyzer/           - Main application entry point (main.go)
 internal/              - Private application packages (not importable)
   ├── ai/             - Claude AI client, prompts, response parsing
   ├── config/         - Configuration loading (viper + .env)
+  ├── errors/         - Error sanitization (credential redaction)
+  ├── logging/        - Secure logger wrapper (credential filtering)
   ├── logwatch/       - Log reading, preprocessing, token estimation
   ├── notification/   - Telegram client and message formatting
   └── storage/        - SQLite operations (summaries table)
@@ -86,7 +88,7 @@ configs/              - Configuration templates (.env.example)
 ```
 main() → run() → runAnalyzer()
   1. Load config (internal/config)
-  2. Initialize logger (github.com/olegiv/go-logger)
+  2. Initialize secure logger (internal/logging wraps go-logger)
   3. Initialize storage (internal/storage) - SQLite connection
   4. Initialize Telegram client (internal/notification)
   5. Initialize Claude client (internal/ai)
@@ -185,8 +187,9 @@ Both `HTTP_PROXY` and `HTTPS_PROXY` are supported:
 - ✅ MarkdownV2 escaping validated
 
 ### Code Style
-- Use zerolog for structured logging: `log.Info().Str("key", value).Msg("message")`
-- Return detailed errors with context: `fmt.Errorf("failed to X: %w", err)`
+- Use SecureLogger for structured logging: `log.Info().Str("key", value).Msg("message")`
+- For errors that may contain credentials, use: `internalerrors.Wrapf(err, "failed to X")`
+- For other errors: `fmt.Errorf("failed to X: %w", err)`
 - Constants for exit codes, timeouts, retry counts
 - Defer cleanup: `defer store.Close()`, `defer telegramClient.Close()`
 
@@ -386,6 +389,7 @@ stats, err := store.GetStatistics()
 - **Database**: Contains historical analysis, ensure proper file permissions
 - **Network**: Use HTTPS proxy in corporate environments
 - **Updates**: Regularly update dependencies for security patches
+- **Credential sanitization**: All logs and errors automatically redact API keys and tokens (internal/errors, internal/logging)
 
 ### Performance Tuning
 - **Preprocessing**: Adjust `MAX_PREPROCESSING_TOKENS` based on log size

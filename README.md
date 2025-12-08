@@ -14,6 +14,7 @@ An intelligent system log analyzer that uses Claude AI to analyze logwatch repor
 - **Intelligent Preprocessing**: Handles large log files (up to 800KB-1MB) with smart content reduction
 - **Cost Optimization**: Implements Claude prompt caching (16-30% cost savings)
 - **Proxy Support**: Full HTTP/HTTPS proxy support for corporate environments
+- **Secure Logging**: Automatic credential sanitization prevents API keys from appearing in logs
 - **Pure Go**: No CGO dependencies, easy cross-platform deployment
 
 ## Quick Start
@@ -177,6 +178,8 @@ logwatch-ai-go/
 ├── internal/
 │   ├── ai/                 # Claude AI client and prompts
 │   ├── config/             # Configuration management
+│   ├── errors/             # Error sanitization (credential redaction)
+│   ├── logging/            # Secure logger (credential filtering)
 │   ├── logwatch/           # Log file reading and preprocessing
 │   ├── notification/       # Telegram notifications
 │   └── storage/            # SQLite database operations
