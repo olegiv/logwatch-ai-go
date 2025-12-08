@@ -53,6 +53,11 @@ func run() int {
 		MaxBackups: 5,
 		Console:    true,
 	})
+	defer func() {
+		if err := log.Close(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
+		}
+	}()
 
 	log.Info().Msg("Starting Logwatch AI Analyzer")
 	log.Info().Str("model", cfg.ClaudeModel).Msg("Configured AI model")

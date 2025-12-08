@@ -22,6 +22,7 @@ vendor/
 dist/
 bin/
 build/
+/analyzer
 
 # Environment files
 .env
