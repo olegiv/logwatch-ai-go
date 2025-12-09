@@ -18,11 +18,11 @@ var credentialPatterns = []*regexp.Regexp{
 	// Bearer tokens in headers
 	regexp.MustCompile(`Bearer\s+[a-zA-Z0-9_.-]+`),
 	// Authorization headers (matches "authorization: value" or "authorization value")
-	regexp.MustCompile(`(?i)authorization[:\s]+[^\s]+`),
+	regexp.MustCompile(`(?i)authorization[:\s]+\S+`),
 	// API key in URLs
 	regexp.MustCompile(`(?i)api[_-]?key[=:][^\s&"']+`),
 	// X-API-Key headers
-	regexp.MustCompile(`(?i)x-api-key[:\s]+[^\s]+`),
+	regexp.MustCompile(`(?i)x-api-key[:\s]+\S+`),
 }
 
 const redactedPlaceholder = "[REDACTED]"
