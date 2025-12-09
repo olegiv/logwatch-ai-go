@@ -67,7 +67,7 @@ chmod +x ./bin/logwatch-analyzer
 **Symptom:**
 ```
 go: cannot find main module; see 'go help modules'
-or: requires Go 1.23 or later
+or: requires Go 1.25 or later
 ```
 
 **Cause:** Go version is too old.

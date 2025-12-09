@@ -23,7 +23,7 @@ An intelligent system log analyzer that uses Claude AI to analyze logwatch repor
 
 ### Prerequisites
 
-- Go 1.21+ (for building from source)
+- Go 1.25+ (for building from source)
 - Logwatch installed and configured
 - Anthropic API key
 - Telegram bot token and channel IDs
