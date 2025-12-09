@@ -16,6 +16,7 @@ An intelligent system log analyzer that uses Claude AI to analyze logwatch repor
 - **Proxy Support**: Full HTTP/HTTPS proxy support for corporate environments
 - **Secure Logging**: Automatic credential sanitization prevents API keys from appearing in logs
 - **Rate Limiting**: Telegram API rate limiting with exponential backoff retry
+- **Prompt Injection Protection**: Input sanitization filters adversarial content from logs
 - **Pure Go**: No CGO dependencies, easy cross-platform deployment
 
 ## Quick Start

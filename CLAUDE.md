@@ -148,6 +148,7 @@ CREATE TABLE summaries (
 - Context: Includes last 7 days of analysis history
 - Configurable timeout: `AI_TIMEOUT_SECONDS` (default: 120, range: 30-600)
 - Configurable max tokens: `AI_MAX_TOKENS` (default: 8000, range: 1000-16000)
+- Input sanitization: Logwatch content filtered for prompt injection attempts
 
 **7. Telegram Notifications (internal/notification/telegram.go)**
 - **Archive channel**: Always receives full analysis report
@@ -392,6 +393,7 @@ stats, err := store.GetStatistics()
 - **Network**: Use HTTPS proxy in corporate environments
 - **Updates**: Regularly update dependencies for security patches
 - **Credential sanitization**: All logs and errors automatically redact API keys and tokens (internal/errors, internal/logging)
+- **Prompt injection protection**: Logwatch content is sanitized to filter common prompt injection patterns (internal/ai/prompt.go)
 
 ### Performance Tuning
 - **Preprocessing**: Adjust `MAX_PREPROCESSING_TOKENS` based on log size

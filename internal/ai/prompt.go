@@ -3,7 +3,9 @@ package ai
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 )
 
 // Analysis represents the structured analysis result from Claude
@@ -94,18 +96,62 @@ func GetUserPrompt(logwatchContent, historicalContext string) string {
 	var prompt strings.Builder
 
 	prompt.WriteString("LOGWATCH OUTPUT:\n")
-	prompt.WriteString(logwatchContent)
+	prompt.WriteString(SanitizeLogContent(logwatchContent)) // L-03 fix: sanitize input
 	prompt.WriteString("\n\n")
 
 	if historicalContext != "" {
 		prompt.WriteString("HISTORICAL CONTEXT:\n")
-		prompt.WriteString(historicalContext)
+		prompt.WriteString(SanitizeLogContent(historicalContext)) // L-03 fix: sanitize input
 		prompt.WriteString("\n\n")
 	}
 
 	prompt.WriteString("Please analyze the logwatch output above and provide your assessment in JSON format as specified.")
 
 	return prompt.String()
+}
+
+// promptInjectionPatterns contains regex patterns for common prompt injection attempts
+var promptInjectionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)`),
+	regexp.MustCompile(`(?i)disregard\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)`),
+	regexp.MustCompile(`(?i)forget\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)`),
+	regexp.MustCompile(`(?i)you\s+are\s+now\s+a`),
+	regexp.MustCompile(`(?i)new\s+instructions?:`),
+	regexp.MustCompile(`(?i)system\s*prompt\s*:`),
+	regexp.MustCompile(`(?i)\bASSISTANT\s*:`),
+	regexp.MustCompile(`(?i)\bHUMAN\s*:`),
+	regexp.MustCompile(`(?i)\bUSER\s*:`),
+	regexp.MustCompile(`(?i)\bSYSTEM\s*:`),
+}
+
+// SanitizeLogContent sanitizes log content to prevent prompt injection (L-03 fix).
+// This removes:
+// - Non-printable characters (except newlines, tabs, carriage returns)
+// - Common prompt injection patterns
+// - Excessive whitespace
+func SanitizeLogContent(content string) string {
+	// Remove non-printable characters except newlines, tabs, and carriage returns
+	var sanitized strings.Builder
+	sanitized.Grow(len(content))
+
+	for _, r := range content {
+		if unicode.IsPrint(r) || r == '\n' || r == '\t' || r == '\r' {
+			sanitized.WriteRune(r)
+		}
+	}
+
+	result := sanitized.String()
+
+	// Remove common prompt injection patterns
+	for _, pattern := range promptInjectionPatterns {
+		result = pattern.ReplaceAllString(result, "[FILTERED]")
+	}
+
+	// Normalize excessive newlines (more than 3 consecutive)
+	excessiveNewlines := regexp.MustCompile(`\n{4,}`)
+	result = excessiveNewlines.ReplaceAllString(result, "\n\n\n")
+
+	return result
 }
 
 // Maximum allowed JSON response size (1MB) to prevent memory exhaustion
