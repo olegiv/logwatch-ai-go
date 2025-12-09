@@ -67,7 +67,7 @@ func TestNewClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewClient(tt.apiKey, tt.model, tt.proxyURL)
+			client, err := NewClient(tt.apiKey, tt.model, tt.proxyURL, 120, 8000)
 
 			if tt.expectError {
 				if err == nil {
@@ -99,16 +99,6 @@ func TestNewClient(t *testing.T) {
 
 func TestCalculateStats(t *testing.T) {
 	// Create a mock anthropic response
-	type usage struct {
-		InputTokens              int
-		OutputTokens             int
-		CacheCreationInputTokens int
-		CacheReadInputTokens     int
-	}
-
-	type mockResponse struct {
-		Usage usage
-	}
 
 	tests := []struct {
 		name            string
@@ -240,7 +230,8 @@ func TestGetModelInfo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &Client{
-				model: tt.model,
+				model:     tt.model,
+				maxTokens: 8000,
 			}
 
 			info := client.GetModelInfo()
@@ -307,7 +298,7 @@ func TestStatsStructure(t *testing.T) {
 
 func TestContextCancellation(t *testing.T) {
 	// Test that context cancellation is respected
-	client, err := NewClient("sk-ant-test-key", "claude-sonnet-4.5", "")
+	client, err := NewClient("sk-ant-test-key", "claude-sonnet-4.5", "", 120, 8000)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -330,7 +321,7 @@ func TestContextCancellation(t *testing.T) {
 
 func TestContextTimeout(t *testing.T) {
 	// Test that context timeout is respected
-	client, err := NewClient("sk-ant-test-key", "claude-sonnet-4.5", "")
+	client, err := NewClient("sk-ant-test-key", "claude-sonnet-4.5", "", 120, 8000)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -354,7 +345,7 @@ func TestContextTimeout(t *testing.T) {
 
 func TestClientStructure(t *testing.T) {
 	// Test that Client structure is properly initialized
-	client, err := NewClient("sk-ant-test-key", "claude-sonnet-4.5", "")
+	client, err := NewClient("sk-ant-test-key", "claude-sonnet-4.5", "", 120, 8000)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}

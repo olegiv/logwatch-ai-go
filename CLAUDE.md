@@ -146,7 +146,8 @@ CREATE TABLE summaries (
 - Prompt caching: System prompt cached for 90% cost reduction on subsequent calls
 - Cost calculation: Uses Sonnet 4.5 pricing ($3/MTok input, $15/MTok output)
 - Context: Includes last 7 days of analysis history
-- Max output: 8000 tokens
+- Configurable timeout: `AI_TIMEOUT_SECONDS` (default: 120, range: 30-600)
+- Configurable max tokens: `AI_MAX_TOKENS` (default: 8000, range: 1000-16000)
 
 **7. Telegram Notifications (internal/notification/telegram.go)**
 - **Archive channel**: Always receives full analysis report

@@ -121,7 +121,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 
 	// 3. Initialize Claude AI client
 	proxyURL := cfg.GetProxyURL(true) // HTTPS proxy for API calls
-	claudeClient, err := ai.NewClient(cfg.AnthropicAPIKey, cfg.ClaudeModel, proxyURL)
+	claudeClient, err := ai.NewClient(cfg.AnthropicAPIKey, cfg.ClaudeModel, proxyURL, cfg.AITimeoutSeconds, cfg.AIMaxTokens)
 	if err != nil {
 		return fmt.Errorf("failed to initialize Claude client: %w", err)
 	}

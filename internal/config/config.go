@@ -37,6 +37,10 @@ type Config struct {
 	// Proxy
 	HTTPProxy  string
 	HTTPSProxy string
+
+	// AI Settings (L-02 fix: make constants configurable)
+	AITimeoutSeconds int
+	AIMaxTokens      int
 }
 
 // Load loads configuration from .env file and environment variables
@@ -68,6 +72,8 @@ func Load() (*Config, error) {
 		MaxPreprocessingTokens: viper.GetInt("MAX_PREPROCESSING_TOKENS"),
 		HTTPProxy:              viper.GetString("HTTP_PROXY"),
 		HTTPSProxy:             viper.GetString("HTTPS_PROXY"),
+		AITimeoutSeconds:       viper.GetInt("AI_TIMEOUT_SECONDS"),
+		AIMaxTokens:            viper.GetInt("AI_MAX_TOKENS"),
 	}
 
 	// Validate configuration
@@ -88,6 +94,8 @@ func setDefaults() {
 	viper.SetDefault("DATABASE_PATH", "./data/summaries.db")
 	viper.SetDefault("ENABLE_PREPROCESSING", true)
 	viper.SetDefault("MAX_PREPROCESSING_TOKENS", 150000)
+	viper.SetDefault("AI_TIMEOUT_SECONDS", 120)
+	viper.SetDefault("AI_MAX_TOKENS", 8000)
 }
 
 // Validate validates the configuration
@@ -147,6 +155,14 @@ func (c *Config) Validate() error {
 	// Validate preprocessing tokens
 	if c.EnablePreprocessing && c.MaxPreprocessingTokens < 10000 {
 		return fmt.Errorf("MAX_PREPROCESSING_TOKENS must be at least 10000")
+	}
+
+	// Validate AI settings (L-02 fix)
+	if c.AITimeoutSeconds < 30 || c.AITimeoutSeconds > 600 {
+		return fmt.Errorf("AI_TIMEOUT_SECONDS must be between 30 and 600")
+	}
+	if c.AIMaxTokens < 1000 || c.AIMaxTokens > 16000 {
+		return fmt.Errorf("AI_MAX_TOKENS must be between 1000 and 16000")
 	}
 
 	return nil

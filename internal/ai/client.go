@@ -8,14 +8,15 @@ import (
 	"net/url"
 	"time"
 
-	anthropic "github.com/liushuangls/go-anthropic/v2"
+	"github.com/liushuangls/go-anthropic/v2"
 	internalerrors "github.com/olegiv/logwatch-ai-go/internal/errors"
 )
 
 // Client wraps the Anthropic API client
 type Client struct {
-	client *anthropic.Client
-	model  string
+	client    *anthropic.Client
+	model     string
+	maxTokens int // L-02 fix: configurable max tokens
 }
 
 // Stats holds statistics about the API call
@@ -29,8 +30,10 @@ type Stats struct {
 }
 
 // NewClient creates a new Claude AI client
-func NewClient(apiKey, model, proxyURL string) (*Client, error) {
+// timeoutSeconds and maxTokens are configurable (L-02 fix)
+func NewClient(apiKey, model, proxyURL string, timeoutSeconds, maxTokens int) (*Client, error) {
 	var httpClient *http.Client
+	timeout := time.Duration(timeoutSeconds) * time.Second
 
 	// Configure proxy if provided
 	if proxyURL != "" {
@@ -48,11 +51,11 @@ func NewClient(apiKey, model, proxyURL string) (*Client, error) {
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(proxyURLParsed),
 			},
-			Timeout: 120 * time.Second,
+			Timeout: timeout,
 		}
 	} else {
 		httpClient = &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: timeout,
 		}
 	}
 
@@ -62,8 +65,9 @@ func NewClient(apiKey, model, proxyURL string) (*Client, error) {
 	)
 
 	return &Client{
-		client: client,
-		model:  model,
+		client:    client,
+		model:     model,
+		maxTokens: maxTokens,
 	}, nil
 }
 
@@ -135,7 +139,7 @@ func (c *Client) callAPI(ctx context.Context, systemPrompt, userPrompt string) (
 			},
 		},
 		System:    systemPrompt,
-		MaxTokens: 8000,
+		MaxTokens: c.maxTokens, // L-02 fix: use configurable value
 	}
 
 	response, err := c.client.CreateMessages(ctx, request)
@@ -181,7 +185,7 @@ func (c *Client) GetModelInfo() map[string]interface{} {
 	return map[string]interface{}{
 		"model":         c.model,
 		"provider":      "Anthropic",
-		"max_tokens":    8000,
+		"max_tokens":    c.maxTokens, // L-02 fix: use configurable value
 		"context_limit": 200000,
 	}
 }

@@ -59,6 +59,8 @@ Create a `.env` file with the following settings:
 # AI Provider
 ANTHROPIC_API_KEY=sk-ant-xxxxx
 CLAUDE_MODEL=claude-sonnet-4-5-20250929
+AI_TIMEOUT_SECONDS=120
+AI_MAX_TOKENS=8000
 
 # Telegram
 TELEGRAM_BOT_TOKEN=1234567890:ABC-DEF1234ghIkl-zyx57W2v1u123ew11

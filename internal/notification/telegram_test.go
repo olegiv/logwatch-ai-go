@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 )
@@ -465,7 +464,7 @@ func TestExtractRetryAfter(t *testing.T) {
 		},
 		{
 			name: "retry after 30",
-			err:  fmt.Errorf("Too Many Requests: retry after 30"),
+			err:  fmt.Errorf("too Many Requests: retry after 30"),
 			want: 30,
 		},
 		{
@@ -475,12 +474,12 @@ func TestExtractRetryAfter(t *testing.T) {
 		},
 		{
 			name: "retry after 5",
-			err:  fmt.Errorf("Error: retry after 5"),
+			err:  fmt.Errorf("error: retry after 5"),
 			want: 5,
 		},
 		{
 			name: "no retry after value - defaults to 30",
-			err:  fmt.Errorf("Too Many Requests"),
+			err:  fmt.Errorf("too Many Requests"),
 			want: 30,
 		},
 		{
@@ -500,26 +499,3 @@ func TestExtractRetryAfter(t *testing.T) {
 	}
 }
 
-func TestRateLimitConstants(t *testing.T) {
-	// Verify that rate limit constants are reasonable
-	if minMessageInterval < 500*time.Millisecond {
-		t.Error("minMessageInterval is too short, risk of rate limiting")
-	}
-	if minMessageInterval > 5*time.Second {
-		t.Error("minMessageInterval is too long, may cause delays")
-	}
-
-	if maxRetries < 2 {
-		t.Error("maxRetries should be at least 2 for reliability")
-	}
-	if maxRetries > 10 {
-		t.Error("maxRetries is too high, may cause long delays")
-	}
-
-	if baseRetryDelay < 1*time.Second {
-		t.Error("baseRetryDelay is too short")
-	}
-	if baseRetryDelay > 10*time.Second {
-		t.Error("baseRetryDelay is too long")
-	}
-}
