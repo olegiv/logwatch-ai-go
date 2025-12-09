@@ -642,3 +642,46 @@ func TestInitSchema(t *testing.T) {
 		t.Errorf("Failed to save to newly created schema: %v", err)
 	}
 }
+
+func TestDatabaseConnectionPoolSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	storage, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	// Verify database is working with configured pool settings
+	// by performing multiple operations
+	for i := 0; i < 10; i++ {
+		summary := &Summary{
+			Timestamp:       time.Now(),
+			SystemStatus:    "Good",
+			Summary:         "Pool test summary",
+			CriticalIssues:  []string{},
+			Warnings:        []string{},
+			Recommendations: []string{},
+			Metrics:         map[string]interface{}{},
+			InputTokens:     100,
+			OutputTokens:    50,
+			CostUSD:         0.001,
+		}
+
+		err = storage.SaveSummary(summary)
+		if err != nil {
+			t.Fatalf("Failed to save summary %d: %v", i, err)
+		}
+	}
+
+	// Verify all were saved
+	summaries, err := storage.GetRecentSummaries(1)
+	if err != nil {
+		t.Fatalf("Failed to get summaries: %v", err)
+	}
+
+	if len(summaries) != 10 {
+		t.Errorf("Expected 10 summaries, got %d", len(summaries))
+	}
+}

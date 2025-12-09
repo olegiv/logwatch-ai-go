@@ -32,6 +32,18 @@ type Summary struct {
 	CostUSD         float64
 }
 
+// Database configuration constants (L-04 fix)
+const (
+	// busyTimeoutMs is how long SQLite waits when database is locked (5 seconds)
+	busyTimeoutMs = 5000
+	// maxOpenConns limits concurrent connections (SQLite works best with 1)
+	maxOpenConns = 1
+	// maxIdleConns is the number of idle connections to keep
+	maxIdleConns = 1
+	// connMaxLifetime is how long a connection can be reused
+	connMaxLifetime = 30 * time.Minute
+)
+
 // New creates a new storage instance
 func New(dbPath string) (*Storage, error) {
 	// Create directory if it doesn't exist (0700 for security - owner only)
@@ -40,11 +52,19 @@ func New(dbPath string) (*Storage, error) {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	// Open database
-	db, err := sql.Open("sqlite", dbPath)
+	// Open database with busy timeout to prevent indefinite waits (L-04 fix)
+	// The _busy_timeout pragma prevents "database is locked" errors by waiting
+	dsn := fmt.Sprintf("%s?_busy_timeout=%d", dbPath, busyTimeoutMs)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+
+	// Configure connection pool (L-04 fix)
+	// SQLite works best with a single connection to avoid lock contention
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxLifetime(connMaxLifetime)
 
 	// Test connection
 	if err := db.Ping(); err != nil {

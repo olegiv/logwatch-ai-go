@@ -140,6 +140,8 @@ CREATE TABLE summaries (
     cost_usd REAL
 );
 ```
+- Connection timeout: 5s busy timeout prevents indefinite waits on locks
+- Connection pool: Single connection (optimal for SQLite), 30-min lifetime
 
 **6. Claude AI Integration (internal/ai/client.go)**
 - Retry logic: 3 attempts with exponential backoff (2^n seconds)
@@ -354,6 +356,7 @@ stats, err := store.GetStatistics()
 - Ensure only one instance runs at a time
 - Check file permissions on `./data/` directory
 - SQLite uses file-level locking (modernc.org/sqlite is pure Go, no CGO)
+- Built-in 5-second busy timeout handles temporary lock contention
 
 ### "Token estimation seems off"
 - Algorithm is calibrated for English text

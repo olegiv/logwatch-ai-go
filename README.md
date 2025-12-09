@@ -319,6 +319,7 @@ go test -v ./internal/logwatch
 **Database locked errors**
 - Ensure only one instance is running
 - Check file permissions on `data/` directory
+- Built-in 5-second busy timeout handles temporary lock contention
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more solutions.
 
