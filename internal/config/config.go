@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"regexp"
 	"strings"
@@ -95,7 +96,8 @@ func (c *Config) Validate() error {
 	if c.AnthropicAPIKey == "" {
 		return fmt.Errorf("ANTHROPIC_API_KEY is required")
 	}
-	if !strings.HasPrefix(c.AnthropicAPIKey, "sk-ant-") {
+	// Use constant-time comparison to prevent timing attacks (M-04 fix)
+	if !constantTimePrefixMatch(c.AnthropicAPIKey, "sk-ant-") {
 		return fmt.Errorf("ANTHROPIC_API_KEY must start with 'sk-ant-'")
 	}
 
@@ -164,4 +166,15 @@ func (c *Config) GetProxyURL(isHTTPS bool) string {
 		return c.HTTPProxy
 	}
 	return ""
+}
+
+// constantTimePrefixMatch checks if s starts with prefix using constant-time comparison.
+// This prevents timing attacks that could leak information about the string content.
+// Returns false if s is shorter than prefix.
+func constantTimePrefixMatch(s, prefix string) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	// Compare only the prefix portion using constant-time comparison
+	return subtle.ConstantTimeCompare([]byte(s[:len(prefix)]), []byte(prefix)) == 1
 }

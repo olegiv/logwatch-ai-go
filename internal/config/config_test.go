@@ -535,3 +535,76 @@ func TestLoad_ValidationFails(t *testing.T) {
 		t.Error("Expected Load to fail when required env vars are missing")
 	}
 }
+
+func TestConstantTimePrefixMatch(t *testing.T) {
+	tests := []struct {
+		name   string
+		s      string
+		prefix string
+		want   bool
+	}{
+		{
+			name:   "exact prefix match",
+			s:      "sk-ant-api03-test1234567890",
+			prefix: "sk-ant-",
+			want:   true,
+		},
+		{
+			name:   "prefix match with longer string",
+			s:      "sk-ant-very-long-api-key-here",
+			prefix: "sk-ant-",
+			want:   true,
+		},
+		{
+			name:   "exact match",
+			s:      "sk-ant-",
+			prefix: "sk-ant-",
+			want:   true,
+		},
+		{
+			name:   "no match - different prefix",
+			s:      "invalid-key-here",
+			prefix: "sk-ant-",
+			want:   false,
+		},
+		{
+			name:   "no match - string too short",
+			s:      "sk-a",
+			prefix: "sk-ant-",
+			want:   false,
+		},
+		{
+			name:   "no match - empty string",
+			s:      "",
+			prefix: "sk-ant-",
+			want:   false,
+		},
+		{
+			name:   "match - empty prefix",
+			s:      "anything",
+			prefix: "",
+			want:   true,
+		},
+		{
+			name:   "no match - partial prefix",
+			s:      "sk-ant",
+			prefix: "sk-ant-",
+			want:   false,
+		},
+		{
+			name:   "no match - similar but different",
+			s:      "sk-ANT-key",
+			prefix: "sk-ant-",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := constantTimePrefixMatch(tt.s, tt.prefix)
+			if got != tt.want {
+				t.Errorf("constantTimePrefixMatch(%q, %q) = %v, want %v", tt.s, tt.prefix, got, tt.want)
+			}
+		})
+	}
+}
