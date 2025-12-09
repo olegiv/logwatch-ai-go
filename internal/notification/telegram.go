@@ -11,14 +11,24 @@ import (
 	internalerrors "github.com/olegiv/logwatch-ai-go/internal/errors"
 )
 
-const maxMessageLength = 4096
+const (
+	maxMessageLength = 4096
+	// minMessageInterval is the minimum time between messages to the same channel
+	// to avoid Telegram rate limits (L-01 fix)
+	minMessageInterval = 1 * time.Second
+	// maxRetries is the maximum number of retry attempts for sending messages
+	maxRetries = 3
+	// baseRetryDelay is the initial delay between retries (doubles each attempt)
+	baseRetryDelay = 2 * time.Second
+)
 
 // TelegramClient handles Telegram notifications
 type TelegramClient struct {
-	bot            *tgbotapi.BotAPI
-	archiveChannel int64
-	alertsChannel  int64
-	hostname       string
+	bot             *tgbotapi.BotAPI
+	archiveChannel  int64
+	alertsChannel   int64
+	hostname        string
+	lastMessageTime time.Time // tracks last message for rate limiting (L-01 fix)
 }
 
 // NewTelegramClient creates a new Telegram client
@@ -136,36 +146,105 @@ func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats) s
 	return msg.String()
 }
 
-// sendToChannel sends a message to a Telegram channel
+// sendToChannel sends a message to a Telegram channel with rate limiting (L-01 fix)
 func (t *TelegramClient) sendToChannel(channelID int64, message string) error {
 	// Split message if it exceeds Telegram's limit
 	messages := t.splitMessage(message)
 
 	for _, msg := range messages {
+		// Apply rate limiting before sending (L-01 fix)
+		t.waitForRateLimit()
+
 		msgConfig := tgbotapi.NewMessage(channelID, msg)
 		msgConfig.ParseMode = "MarkdownV2"
 
-		// Send with retry
-		var lastErr error
-		for attempt := 1; attempt <= 2; attempt++ {
-			_, err := t.bot.Send(msgConfig)
-			if err == nil {
-				break
-			}
-			lastErr = err
-
-			if attempt < 2 {
-				time.Sleep(5 * time.Second)
-			}
+		// Send with exponential backoff retry
+		if err := t.sendWithRetry(msgConfig); err != nil {
+			return err
 		}
 
-		if lastErr != nil {
-			// Sanitize error to prevent credentials from appearing in error messages (M-01 fix)
-			return internalerrors.Wrapf(lastErr, "failed to send message after retries")
-		}
+		// Update last message time for rate limiting
+		t.lastMessageTime = time.Now()
 	}
 
 	return nil
+}
+
+// waitForRateLimit ensures minimum interval between messages (L-01 fix)
+func (t *TelegramClient) waitForRateLimit() {
+	if t.lastMessageTime.IsZero() {
+		return
+	}
+
+	elapsed := time.Since(t.lastMessageTime)
+	if elapsed < minMessageInterval {
+		time.Sleep(minMessageInterval - elapsed)
+	}
+}
+
+// sendWithRetry sends a message with exponential backoff retry (L-01 fix)
+func (t *TelegramClient) sendWithRetry(msgConfig tgbotapi.MessageConfig) error {
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		_, err := t.bot.Send(msgConfig)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		// Check if this is a rate limit error (429)
+		if isRateLimitError(err) {
+			// Wait longer for rate limit errors
+			retryAfter := extractRetryAfter(err)
+			if retryAfter > 0 {
+				time.Sleep(time.Duration(retryAfter) * time.Second)
+				continue
+			}
+		}
+
+		// Exponential backoff for other errors
+		if attempt < maxRetries {
+			delay := baseRetryDelay * time.Duration(1<<(attempt-1)) // 2s, 4s, 8s...
+			time.Sleep(delay)
+		}
+	}
+
+	// Sanitize error to prevent credentials from appearing in error messages (M-01 fix)
+	return internalerrors.Wrapf(lastErr, "failed to send message after %d retries", maxRetries)
+}
+
+// isRateLimitError checks if the error is a Telegram rate limit error (429)
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "429") || strings.Contains(errStr, "Too Many Requests")
+}
+
+// extractRetryAfter extracts the retry_after value from a rate limit error
+func extractRetryAfter(err error) int {
+	if err == nil {
+		return 0
+	}
+
+	// Telegram API errors typically include retry_after in the message
+	// Example: "Too Many Requests: retry after 30"
+	errStr := err.Error()
+
+	// Simple extraction - look for "retry after X" pattern
+	if idx := strings.Index(strings.ToLower(errStr), "retry after "); idx != -1 {
+		remaining := errStr[idx+len("retry after "):]
+		var seconds int
+		if _, err := fmt.Sscanf(remaining, "%d", &seconds); err == nil {
+			return seconds
+		}
+	}
+
+	// Default to a conservative wait time if we can't extract the value
+	return 30
 }
 
 // splitMessage splits a long message into multiple messages

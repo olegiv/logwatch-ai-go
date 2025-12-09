@@ -153,7 +153,8 @@ CREATE TABLE summaries (
 - **Alerts channel**: Only for Warning/Critical/Bad statuses (optional)
 - Message format: MarkdownV2 with proper escaping
 - Handles 4096 char limit (splits messages if needed)
-- Retry logic: 2 attempts with 5s delay
+- Rate limiting: 1s minimum between messages, detects 429 errors
+- Retry logic: 3 attempts with exponential backoff (2s, 4s, 8s)
 
 ## Important Implementation Notes
 

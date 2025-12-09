@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 )
@@ -405,5 +406,120 @@ func TestFormatMessage_MultipleIssues(t *testing.T) {
 		if !strings.Contains(message, escapeMarkdown(key)) {
 			t.Errorf("Metric key '%s' not found in message", key)
 		}
+	}
+}
+
+func TestIsRateLimitError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "429 error",
+			err:  fmt.Errorf("telegram: 429 Too Many Requests"),
+			want: true,
+		},
+		{
+			name: "too many requests error",
+			err:  fmt.Errorf("Too Many Requests: retry after 30"),
+			want: true,
+		},
+		{
+			name: "other error",
+			err:  fmt.Errorf("connection timeout"),
+			want: false,
+		},
+		{
+			name: "network error",
+			err:  fmt.Errorf("failed to connect to api.telegram.org"),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isRateLimitError(tt.err)
+			if got != tt.want {
+				t.Errorf("isRateLimitError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractRetryAfter(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{
+			name: "nil error",
+			err:  nil,
+			want: 0,
+		},
+		{
+			name: "retry after 30",
+			err:  fmt.Errorf("Too Many Requests: retry after 30"),
+			want: 30,
+		},
+		{
+			name: "retry after 60",
+			err:  fmt.Errorf("telegram: 429 Too Many Requests: retry after 60 seconds"),
+			want: 60,
+		},
+		{
+			name: "retry after 5",
+			err:  fmt.Errorf("Error: retry after 5"),
+			want: 5,
+		},
+		{
+			name: "no retry after value - defaults to 30",
+			err:  fmt.Errorf("Too Many Requests"),
+			want: 30,
+		},
+		{
+			name: "other error - defaults to 30",
+			err:  fmt.Errorf("connection timeout"),
+			want: 30,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractRetryAfter(tt.err)
+			if got != tt.want {
+				t.Errorf("extractRetryAfter() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRateLimitConstants(t *testing.T) {
+	// Verify that rate limit constants are reasonable
+	if minMessageInterval < 500*time.Millisecond {
+		t.Error("minMessageInterval is too short, risk of rate limiting")
+	}
+	if minMessageInterval > 5*time.Second {
+		t.Error("minMessageInterval is too long, may cause delays")
+	}
+
+	if maxRetries < 2 {
+		t.Error("maxRetries should be at least 2 for reliability")
+	}
+	if maxRetries > 10 {
+		t.Error("maxRetries is too high, may cause long delays")
+	}
+
+	if baseRetryDelay < 1*time.Second {
+		t.Error("baseRetryDelay is too short")
+	}
+	if baseRetryDelay > 10*time.Second {
+		t.Error("baseRetryDelay is too long")
 	}
 }
