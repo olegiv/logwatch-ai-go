@@ -424,3 +424,231 @@ To reduce costs further:
 2. Reduce historical context days (currently 7)
 3. Adjust section priority classification
 4. Use smaller model (not recommended - quality drop)
+
+## Claude Code Extensions
+
+This project includes specialized Claude Code agents and slash commands tailored to the logwatch-ai-go tech stack and workflows. These tools enhance development productivity by providing context-aware assistance.
+
+### Specialized Agents
+
+Agents are available in `.claude/agents/` and provide deep expertise in specific areas:
+
+#### go-dev (Go Development Specialist)
+**When to use:** Development tasks, testing, code quality
+- Run tests and analyze failures
+- Format code and run static analysis (go vet)
+- Build the application (dev and prod builds)
+- Manage Go dependencies
+- Add new tests or improve coverage
+- Debug Go-specific issues
+
+**Examples:**
+- "Run all tests and show me the results"
+- "Fix the failing test in internal/ai/client_test.go"
+- "Add unit tests for the new preprocessing logic"
+- "Check code quality with fmt and vet"
+
+#### build-manager (Cross-Platform Build Specialist)
+**When to use:** Building for different platforms, optimizing binaries
+- Build for Linux AMD64 (Debian 12 / Ubuntu 24)
+- Build for macOS ARM64 (Apple Silicon)
+- Create production-optimized binaries
+- Troubleshoot compilation errors
+- Optimize binary size
+- Prepare release builds
+
+**Examples:**
+- "Build for Linux Debian 12 deployment"
+- "Create optimized production binaries for all platforms"
+- "Why is the binary so large? How can we reduce it?"
+- "Prepare a release build with checksums"
+
+#### deploy-assistant (Deployment & Production Specialist)
+**When to use:** Installing, configuring, deploying to production
+- Install to /opt/logwatch-ai on Linux servers
+- Set up cron jobs for automated analysis
+- Configure .env for different environments (Integration, QA, Pre-Prod, Production)
+- Troubleshoot production deployment issues
+- Manage multi-environment deployments
+- Handle log rotation and monitoring
+
+**Examples:**
+- "Install to /opt/logwatch-ai on Linux server"
+- "Set up cron job to run daily at 2:15 AM"
+- "Configure for QA environment with separate Telegram channels"
+- "Check production logs for errors"
+
+#### db-manager (SQLite Database Specialist)
+**When to use:** Querying historical data, database operations, troubleshooting
+- Query summaries database for historical analysis
+- Troubleshoot database issues (locks, corruption, performance)
+- Analyze stored summaries and statistics
+- Manage database cleanup and maintenance
+- Generate reports from stored analysis data
+- Export data to CSV/JSON
+
+**Examples:**
+- "Show me the last 10 analysis summaries"
+- "How many Critical status summaries do we have?"
+- "Database is locked - how do I fix it?"
+- "Export all summaries to JSON for reporting"
+
+#### api-tester (API Integration Testing Specialist)
+**When to use:** Testing APIs, validating credentials, debugging API issues
+- Test Claude AI API integration
+- Test Telegram Bot API (sending messages, formatting)
+- Validate API credentials and configuration
+- Troubleshoot API errors (rate limits, timeouts, authentication)
+- Test MarkdownV2 formatting and escaping
+- Verify end-to-end workflow with real APIs
+
+**Examples:**
+- "Test if my Anthropic API key is valid"
+- "Send a test message to my Telegram channel"
+- "Why is Claude API returning 401?"
+- "Run end-to-end test with real logwatch data"
+
+#### cost-optimizer (Cost Tracking & Optimization Specialist)
+**When to use:** Analyzing costs, optimizing spending, forecasting
+- Analyze Claude AI costs from database
+- Generate cost reports (daily, monthly, yearly)
+- Identify cost anomalies or unusual spending
+- Optimize token usage and reduce costs
+- Forecast future costs based on usage patterns
+- Recommend preprocessing adjustments
+
+**Examples:**
+- "What are my total Claude AI costs this month?"
+- "Show me cost trends over the last 30 days"
+- "Why did today's analysis cost more than usual?"
+- "How can I reduce costs without losing analysis quality?"
+
+### Slash Commands
+
+Quick commands are available for common workflows. Use them with `/command` syntax:
+
+#### Development Workflow
+- **/test** - Run all tests and analyze results
+- **/test-coverage** - Generate test coverage report (opens coverage.html)
+- **/build** - Build development binary with debug info
+- **/build-prod** - Build optimized production binary for current platform
+- **/build-all** - Build for all platforms (Linux AMD64, macOS ARM64)
+- **/lint** - Run code formatting (gofmt) and static analysis (go vet)
+- **/clean** - Remove build artifacts and coverage files
+
+#### Deployment & Operations
+- **/deploy-prep** - Create complete deployment package for Linux production
+- **/check-logs** - Check application logs for errors and recent activity
+
+#### Database & Cost Analysis
+- **/db-stats** - Show database statistics and recent analysis summaries
+- **/cost-report** - Generate comprehensive Claude AI cost report
+
+#### Security
+- **/security-audit** - Perform comprehensive security audit of codebase, dependencies, and configurations
+
+### How to Use Agents and Commands
+
+**Invoke an agent:**
+```
+@go-dev run all tests and fix any failures
+@build-manager build for Linux Debian 12
+@cost-optimizer show me this month's costs
+```
+
+**Run a slash command:**
+```
+/test
+/build-all
+/cost-report
+```
+
+**Choose the right tool:**
+- **Simple, single tasks**: Use slash commands for quick operations
+- **Complex, multi-step tasks**: Use agents for guided assistance
+- **Ongoing development**: Use go-dev agent for iterative development
+- **Deployment**: Use deploy-assistant for production operations
+- **Cost analysis**: Use cost-optimizer for financial insights
+
+### Agent Capabilities Matrix
+
+| Task | Recommended Agent | Alternative |
+|------|------------------|-------------|
+| Run tests | go-dev | /test command |
+| Build for Linux | build-manager | /build-all command |
+| Deploy to production | deploy-assistant | /deploy-prep command |
+| Query database | db-manager | /db-stats command |
+| Test APIs | api-tester | Manual testing |
+| Analyze costs | cost-optimizer | /cost-report command |
+| Code quality | go-dev | /lint command |
+| Debug issues | go-dev | Check logs manually |
+| Optimize performance | cost-optimizer + go-dev | Manual analysis |
+| Security audit | /security-audit command | Manual review |
+
+### Best Practices
+
+1. **Start with commands for simple tasks**: Use /test, /build, /db-stats for quick operations
+2. **Use agents for complex scenarios**: Multi-step debugging, deployment planning, cost optimization
+3. **Combine tools**: Use /test to run tests, then @go-dev to fix failures
+4. **Context matters**: Agents understand the project's tech stack and conventions
+5. **Ask for explanations**: Agents can explain "why" not just "how"
+
+### Examples in Practice
+
+**Scenario 1: Preparing for Production Deployment**
+```
+@deploy-assistant I need to deploy to production. Walk me through the process.
+
+# Agent will guide you through:
+# 1. Building for Linux AMD64
+# 2. Creating deployment package
+# 3. Configuring .env for production
+# 4. Setting up cron jobs
+# 5. Testing before going live
+```
+
+**Scenario 2: Investigating High Costs**
+```
+@cost-optimizer My costs seem higher than expected this week. Investigate.
+
+# Agent will:
+# 1. Query database for cost trends
+# 2. Identify anomalies
+# 3. Analyze token usage patterns
+# 4. Recommend optimizations
+# 5. Show before/after projections
+```
+
+**Scenario 3: Adding New Features**
+```
+@go-dev I added a new function to internal/ai/prompt.go. Create tests for it.
+
+# Agent will:
+# 1. Read the new function
+# 2. Create table-driven tests
+# 3. Run tests to verify
+# 4. Check coverage
+# 5. Suggest edge cases
+```
+
+**Scenario 4: Quick Status Check**
+```
+/db-stats
+/check-logs
+/cost-report
+
+# Quick overview of system health, recent activity, and costs
+```
+
+**Scenario 5: Pre-Release Security Audit**
+```
+/security-audit
+
+# Comprehensive security analysis including:
+# 1. Code vulnerabilities (SQL injection, command injection, etc.)
+# 2. Dependency CVEs and outdated packages
+# 3. Credential exposure in code/logs
+# 4. Configuration security issues
+# 5. Deployment security best practices
+# Results stored in .audit/ directory (gitignored)
+```
