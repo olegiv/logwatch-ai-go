@@ -21,6 +21,8 @@ type Client struct {
 
 // Stats holds statistics about the API call
 type Stats struct {
+	Provider            string
+	Model               string
 	InputTokens         int
 	OutputTokens        int
 	CacheCreationTokens int
@@ -176,6 +178,8 @@ func (c *Client) calculateStats(response anthropic.MessagesResponse, durationSec
 	totalCost := inputCost + outputCost + cacheWriteCost + cacheReadCost
 
 	return &Stats{
+		Provider:            "Anthropic",
+		Model:               c.model,
 		InputTokens:         inputTokens,
 		OutputTokens:        outputTokens,
 		CacheCreationTokens: cacheCreationTokens,

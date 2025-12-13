@@ -74,7 +74,7 @@ type Config struct {
 
 	// Ollama Settings (used when LLMProvider = "ollama")
 	OllamaBaseURL string // e.g., "http://localhost:11434"
-	OllamaModel   string // e.g., "llama3.3:70b"
+	OllamaModel   string // e.g., "llama3.3:latest"
 
 	// Telegram
 	TelegramBotToken       string
@@ -280,7 +280,7 @@ func setDefaults() {
 	viper.SetDefault("LLM_PROVIDER", "anthropic")
 	viper.SetDefault("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 	viper.SetDefault("OLLAMA_BASE_URL", "http://localhost:11434")
-	viper.SetDefault("OLLAMA_MODEL", "llama3.3:70b")
+	viper.SetDefault("OLLAMA_MODEL", "llama3.3:latest")
 
 	// Log source defaults
 	viper.SetDefault("LOG_SOURCE_TYPE", "logwatch")

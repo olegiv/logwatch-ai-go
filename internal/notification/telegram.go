@@ -96,6 +96,7 @@ func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats, l
 
 	// Execution Stats
 	msg.WriteString("📋 *Execution Stats*\n")
+	msg.WriteString(fmt.Sprintf("• LLM\\: %s \\(%s\\)\n", escapeMarkdown(stats.Model), escapeMarkdown(stats.Provider)))
 	msg.WriteString(fmt.Sprintf("• Critical Issues\\: %d\n", len(analysis.CriticalIssues)))
 	msg.WriteString(fmt.Sprintf("• Warnings\\: %d\n", len(analysis.Warnings)))
 	msg.WriteString(fmt.Sprintf("• Recommendations\\: %d\n", len(analysis.Recommendations)))

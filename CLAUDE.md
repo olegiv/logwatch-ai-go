@@ -12,7 +12,7 @@ Logwatch AI Analyzer is an intelligent system log analyzer that uses LLM (Large 
 
 **Supported LLM Providers:**
 - **Anthropic Claude** - Cloud-based AI (Claude Sonnet 4.5 default)
-- **Ollama** - Local LLM inference (llama3.3:70b recommended for high-RAM systems)
+- **Ollama** - Local LLM inference (llama3.3:latest recommended for high-RAM systems)
 
 **Key Technologies:**
 - Go 1.25+ with pure Go SQLite (modernc.org/sqlite)
@@ -250,7 +250,7 @@ type Provider interface {
 - Zero cost: Local inference has no monetary cost
 - JSON format mode: Requests structured JSON output
 - Recommended models for high-RAM systems (96GB+):
-  - `llama3.3:70b` - Best quality for reasoning/analysis
+  - `llama3.3:latest` - Best quality for reasoning/analysis
   - `qwen2.5:72b` - Excellent for technical analysis
   - `deepseek-coder-v2:33b` - Faster, good quality
 
@@ -279,7 +279,7 @@ type Provider interface {
   - `CLAUDE_MODEL` is required (default: `claude-sonnet-4-5-20250929`)
 - When `LLM_PROVIDER=ollama`:
   - `OLLAMA_BASE_URL` is required (default: `http://localhost:11434`)
-  - `OLLAMA_MODEL` is required (default: `llama3.3:70b`)
+  - `OLLAMA_MODEL` is required (default: `llama3.3:latest`)
   - Ollama must be running and the model must be available (run `ollama pull <model>` to download)
 
 **Telegram Settings:**
@@ -486,6 +486,7 @@ Previous N analysis summaries:
 {status_emoji} Status: {status}
 
 📋 Execution Stats
+• LLM: {model} ({provider})
 • Critical Issues: N
 • Warnings: N
 • Recommendations: N
@@ -511,6 +512,8 @@ Previous N analysis summaries:
 
 - `{Source}` is "Logwatch" or "Drupal Watchdog" based on `LOG_SOURCE_TYPE`
 - `{site_name}` shown only for multi-site Drupal deployments
+- `{model}` is the LLM model name (e.g., "claude-sonnet-4-5-20250929" or "llama3.3:latest")
+- `{provider}` is "Anthropic" or "Ollama" based on `LLM_PROVIDER`
 
 ### Status Emoji Mapping
 - `Good` → 🟢
@@ -687,7 +690,7 @@ For development or cost-sensitive deployments, use Ollama for **free local infer
 brew install ollama
 
 # Pull recommended model (requires ~40GB disk, ~45GB RAM)
-ollama pull llama3.3:70b
+ollama pull llama3.3:latest
 
 # Or use a smaller model for lower-RAM systems
 ollama pull llama3.2:8b
@@ -700,7 +703,7 @@ Configure in `.env`:
 ```
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.3:70b
+OLLAMA_MODEL=llama3.3:latest
 ```
 
 **Trade-offs:**

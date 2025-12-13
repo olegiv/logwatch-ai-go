@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Ollama LLM Integration
+- New `LLM_PROVIDER` configuration option to select between Anthropic and Ollama
+- `internal/ai/provider.go` with `Provider` interface for pluggable LLM backends
+- `internal/ai/ollama.go` with full Ollama REST API client implementation
+- Connection check to verify Ollama server and model availability before analysis
+- JSON format mode for structured output from local models
+- Retry logic with exponential backoff (3 attempts) matching Anthropic client
+- Zero-cost tracking for local inference (CostUSD = 0)
+- Support for recommended models: llama3.3:latest, qwen2.5:72b, deepseek-coder-v2:33b
+
+#### Configuration
+- `LLM_PROVIDER` environment variable: `anthropic` (default) or `ollama`
+- `OLLAMA_BASE_URL` for custom Ollama server location (default: `http://localhost:11434`)
+- `OLLAMA_MODEL` for model selection (default: `llama3.3:latest`)
+- Validation ensures appropriate settings based on selected provider
+
+#### Telegram Notifications
+- LLM model and provider info now displayed in Telegram reports (e.g., "LLM: llama3.3:latest (Ollama)")
+- `Provider` and `Model` fields added to `ai.Stats` struct for tracking
+
+### Changed
+- AI client initialization now uses provider factory pattern based on `LLM_PROVIDER`
+- Configuration validation adapts to selected LLM provider (Anthropic API key only required for anthropic)
+
 ## [0.4.0] - 2025-12-13
 
 ### Added

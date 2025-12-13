@@ -19,7 +19,7 @@ func TestNewOllamaClient(t *testing.T) {
 			name: "valid config",
 			cfg: OllamaConfig{
 				BaseURL:        "http://localhost:11434",
-				Model:          "llama3.3:70b",
+				Model:          "llama3.3:latest",
 				TimeoutSeconds: 120,
 				MaxTokens:      8000,
 			},
@@ -38,7 +38,7 @@ func TestNewOllamaClient(t *testing.T) {
 		{
 			name: "default base URL",
 			cfg: OllamaConfig{
-				Model: "llama3.3:70b",
+				Model: "llama3.3:latest",
 			},
 			wantErr: false,
 		},
@@ -46,7 +46,7 @@ func TestNewOllamaClient(t *testing.T) {
 			name: "trailing slash in base URL",
 			cfg: OllamaConfig{
 				BaseURL: "http://localhost:11434/",
-				Model:   "llama3.3:70b",
+				Model:   "llama3.3:latest",
 			},
 			wantErr: false,
 		},
@@ -69,7 +69,7 @@ func TestNewOllamaClient(t *testing.T) {
 func TestOllamaClient_GetModelInfo(t *testing.T) {
 	client, err := NewOllamaClient(OllamaConfig{
 		BaseURL:   "http://localhost:11434",
-		Model:     "llama3.3:70b",
+		Model:     "llama3.3:latest",
 		MaxTokens: 8000,
 	})
 	if err != nil {
@@ -78,8 +78,8 @@ func TestOllamaClient_GetModelInfo(t *testing.T) {
 
 	info := client.GetModelInfo()
 
-	if info["model"] != "llama3.3:70b" {
-		t.Errorf("GetModelInfo() model = %v, want llama3.3:70b", info["model"])
+	if info["model"] != "llama3.3:latest" {
+		t.Errorf("GetModelInfo() model = %v, want llama3.3:latest", info["model"])
 	}
 	if info["provider"] != "Ollama" {
 		t.Errorf("GetModelInfo() provider = %v, want Ollama", info["provider"])
@@ -94,7 +94,7 @@ func TestOllamaClient_GetModelInfo(t *testing.T) {
 
 func TestOllamaClient_GetProviderName(t *testing.T) {
 	client, err := NewOllamaClient(OllamaConfig{
-		Model: "llama3.3:70b",
+		Model: "llama3.3:latest",
 	})
 	if err != nil {
 		t.Fatalf("NewOllamaClient() error = %v", err)
@@ -115,10 +115,10 @@ func TestOllamaClient_CheckConnection(t *testing.T) {
 	}{
 		{
 			name:  "model found",
-			model: "llama3.3:70b",
+			model: "llama3.3:latest",
 			response: map[string]interface{}{
 				"models": []map[string]interface{}{
-					{"name": "llama3.3:70b"},
+					{"name": "llama3.3:latest"},
 					{"name": "mistral:latest"},
 				},
 			},
@@ -130,7 +130,7 @@ func TestOllamaClient_CheckConnection(t *testing.T) {
 			model: "nonexistent:model",
 			response: map[string]interface{}{
 				"models": []map[string]interface{}{
-					{"name": "llama3.3:70b"},
+					{"name": "llama3.3:latest"},
 				},
 			},
 			statusCode: http.StatusOK,
@@ -138,14 +138,14 @@ func TestOllamaClient_CheckConnection(t *testing.T) {
 		},
 		{
 			name:       "server error",
-			model:      "llama3.3:70b",
+			model:      "llama3.3:latest",
 			response:   "Internal Server Error",
 			statusCode: http.StatusInternalServerError,
 			wantErr:    true,
 		},
 		{
 			name:  "partial model name match",
-			model: "llama3.3:70b",
+			model: "llama3.3:latest",
 			response: map[string]interface{}{
 				"models": []map[string]interface{}{
 					{"name": "llama3.3:latest"},
@@ -243,7 +243,7 @@ func TestOllamaClient_Analyze(t *testing.T) {
 
 	client, err := NewOllamaClient(OllamaConfig{
 		BaseURL:        server.URL,
-		Model:          "llama3.3:70b",
+		Model:          "llama3.3:latest",
 		TimeoutSeconds: 30,
 		MaxTokens:      4000,
 	})
@@ -312,7 +312,7 @@ func TestOllamaClient_Analyze_Error(t *testing.T) {
 
 			client, err := NewOllamaClient(OllamaConfig{
 				BaseURL: server.URL,
-				Model:   "llama3.3:70b",
+				Model:   "llama3.3:latest",
 			})
 			if err != nil {
 				t.Fatalf("NewOllamaClient() error = %v", err)

@@ -23,7 +23,7 @@ type OllamaClient struct {
 // OllamaConfig holds Ollama-specific configuration
 type OllamaConfig struct {
 	BaseURL        string // e.g., "http://localhost:11434"
-	Model          string // e.g., "llama3.3:70b"
+	Model          string // e.g., "llama3.3:latest"
 	TimeoutSeconds int    // Request timeout
 	MaxTokens      int    // Max tokens in response
 }
@@ -233,6 +233,8 @@ func (c *OllamaClient) calculateStats(response *ollamaChatResponse, durationSeco
 	// Local inference has no monetary cost
 	// But we track tokens for comparison purposes
 	return &Stats{
+		Provider:            "Ollama",
+		Model:               c.model,
 		InputTokens:         inputTokens,
 		OutputTokens:        outputTokens,
 		CacheCreationTokens: 0,
@@ -296,7 +298,7 @@ func (c *OllamaClient) CheckConnection(ctx context.Context) error {
 	// Check if the configured model is available
 	modelFound := false
 	for _, m := range tagsResp.Models {
-		// Match model name (could be "llama3.3:70b" or just "llama3.3")
+		// Match model name (e.g., "llama3.3:latest" matches "llama3.3")
 		if m.Name == c.model || strings.HasPrefix(m.Name, strings.Split(c.model, ":")[0]) {
 			modelFound = true
 			break
