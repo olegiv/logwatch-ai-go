@@ -4,11 +4,16 @@
 [![CodeQL](https://github.com/olegiv/logwatch-ai-go/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/olegiv/logwatch-ai-go/actions/workflows/github-code-scanning/codeql)
 [![Dependency review](https://github.com/olegiv/logwatch-ai-go/actions/workflows/dependency-review.yml/badge.svg)](https://github.com/olegiv/logwatch-ai-go/actions/workflows/dependency-review.yml)
 
-An intelligent system log analyzer that uses Claude AI to analyze logwatch reports and send actionable insights via Telegram. This is a Go port of the original Node.js [logwatch-ai](https://github.com/olegiv/logwatch-ai) project.
+An intelligent log analyzer that uses Claude AI to analyze log reports and send actionable insights via Telegram. This is a Go port of the original Node.js [logwatch-ai](https://github.com/olegiv/logwatch-ai) project.
+
+**Supported Log Sources:**
+- **Logwatch** - Linux system log aggregation (syslog, auth, mail, etc.)
+- **Drupal Watchdog** - PHP/Drupal application logs (JSON or drush export)
 
 ## Features
 
-- **AI-Powered Analysis**: Uses Anthropic's Claude Sonnet 4.5 to analyze logwatch reports
+- **AI-Powered Analysis**: Uses Anthropic's Claude Sonnet 4.5 to analyze log reports
+- **Multi-Source Support**: Analyze Logwatch reports or Drupal watchdog logs
 - **Smart Notifications**: Dual-channel Telegram notifications (archive + alerts)
 - **Historical Tracking**: SQLite database stores analysis history for trend detection
 - **Intelligent Preprocessing**: Handles large log files (up to 800KB-1MB) with smart content reduction
@@ -68,8 +73,19 @@ TELEGRAM_BOT_TOKEN=1234567890:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
 TELEGRAM_CHANNEL_ARCHIVE_ID=-1001234567890    # Required
 TELEGRAM_CHANNEL_ALERTS_ID=-1009876543210     # Optional
 
-# Paths
+# Log Source Configuration
+# Options: "logwatch" (default) or "drupal_watchdog"
+LOG_SOURCE_TYPE=logwatch
+
+# Logwatch Configuration (used when LOG_SOURCE_TYPE=logwatch)
 LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt
+
+# Drupal Watchdog Configuration (used when LOG_SOURCE_TYPE=drupal_watchdog)
+# DRUPAL_WATCHDOG_PATH=/var/log/drupal-watchdog.json
+# DRUPAL_WATCHDOG_FORMAT=json    # "json" (recommended) or "drush"
+# DRUPAL_SITE_NAME=              # Optional: for multi-site deployments
+
+# Common Log Settings
 MAX_LOG_SIZE_MB=10
 
 # Application
@@ -117,6 +133,55 @@ Run logwatch analysis daily at 2:00 AM:
 ```
 
 See [docs/CRON_SETUP.md](docs/CRON_SETUP.md) for detailed setup instructions.
+
+### Drupal Watchdog Setup
+
+To analyze Drupal watchdog logs instead of logwatch:
+
+1. **Export watchdog logs as JSON** (recommended):
+```bash
+# Via drush
+drush watchdog:show --format=json > /var/log/drupal-watchdog.json
+
+# Or via MySQL/MariaDB
+mysql -u user -p drupal_db -e "SELECT * FROM watchdog ORDER BY wid DESC LIMIT 1000" | \
+  jq -s '.' > /var/log/drupal-watchdog.json
+```
+
+2. **Configure environment**:
+```bash
+LOG_SOURCE_TYPE=drupal_watchdog
+DRUPAL_WATCHDOG_PATH=/var/log/drupal-watchdog.json
+DRUPAL_WATCHDOG_FORMAT=json
+```
+
+3. **Set up automated export** (cron example):
+```bash
+# Export watchdog logs daily at 2:00 AM
+0 2 * * * drush -r /var/www/html watchdog:show --format=json --count=1000 > /var/log/drupal-watchdog.json
+
+# Run analyzer at 2:15 AM
+15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer >> logs/cron.log 2>&1
+```
+
+**Drupal Watchdog JSON Format:**
+```json
+[
+  {
+    "wid": 1234,
+    "uid": 1,
+    "type": "php",
+    "message": "PDOException: SQLSTATE[HY000] [2002] Connection refused",
+    "variables": "a:0:{}",
+    "severity": 3,
+    "link": "",
+    "location": "https://example.com/",
+    "referer": "",
+    "hostname": "127.0.0.1",
+    "timestamp": 1699900800
+  }
+]
+```
 
 ## Usage
 
@@ -181,28 +246,34 @@ logwatch-ai-go/
 │   └── analyzer/           # Main application entry point
 ├── internal/
 │   ├── ai/                 # Claude AI client and prompts
+│   ├── analyzer/           # Multi-source abstraction (interfaces)
 │   ├── config/             # Configuration management
+│   ├── drupal/             # Drupal watchdog reader and prompts
 │   ├── errors/             # Error sanitization (credential redaction)
 │   ├── logging/            # Secure logger (credential filtering)
-│   ├── logwatch/           # Log file reading and preprocessing
+│   ├── logwatch/           # Logwatch file reading and preprocessing
 │   ├── notification/       # Telegram notifications
 │   └── storage/            # SQLite database operations
 ├── scripts/                # Helper scripts
 ├── configs/                # Configuration templates
 ├── docs/                   # Documentation
+├── testdata/               # Test fixtures
 └── Makefile               # Build automation
 ```
 
 ### How It Works
 
-1. **Logwatch Generation**: Root cron runs `generate-logwatch.sh` to create daily report
-2. **File Reading**: Application reads and validates the logwatch output
-3. **Preprocessing**: Large files are intelligently compressed while preserving critical info
-4. **Historical Context**: Retrieves last 7 days of analysis from database
-5. **AI Analysis**: Claude Sonnet 4.5 analyzes logs with prompt caching
-6. **Storage**: Results saved to SQLite database
-7. **Notifications**: Sent to Telegram (archive channel always, alerts channel conditionally)
-8. **Cleanup**: Old database entries (>90 days) are removed
+1. **Log Generation**:
+   - *Logwatch*: Root cron runs `generate-logwatch.sh` to create daily report
+   - *Drupal*: drush exports watchdog entries to JSON file
+2. **Source Selection**: Application loads appropriate reader based on `LOG_SOURCE_TYPE`
+3. **File Reading**: Source-specific reader validates and parses log content
+4. **Preprocessing**: Large files are intelligently compressed with source-aware priority
+5. **Historical Context**: Retrieves last 7 days of analysis from database
+6. **AI Analysis**: Claude Sonnet 4.5 analyzes with source-specific prompts
+7. **Storage**: Results saved to SQLite database
+8. **Notifications**: Sent to Telegram (archive channel always, alerts channel conditionally)
+9. **Cleanup**: Old database entries (>90 days) are removed
 
 ## Cost Estimation
 
@@ -320,6 +391,16 @@ go test -v ./internal/logwatch
 - Ensure only one instance is running
 - Check file permissions on `data/` directory
 - Built-in 5-second busy timeout handles temporary lock contention
+
+**Drupal Watchdog: "Invalid JSON format"**
+- Ensure watchdog export is valid JSON array format
+- Check for UTF-8 encoding issues in log messages
+- Validate with: `jq . /path/to/watchdog.json`
+
+**Drupal Watchdog: "Missing entries"**
+- Check `DRUPAL_WATCHDOG_FORMAT` matches your file format
+- Verify file permissions and path
+- Ensure drush export includes `--count` parameter
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more solutions.
 
