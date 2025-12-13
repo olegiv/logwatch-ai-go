@@ -4,15 +4,20 @@
 [![CodeQL](https://github.com/olegiv/logwatch-ai-go/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/olegiv/logwatch-ai-go/actions/workflows/github-code-scanning/codeql)
 [![Dependency review](https://github.com/olegiv/logwatch-ai-go/actions/workflows/dependency-review.yml/badge.svg)](https://github.com/olegiv/logwatch-ai-go/actions/workflows/dependency-review.yml)
 
-An intelligent log analyzer that uses Claude AI to analyze log reports and send actionable insights via Telegram. This is a Go port of the original Node.js [logwatch-ai](https://github.com/olegiv/logwatch-ai) project.
+An intelligent log analyzer that uses LLM (Large Language Models) to analyze log reports and send actionable insights via Telegram. This is a Go port of the original Node.js [logwatch-ai](https://github.com/olegiv/logwatch-ai) project.
 
 **Supported Log Sources:**
 - **Logwatch** - Linux system log aggregation (syslog, auth, mail, etc.)
 - **Drupal Watchdog** - PHP/Drupal application logs (JSON or drush export)
 
+**Supported LLM Providers:**
+- **Anthropic Claude** - Cloud-based AI (Claude Sonnet 4.5 default)
+- **Ollama** - Local LLM inference for privacy and zero-cost operation
+
 ## Features
 
-- **AI-Powered Analysis**: Uses Anthropic's Claude Sonnet 4.5 to analyze log reports
+- **AI-Powered Analysis**: Uses LLM to analyze log reports (Claude AI or local Ollama models)
+- **Dual LLM Provider Support**: Choose between Anthropic Claude (cloud) or Ollama (local)
 - **Multi-Source Support**: Analyze Logwatch reports or Drupal watchdog logs
 - **Smart Notifications**: Dual-channel Telegram notifications (archive + alerts)
 - **Historical Tracking**: SQLite database stores analysis history for trend detection
@@ -30,7 +35,9 @@ An intelligent log analyzer that uses Claude AI to analyze log reports and send 
 
 - Go 1.25+ (for building from source)
 - Logwatch installed and configured
-- Anthropic API key
+- **LLM Provider** (choose one):
+  - Anthropic API key (for cloud-based Claude AI), OR
+  - Ollama installed locally (for free local inference)
 - Telegram bot token and channel IDs
 
 ### Installation
@@ -62,9 +69,20 @@ sudo make install
 Create a `.env` file with the following settings:
 
 ```bash
-# AI Provider
+# LLM Provider Selection
+# Options: "anthropic" (default) or "ollama"
+LLM_PROVIDER=anthropic
+
+# Anthropic/Claude Configuration (used when LLM_PROVIDER=anthropic)
 ANTHROPIC_API_KEY=sk-ant-xxxxx
 CLAUDE_MODEL=claude-sonnet-4-5-20250929
+
+# Ollama Configuration (used when LLM_PROVIDER=ollama)
+# Requires Ollama running locally: https://ollama.ai
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.3:latest
+
+# AI Settings (applies to all providers)
 AI_TIMEOUT_SECONDS=120
 AI_MAX_TOKENS=8000
 
@@ -115,6 +133,56 @@ HTTPS_PROXY=http://proxy.example.com:8080
 3. **Get channel IDs**:
    - Forward a message from your channel to [@userinfobot](https://t.me/userinfobot)
    - The bot will reply with the channel ID (should start with `-100`)
+
+### Ollama Setup (Optional)
+
+For free local inference without cloud API costs, you can use Ollama:
+
+1. **Install Ollama**:
+```bash
+# macOS
+brew install ollama
+
+# Linux
+curl -fsSL https://ollama.ai/install.sh | sh
+```
+
+2. **Pull a model** (recommended for systems with 64GB+ RAM):
+```bash
+# Best quality for log analysis (requires ~40GB RAM)
+ollama pull llama3.3:latest
+
+# Alternative for lower-RAM systems
+ollama pull llama3.2:8b
+```
+
+3. **Start Ollama server**:
+```bash
+ollama serve
+```
+
+4. **Configure in `.env`**:
+```bash
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.3:latest
+```
+
+**Recommended Models:**
+| Model | RAM Required | Quality | Speed |
+|-------|-------------|---------|-------|
+| `llama3.3:latest` | ~45GB | Excellent | Slower |
+| `qwen2.5:72b` | ~45GB | Excellent | Slower |
+| `deepseek-coder-v2:33b` | ~20GB | Good | Faster |
+| `llama3.2:8b` | ~5GB | Acceptable | Fast |
+
+**Trade-offs vs Claude:**
+- ✅ Zero cost - unlimited analysis
+- ✅ Data privacy - logs never leave your machine
+- ✅ No rate limits or API quotas
+- ⚠️ Slower than cloud (depends on hardware)
+- ⚠️ Quality varies by model (larger models = better)
+- ⚠️ Requires powerful hardware for best results
 
 ### Cron Setup
 
@@ -385,19 +453,25 @@ logwatch-ai-go/
 
 ## Cost Estimation
 
-### Claude AI Pricing (Sonnet 4.5)
+### Anthropic Claude (Cloud)
 
+**Pricing (Sonnet 4.5):**
 - Input: $3.00 per million tokens
 - Output: $15.00 per million tokens
 - Cache write: $3.75 per million tokens
 - Cache read: $0.30 per million tokens (90% savings)
 
-### Typical Costs
-
+**Typical Costs:**
 - **First run**: $0.0160-0.0220 (cache creation)
 - **Cached run**: $0.0107-0.0154 (cache hits)
 - **Monthly (daily)**: ~$0.47/month
 - **Yearly**: ~$5.64/year
+
+### Ollama (Local)
+
+**Cost: $0.00** - Local inference has no monetary cost.
+
+Trade-off: Requires capable hardware (see [Ollama Setup](#ollama-setup-optional) for requirements).
 
 ## Telegram Notification Format
 
@@ -409,6 +483,7 @@ logwatch-ai-go/
 🟢 Status: Good
 
 📋 Execution Stats
+• LLM: claude-sonnet-4-5-20250929 (Anthropic)
 • Critical Issues: 0
 • Warnings: 2
 • Recommendations: 3
@@ -516,6 +591,22 @@ go test -v ./internal/logwatch
 - Check `watchdog_format` in drupal-sites.json matches your file format
 - Verify file permissions and watchdog_path
 - Ensure drush export includes `--count` parameter
+
+**Ollama: "connection refused" or "ollama is not running"**
+- Ensure Ollama server is running: `ollama serve`
+- Check the base URL in `.env`: `OLLAMA_BASE_URL=http://localhost:11434`
+- Test connection: `curl http://localhost:11434/api/tags`
+
+**Ollama: "model not found"**
+- Pull the model first: `ollama pull <model-name>`
+- List available models: `ollama list`
+- Verify model name matches `.env`: `OLLAMA_MODEL=llama3.3:latest`
+
+**Ollama: Slow response or timeout**
+- Large models (70B+) require significant RAM and may be slow
+- Consider a smaller model for faster inference
+- Increase timeout: `AI_TIMEOUT_SECONDS=300`
+- Check system resources: `htop` or Activity Monitor
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more solutions.
 

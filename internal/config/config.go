@@ -65,9 +65,16 @@ func PrintUsage() {
 
 // Config holds all application configuration
 type Config struct {
-	// AI Provider
+	// LLM Provider Selection
+	LLMProvider string // "anthropic" (default) or "ollama"
+
+	// Anthropic/Claude Settings (used when LLMProvider = "anthropic")
 	AnthropicAPIKey string
 	ClaudeModel     string
+
+	// Ollama Settings (used when LLMProvider = "ollama")
+	OllamaBaseURL string // e.g., "http://localhost:11434"
+	OllamaModel   string // e.g., "llama3.3:latest"
 
 	// Telegram
 	TelegramBotToken       string
@@ -133,16 +140,26 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 	setDefaults()
 
 	config := &Config{
-		AnthropicAPIKey:        viper.GetString("ANTHROPIC_API_KEY"),
-		ClaudeModel:            viper.GetString("CLAUDE_MODEL"),
+		// LLM Provider settings
+		LLMProvider:     viper.GetString("LLM_PROVIDER"),
+		AnthropicAPIKey: viper.GetString("ANTHROPIC_API_KEY"),
+		ClaudeModel:     viper.GetString("CLAUDE_MODEL"),
+		OllamaBaseURL:   viper.GetString("OLLAMA_BASE_URL"),
+		OllamaModel:     viper.GetString("OLLAMA_MODEL"),
+
+		// Telegram settings
 		TelegramBotToken:       viper.GetString("TELEGRAM_BOT_TOKEN"),
 		TelegramArchiveChannel: viper.GetInt64("TELEGRAM_CHANNEL_ARCHIVE_ID"),
 		TelegramAlertsChannel:  viper.GetInt64("TELEGRAM_CHANNEL_ALERTS_ID"),
-		LogSourceType:          viper.GetString("LOG_SOURCE_TYPE"),
-		LogwatchOutputPath:     viper.GetString("LOGWATCH_OUTPUT_PATH"),
+
+		// Log source settings
+		LogSourceType:      viper.GetString("LOG_SOURCE_TYPE"),
+		LogwatchOutputPath: viper.GetString("LOGWATCH_OUTPUT_PATH"),
 		// Drupal settings are loaded from drupal-sites.json, not env vars
-		DrupalWatchdogFormat:   "json", // default, overridden by site config
-		MaxLogSizeMB:           viper.GetInt("MAX_LOG_SIZE_MB"),
+		DrupalWatchdogFormat: "json", // default, overridden by site config
+		MaxLogSizeMB:         viper.GetInt("MAX_LOG_SIZE_MB"),
+
+		// Application settings
 		LogLevel:               viper.GetString("LOG_LEVEL"),
 		EnableDatabase:         viper.GetBool("ENABLE_DATABASE"),
 		DatabasePath:           viper.GetString("DATABASE_PATH"),
@@ -259,7 +276,13 @@ func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
 
 // setDefaults sets default configuration values
 func setDefaults() {
+	// LLM Provider defaults
+	viper.SetDefault("LLM_PROVIDER", "anthropic")
 	viper.SetDefault("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+	viper.SetDefault("OLLAMA_BASE_URL", "http://localhost:11434")
+	viper.SetDefault("OLLAMA_MODEL", "llama3.3:latest")
+
+	// Log source defaults
 	viper.SetDefault("LOG_SOURCE_TYPE", "logwatch")
 	viper.SetDefault("LOGWATCH_OUTPUT_PATH", "/tmp/logwatch-output.txt")
 	// Drupal settings come from drupal-sites.json, not env vars
@@ -275,13 +298,9 @@ func setDefaults() {
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
-	// Validate Anthropic API Key
-	if c.AnthropicAPIKey == "" {
-		return fmt.Errorf("ANTHROPIC_API_KEY is required")
-	}
-	// Use constant-time comparison to prevent timing attacks (M-04 fix)
-	if !constantTimePrefixMatch(c.AnthropicAPIKey, "sk-ant-") {
-		return fmt.Errorf("ANTHROPIC_API_KEY must start with 'sk-ant-'")
+	// Validate LLM Provider
+	if err := c.validateLLMProvider(); err != nil {
+		return err
 	}
 
 	// Validate Telegram Bot Token
@@ -370,6 +389,48 @@ func constantTimePrefixMatch(s, prefix string) bool {
 	return subtle.ConstantTimeCompare([]byte(s[:len(prefix)]), []byte(prefix)) == 1
 }
 
+// validateLLMProvider validates LLM provider configuration
+func (c *Config) validateLLMProvider() error {
+	validProviders := map[string]bool{
+		"anthropic": true,
+		"ollama":    true,
+	}
+
+	if !validProviders[c.LLMProvider] {
+		return fmt.Errorf("LLM_PROVIDER must be 'anthropic' or 'ollama' (got: %s)", c.LLMProvider)
+	}
+
+	switch c.LLMProvider {
+	case "anthropic":
+		// Validate Anthropic API Key
+		if c.AnthropicAPIKey == "" {
+			return fmt.Errorf("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
+		}
+		// Use constant-time comparison to prevent timing attacks (M-04 fix)
+		if !constantTimePrefixMatch(c.AnthropicAPIKey, "sk-ant-") {
+			return fmt.Errorf("ANTHROPIC_API_KEY must start with 'sk-ant-'")
+		}
+		if c.ClaudeModel == "" {
+			return fmt.Errorf("CLAUDE_MODEL is required when LLM_PROVIDER=anthropic")
+		}
+
+	case "ollama":
+		// Validate Ollama settings
+		if c.OllamaModel == "" {
+			return fmt.Errorf("OLLAMA_MODEL is required when LLM_PROVIDER=ollama")
+		}
+		if c.OllamaBaseURL == "" {
+			return fmt.Errorf("OLLAMA_BASE_URL is required when LLM_PROVIDER=ollama")
+		}
+		// Validate URL format (basic check)
+		if !strings.HasPrefix(c.OllamaBaseURL, "http://") && !strings.HasPrefix(c.OllamaBaseURL, "https://") {
+			return fmt.Errorf("OLLAMA_BASE_URL must start with 'http://' or 'https://'")
+		}
+	}
+
+	return nil
+}
+
 // validateLogSource validates log source configuration based on LogSourceType
 func (c *Config) validateLogSource() error {
 	// Validate log source type
@@ -422,4 +483,22 @@ func (c *Config) IsDrupalWatchdog() bool {
 // IsLogwatch returns true if the log source type is logwatch
 func (c *Config) IsLogwatch() bool {
 	return c.LogSourceType == "logwatch"
+}
+
+// IsOllama returns true if the LLM provider is Ollama
+func (c *Config) IsOllama() bool {
+	return c.LLMProvider == "ollama"
+}
+
+// IsAnthropic returns true if the LLM provider is Anthropic
+func (c *Config) IsAnthropic() bool {
+	return c.LLMProvider == "anthropic"
+}
+
+// GetLLMModel returns the model name for the current LLM provider
+func (c *Config) GetLLMModel() string {
+	if c.IsOllama() {
+		return c.OllamaModel
+	}
+	return c.ClaudeModel
 }

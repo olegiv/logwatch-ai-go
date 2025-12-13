@@ -99,7 +99,10 @@ func run() int {
 		logEvent = logEvent.Str("site_name", cfg.DrupalSiteName)
 	}
 	logEvent.Msg("Starting Log AI Analyzer")
-	log.Info().Str("model", cfg.ClaudeModel).Msg("Configured AI model")
+	log.Info().
+		Str("provider", cfg.LLMProvider).
+		Str("model", cfg.GetLLMModel()).
+		Msg("Configured LLM")
 
 	// Run the analyzer
 	if err := runAnalyzer(ctx, cfg, log); err != nil {
@@ -156,18 +159,18 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		Str("username", botInfo["username"].(string)).
 		Msg("Telegram bot initialized")
 
-	// 3. Initialize Claude AI client
-	proxyURL := cfg.GetProxyURL(true) // HTTPS proxy for API calls
-	claudeClient, err := ai.NewClient(cfg.AnthropicAPIKey, cfg.ClaudeModel, proxyURL, cfg.AITimeoutSeconds, cfg.AIMaxTokens)
+	// 3. Initialize LLM client based on provider
+	llmClient, err := createLLMClient(ctx, cfg, log)
 	if err != nil {
-		return fmt.Errorf("failed to initialize Claude client: %w", err)
+		return fmt.Errorf("failed to initialize LLM client: %w", err)
 	}
 
-	modelInfo := claudeClient.GetModelInfo()
+	modelInfo := llmClient.GetModelInfo()
 	log.Info().
+		Str("provider", llmClient.GetProviderName()).
 		Str("model", modelInfo["model"].(string)).
 		Int("max_tokens", modelInfo["max_tokens"].(int)).
-		Msg("Claude client initialized")
+		Msg("LLM client initialized")
 
 	// 4. Initialize log source based on configuration
 	logSource, err := createLogSource(cfg)
@@ -236,13 +239,14 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 	systemPrompt := logSource.PromptBuilder.GetSystemPrompt()
 	userPrompt := logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext)
 
-	// Analyze with Claude
+	// Analyze with LLM
 	log.Info().
 		Str("log_type", logSource.PromptBuilder.GetLogType()).
-		Msg("Analyzing with Claude AI...")
-	analysis, stats, err := claudeClient.Analyze(ctx, systemPrompt, userPrompt)
+		Str("provider", llmClient.GetProviderName()).
+		Msg("Analyzing logs...")
+	analysis, stats, err := llmClient.Analyze(ctx, systemPrompt, userPrompt)
 	if err != nil {
-		return fmt.Errorf("claude analysis failed: %w", err)
+		return fmt.Errorf("LLM analysis failed: %w", err)
 	}
 
 	log.Info().
@@ -313,6 +317,45 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		Msg("All operations completed successfully")
 
 	return nil
+}
+
+// createLLMClient creates the appropriate LLM client based on configuration
+func createLLMClient(ctx context.Context, cfg *config.Config, log *logging.SecureLogger) (ai.Provider, error) {
+	switch cfg.LLMProvider {
+	case "anthropic":
+		proxyURL := cfg.GetProxyURL(true) // HTTPS proxy for API calls
+		client, err := ai.NewClient(cfg.AnthropicAPIKey, cfg.ClaudeModel, proxyURL, cfg.AITimeoutSeconds, cfg.AIMaxTokens)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Anthropic client: %w", err)
+		}
+		return client, nil
+
+	case "ollama":
+		client, err := ai.NewOllamaClient(ai.OllamaConfig{
+			BaseURL:        cfg.OllamaBaseURL,
+			Model:          cfg.OllamaModel,
+			TimeoutSeconds: cfg.AITimeoutSeconds,
+			MaxTokens:      cfg.AIMaxTokens,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Ollama client: %w", err)
+		}
+
+		// Check connection and model availability
+		log.Info().
+			Str("base_url", cfg.OllamaBaseURL).
+			Str("model", cfg.OllamaModel).
+			Msg("Checking Ollama connection...")
+
+		if err := client.CheckConnection(ctx); err != nil {
+			return nil, fmt.Errorf("Ollama connection check failed: %w", err)
+		}
+
+		return client, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported LLM provider: %s", cfg.LLMProvider)
+	}
 }
 
 // createLogSource creates the appropriate log source based on configuration

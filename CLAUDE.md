@@ -4,15 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Logwatch AI Analyzer is an intelligent system log analyzer that uses Claude AI to analyze log reports and send actionable insights via Telegram. This is a Go port of the original Node.js implementation, optimized for single-binary deployment with no runtime dependencies.
+Logwatch AI Analyzer is an intelligent system log analyzer that uses LLM (Large Language Model) to analyze log reports and send actionable insights via Telegram. This is a Go port of the original Node.js implementation, optimized for single-binary deployment with no runtime dependencies.
 
 **Supported Log Sources:**
 - **Logwatch** - Linux system log aggregation and analysis
 - **Drupal Watchdog** - PHP/Drupal application log analysis (JSON or drush export format)
 
+**Supported LLM Providers:**
+- **Anthropic Claude** - Cloud-based AI (Claude Sonnet 4.5 default)
+- **Ollama** - Local LLM inference (llama3.3:latest recommended for high-RAM systems)
+
 **Key Technologies:**
 - Go 1.25+ with pure Go SQLite (modernc.org/sqlite)
-- Anthropic Claude Sonnet 4.5 API
+- Anthropic Claude API or Ollama local inference
 - Telegram Bot API
 - SQLite for analysis history
 
@@ -72,7 +76,7 @@ The project follows `golang-standards/project-layout`:
 ```
 cmd/analyzer/           - Main application entry point (main.go)
 internal/              - Private application packages (not importable)
-  ├── ai/             - Claude AI client, prompts, response parsing
+  ├── ai/             - LLM clients (Anthropic, Ollama), prompts, response parsing
   ├── analyzer/       - Multi-source abstraction (interfaces, registry)
   ├── config/         - Configuration loading (viper + .env)
   ├── drupal/         - Drupal watchdog reader, preprocessor, prompts
@@ -221,14 +225,40 @@ CREATE INDEX idx_source_site ON summaries(log_source_type, site_name);
 - Connection timeout: 5s busy timeout prevents indefinite waits on locks
 - Connection pool: Single connection (optimal for SQLite), 30-min lifetime
 
-**8. Claude AI Integration (internal/ai/client.go)**
+**8. LLM Provider Integration (internal/ai/)**
+
+The `ai` package provides a `Provider` interface for pluggable LLM backends:
+```go
+type Provider interface {
+    Analyze(ctx context.Context, systemPrompt, userPrompt string) (*Analysis, *Stats, error)
+    GetModelInfo() map[string]interface{}
+    GetProviderName() string
+}
+```
+
+**Supported Providers:**
+
+*Anthropic Claude (internal/ai/client.go):*
 - Retry logic: 3 attempts with exponential backoff (2^n seconds)
 - Prompt caching: System prompt cached for 90% cost reduction on subsequent calls
 - Cost calculation: Uses Sonnet 4.5 pricing ($3/MTok input, $15/MTok output)
+- HTTP proxy support for corporate environments
+
+*Ollama Local LLM (internal/ai/ollama.go):*
+- Retry logic: 3 attempts with exponential backoff (2^n seconds)
+- Connection check: Verifies Ollama is running and model is available
+- Zero cost: Local inference has no monetary cost
+- JSON format mode: Requests structured JSON output
+- Recommended models for high-RAM systems (96GB+):
+  - `llama3.3:latest` - Best quality for reasoning/analysis
+  - `qwen2.5:72b` - Excellent for technical analysis
+  - `deepseek-coder-v2:33b` - Faster, good quality
+
+**Common Settings (both providers):**
 - Context: Includes last 7 days of analysis history
 - Configurable timeout: `AI_TIMEOUT_SECONDS` (default: 120, range: 30-600)
 - Configurable max tokens: `AI_MAX_TOKENS` (default: 8000, range: 1000-16000)
-- Input sanitization: Logwatch content filtered for prompt injection attempts
+- Input sanitization: Log content filtered for prompt injection attempts
 
 **9. Telegram Notifications (internal/notification/telegram.go)**
 - **Archive channel**: Always receives full analysis report
@@ -241,9 +271,22 @@ CREATE INDEX idx_source_site ON summaries(log_source_type, site_name);
 ## Important Implementation Notes
 
 ### Configuration Validation Rules
-- `ANTHROPIC_API_KEY` must start with `sk-ant-`
+
+**LLM Provider Settings:**
+- `LLM_PROVIDER`: `anthropic` (default) or `ollama`
+- When `LLM_PROVIDER=anthropic`:
+  - `ANTHROPIC_API_KEY` is required and must start with `sk-ant-`
+  - `CLAUDE_MODEL` is required (default: `claude-sonnet-4-5-20250929`)
+- When `LLM_PROVIDER=ollama`:
+  - `OLLAMA_BASE_URL` is required (default: `http://localhost:11434`)
+  - `OLLAMA_MODEL` is required (default: `llama3.3:latest`)
+  - Ollama must be running and the model must be available (run `ollama pull <model>` to download)
+
+**Telegram Settings:**
 - `TELEGRAM_BOT_TOKEN` must match format `number:token`
 - `TELEGRAM_CHANNEL_ARCHIVE_ID` must be < -100 (supergroup/channel ID)
+
+**General Settings:**
 - `MAX_LOG_SIZE_MB` range: 1-100
 - `LOG_LEVEL`: debug, info, warn, error
 - `LOG_SOURCE_TYPE`: `logwatch` (default) or `drupal_watchdog`
@@ -443,6 +486,7 @@ Previous N analysis summaries:
 {status_emoji} Status: {status}
 
 📋 Execution Stats
+• LLM: {model} ({provider})
 • Critical Issues: N
 • Warnings: N
 • Recommendations: N
@@ -468,6 +512,8 @@ Previous N analysis summaries:
 
 - `{Source}` is "Logwatch" or "Drupal Watchdog" based on `LOG_SOURCE_TYPE`
 - `{site_name}` shown only for multi-site Drupal deployments
+- `{model}` is the LLM model name (e.g., "claude-sonnet-4-5-20250929" or "llama3.3:latest")
+- `{provider}` is "Anthropic" or "Ollama" based on `LLM_PROVIDER`
 
 ### Status Emoji Mapping
 - `Good` → 🟢
@@ -621,6 +667,8 @@ stats, err := store.GetStatistics(filter)  // Pass nil for all sources
 
 ## Cost Optimization
 
+### Using Anthropic Claude (Cloud)
+
 Typical daily costs with default settings:
 - **First run**: $0.016-0.022 (cache creation)
 - **Cached runs**: $0.011-0.015 (cache hits)
@@ -632,6 +680,39 @@ To reduce costs further:
 2. Reduce historical context days (currently 7)
 3. Adjust section priority classification
 4. Use smaller model (not recommended - quality drop)
+
+### Using Ollama (Local) - Zero Cost
+
+For development or cost-sensitive deployments, use Ollama for **free local inference**:
+
+```bash
+# Install Ollama (macOS)
+brew install ollama
+
+# Pull recommended model (requires ~40GB disk, ~45GB RAM)
+ollama pull llama3.3:latest
+
+# Or use a smaller model for lower-RAM systems
+ollama pull llama3.2:8b
+
+# Start Ollama server
+ollama serve
+```
+
+Configure in `.env`:
+```
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.3:latest
+```
+
+**Trade-offs:**
+- ✅ Zero cost - unlimited analysis
+- ✅ Data privacy - logs never leave your machine
+- ✅ No rate limits
+- ⚠️ Slower than cloud (depends on hardware)
+- ⚠️ Quality varies by model
+- ⚠️ Requires powerful hardware for large models
 
 ## Claude Code Extensions
 

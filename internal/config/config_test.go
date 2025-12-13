@@ -16,6 +16,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Valid config",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -33,6 +35,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Missing Anthropic API Key",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
 				LogSourceType:          "logwatch",
@@ -46,6 +50,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Invalid Anthropic API Key format",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "invalid-key",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -60,6 +66,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Missing Telegram Bot Token",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramArchiveChannel: -1001234567890,
 				LogSourceType:          "logwatch",
@@ -73,6 +81,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Invalid Telegram Bot Token format",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "invalid-token",
 				TelegramArchiveChannel: -1001234567890,
@@ -87,6 +97,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Missing Telegram Archive Channel",
 			config: &Config{
+				LLMProvider:        "anthropic",
+				ClaudeModel:        "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:    "sk-ant-test-key-1234567890",
 				TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				LogSourceType:      "logwatch",
@@ -100,6 +112,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Invalid Telegram Archive Channel ID",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -99,
@@ -114,6 +128,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Invalid Telegram Alerts Channel ID",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -129,6 +145,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Missing logwatch output path",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -142,6 +160,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "MaxLogSizeMB too small",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -156,6 +176,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "MaxLogSizeMB too large",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -170,6 +192,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Invalid log level",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -184,6 +208,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Valid log level - debug",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -199,6 +225,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Valid log level - warn",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -214,6 +242,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Valid log level - error",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -229,6 +259,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "MaxPreprocessingTokens too small",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -245,6 +277,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "Preprocessing disabled with small tokens - valid",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -262,6 +296,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "With valid alerts channel",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -278,6 +314,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "AI timeout too small",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -294,6 +332,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "AI timeout too large",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -310,6 +350,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "AI max tokens too small",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -326,6 +368,8 @@ func TestValidate(t *testing.T) {
 		{
 			name: "AI max tokens too large",
 			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -549,6 +593,8 @@ func TestTelegramTokenRegex(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			config := &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       tt.token,
 				TelegramArchiveChannel: -1001234567890,
@@ -556,6 +602,8 @@ func TestTelegramTokenRegex(t *testing.T) {
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
+				AITimeoutSeconds:       120,
+				AIMaxTokens:            8000,
 			}
 
 			err := config.Validate()
@@ -579,6 +627,8 @@ func TestLogLevelCaseInsensitive(t *testing.T) {
 	for _, level := range tests {
 		t.Run(level, func(t *testing.T) {
 			config := &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-sonnet-4-5-20250929",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -710,6 +760,8 @@ func TestConstantTimePrefixMatch(t *testing.T) {
 func TestValidateLogSource(t *testing.T) {
 	baseConfig := func() *Config {
 		return &Config{
+			LLMProvider:            "anthropic",
+			ClaudeModel:            "claude-sonnet-4-5-20250929",
 			AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 			TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 			TelegramArchiveChannel: -1001234567890,
