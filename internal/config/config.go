@@ -21,9 +21,19 @@ type Config struct {
 	TelegramArchiveChannel int64
 	TelegramAlertsChannel  int64 // Optional
 
-	// Paths
+	// Log Source Selection
+	LogSourceType string // "logwatch" or "drupal_watchdog"
+
+	// Logwatch Settings (used when LogSourceType = "logwatch")
 	LogwatchOutputPath string
-	MaxLogSizeMB       int
+
+	// Drupal Watchdog Settings (used when LogSourceType = "drupal_watchdog")
+	DrupalWatchdogPath   string // Path to watchdog export file
+	DrupalWatchdogFormat string // "json" or "drush"
+	DrupalSiteName       string // Optional: site identifier for multi-site
+
+	// Common Log Settings
+	MaxLogSizeMB int
 
 	// Application
 	LogLevel       string
@@ -63,7 +73,11 @@ func Load() (*Config, error) {
 		TelegramBotToken:       viper.GetString("TELEGRAM_BOT_TOKEN"),
 		TelegramArchiveChannel: viper.GetInt64("TELEGRAM_CHANNEL_ARCHIVE_ID"),
 		TelegramAlertsChannel:  viper.GetInt64("TELEGRAM_CHANNEL_ALERTS_ID"),
+		LogSourceType:          viper.GetString("LOG_SOURCE_TYPE"),
 		LogwatchOutputPath:     viper.GetString("LOGWATCH_OUTPUT_PATH"),
+		DrupalWatchdogPath:     viper.GetString("DRUPAL_WATCHDOG_PATH"),
+		DrupalWatchdogFormat:   viper.GetString("DRUPAL_WATCHDOG_FORMAT"),
+		DrupalSiteName:         viper.GetString("DRUPAL_SITE_NAME"),
 		MaxLogSizeMB:           viper.GetInt("MAX_LOG_SIZE_MB"),
 		LogLevel:               viper.GetString("LOG_LEVEL"),
 		EnableDatabase:         viper.GetBool("ENABLE_DATABASE"),
@@ -87,7 +101,11 @@ func Load() (*Config, error) {
 // setDefaults sets default configuration values
 func setDefaults() {
 	viper.SetDefault("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+	viper.SetDefault("LOG_SOURCE_TYPE", "logwatch")
 	viper.SetDefault("LOGWATCH_OUTPUT_PATH", "/tmp/logwatch-output.txt")
+	viper.SetDefault("DRUPAL_WATCHDOG_PATH", "/tmp/drupal-watchdog.json")
+	viper.SetDefault("DRUPAL_WATCHDOG_FORMAT", "json")
+	viper.SetDefault("DRUPAL_SITE_NAME", "")
 	viper.SetDefault("MAX_LOG_SIZE_MB", 10)
 	viper.SetDefault("LOG_LEVEL", "info")
 	viper.SetDefault("ENABLE_DATABASE", true)
@@ -131,9 +149,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("TELEGRAM_CHANNEL_ALERTS_ID must be a supergroup/channel ID (starts with -100)")
 	}
 
-	// Validate logwatch output path
-	if c.LogwatchOutputPath == "" {
-		return fmt.Errorf("LOGWATCH_OUTPUT_PATH is required")
+	// Validate log source type and source-specific settings
+	if err := c.validateLogSource(); err != nil {
+		return err
 	}
 
 	// Validate max log size
@@ -193,4 +211,58 @@ func constantTimePrefixMatch(s, prefix string) bool {
 	}
 	// Compare only the prefix portion using constant-time comparison
 	return subtle.ConstantTimeCompare([]byte(s[:len(prefix)]), []byte(prefix)) == 1
+}
+
+// validateLogSource validates log source configuration based on LogSourceType
+func (c *Config) validateLogSource() error {
+	// Validate log source type
+	validSourceTypes := map[string]bool{
+		"logwatch":        true,
+		"drupal_watchdog": true,
+	}
+
+	if !validSourceTypes[c.LogSourceType] {
+		return fmt.Errorf("LOG_SOURCE_TYPE must be 'logwatch' or 'drupal_watchdog' (got: %s)", c.LogSourceType)
+	}
+
+	// Validate source-specific settings
+	switch c.LogSourceType {
+	case "logwatch":
+		if c.LogwatchOutputPath == "" {
+			return fmt.Errorf("LOGWATCH_OUTPUT_PATH is required when LOG_SOURCE_TYPE=logwatch")
+		}
+	case "drupal_watchdog":
+		if c.DrupalWatchdogPath == "" {
+			return fmt.Errorf("DRUPAL_WATCHDOG_PATH is required when LOG_SOURCE_TYPE=drupal_watchdog")
+		}
+		validFormats := map[string]bool{
+			"json":  true,
+			"drush": true,
+		}
+		if !validFormats[c.DrupalWatchdogFormat] {
+			return fmt.Errorf("DRUPAL_WATCHDOG_FORMAT must be 'json' or 'drush' (got: %s)", c.DrupalWatchdogFormat)
+		}
+	}
+
+	return nil
+}
+
+// GetLogSourcePath returns the path to the log source file based on LogSourceType
+func (c *Config) GetLogSourcePath() string {
+	switch c.LogSourceType {
+	case "drupal_watchdog":
+		return c.DrupalWatchdogPath
+	default:
+		return c.LogwatchOutputPath
+	}
+}
+
+// IsDrupalWatchdog returns true if the log source type is drupal_watchdog
+func (c *Config) IsDrupalWatchdog() bool {
+	return c.LogSourceType == "drupal_watchdog"
+}
+
+// IsLogwatch returns true if the log source type is logwatch
+func (c *Config) IsLogwatch() bool {
+	return c.LogSourceType == "logwatch"
 }
