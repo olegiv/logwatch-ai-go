@@ -7,28 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-
-- **H-02**: Tightened logwatch output file permissions from 644 to 640 to prevent world-readable sensitive system information
-- **H-03**: Changed database directory permissions from 0755 to 0700 for secure storage of historical analysis data
-- **M-03**: Added proxy URL scheme validation to only allow http/https schemes, preventing potential traffic redirection
-- **M-05**: Added JSON response size limit (1MB) to prevent memory exhaustion from malicious API responses
-- **M-06**: Replaced greedy regex with balanced brace matching for more reliable JSON extraction from API responses
-- **L-05**: Replaced fmt.Printf with proper log.Printf for consistent error handling in storage package
-
 ### Added
 
-- Security audit report in `.audit/SECURITY_AUDIT_REPORT.md`
-- Tests for proxy URL scheme validation (socks5, ftp, file schemes)
-- Tests for JSON extraction function (`extractJSON`)
-- Tests for JSON response size limits
+#### Drupal Watchdog Analysis
+- New log source type for PHP/Drupal application log analysis
+- `internal/drupal/` package with reader, preprocessor, and prompt builder
+- Support for JSON and drush export formats (`DRUPAL_WATCHDOG_FORMAT`)
+- RFC 5424 severity level handling (Emergency through Debug)
+- Priority-based preprocessing for Drupal-specific keywords
+
+#### Multi-Site Drupal Configuration
+- Centralized configuration via `drupal-sites.json`
+- Site-specific settings: drupal_root, watchdog_path, format, min_severity, watchdog_limit
+- CLI flags: `-drupal-site`, `-drupal-sites-config`, `-list-drupal-sites`
+- Automatic site config file discovery in multiple locations
+
+#### CLI Enhancements
+- `-version` flag for version information with build details
+- `-help` flag for comprehensive usage information
+- Configuration overrides via CLI flags for all major settings
+- Unified `PrintUsage` function for consistent help output
+
+#### Log Source Abstraction Layer
+- `internal/analyzer/` package with pluggable architecture
+- `LogReader`, `Preprocessor`, `PromptBuilder` interfaces
+- Registry pattern for extensible log source support
+
+#### Database Schema v2
+- Added `log_source_type` column for multi-source support
+- Added `site_name` column for multi-site filtering
+- Automatic migration from v1 to v2
+- Source-filtered queries for historical context
+
+#### Scripts
+- `scripts/generate-drupal-watchdog.sh` for exporting Drupal watchdog logs
+- Multi-site support with `--site` and `--list-sites` options
+- Configurable severity filtering and entry limits
+
+#### Telegram Notifications
+- Log source-specific headers (Logwatch Analysis vs Drupal Watchdog Analysis)
+- Site name display for multi-site deployments
+
+#### Claude Code Extensions
+- Specialized agents: go-dev, build-manager, deploy-assistant, db-manager, api-tester, cost-optimizer
+- Slash commands for common workflows: /test, /build, /deploy-prep, /db-stats, /cost-report
 
 ### Changed
 
-- `scripts/generate-logwatch.sh`: File permissions changed from 644 to 640
-- `internal/storage/sqlite.go`: Directory permissions changed from 0755 to 0700
-- `internal/ai/client.go`: Added scheme validation for proxy URLs
-- `internal/ai/prompt.go`: Improved JSON parsing with size limits and balanced brace matching
+- Go version requirement updated to 1.25+
+- Schema migration logic refactored to use loop with switch for sequential execution
+- `PrintUsage` extracted for unified CLI usage handling
+- Dependencies updated (zerolog promoted to direct dependency)
+
+### Fixed
+
+- Tests switched from `t.Error` to `t.Fatal` for proper test failure handling
+- Time range filtering in Drupal watchdog export script
+
+## [0.3.0] - 2025-12-09
+
+### Security
+
+#### Medium Severity
+- **M-01**: Sanitize credentials in error messages to prevent accidental exposure in logs
+- **M-02**: Add secure logger wrapper with automatic credential filtering (API keys, tokens, passwords)
+- **M-04**: Use constant-time comparison for sensitive string comparisons
+
+#### Low Severity
+- **L-01**: Add Telegram rate limiting (1s between messages, 429 detection with retry)
+- **L-02**: Make AI settings configurable via environment variables (`AI_TIMEOUT_SECONDS`, `AI_MAX_TOKENS`)
+- **L-03**: Add prompt injection sanitization for logwatch content before Claude analysis
+- **L-04**: Add database connection timeout (5s busy timeout) to prevent indefinite waits
+
+#### Infrastructure Security
+- Fix crypto/x509 security vulnerabilities in dependencies
+- Harden file permissions in install script (restrictive umask, proper ownership)
+
+### Fixed
+
+- Fix logger resource leak in main function (proper cleanup on all exit paths)
+- Fix resource leak in storage initialization (close connection on error)
+- Fix static analysis warnings in tests
+- Fix error handling in deferred cleanup operations
+
+### Changed
+
+- Simplify regex patterns in error sanitizer for better maintainability
+- Refactor duplicated test comparison code into helper functions
+- Simplify Analysis struct comparison helpers
+
+### Added
+
+- Comprehensive troubleshooting guide (`docs/TROUBLESHOOTING.md`)
+- CI/CD workflow badges to README
+- Contributor Covenant Code of Conduct
+- Updated issue templates for better bug reports
+
+### Dependencies
+
+- Update Go dependencies to latest versions
+- Update go-logger dependency to tagged version
 
 ## [0.2.0] - 2025-11-15
 
@@ -177,6 +255,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[0.2.0]: https://github.com/olegiv/logwatch-ai-go/releases/tag/v0.2.0
-[0.1.0]: https://github.com/olegiv/logwatch-ai-go/releases/tag/v0.1.0
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.0.0...v0.1.0
 [0.0.0]: https://github.com/olegiv/logwatch-ai-go/releases/tag/v0.0.0
