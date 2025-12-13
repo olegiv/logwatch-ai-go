@@ -436,9 +436,10 @@ Previous N analysis summaries:
 
 ### Telegram Message Structure
 ```
-🔍 Logwatch Analysis Report
+🔍 {Source} Report[ - {site_name}]
 🖥 Host: {hostname}
 📅 Date: {timestamp}
+🌍 Timezone: {timezone}
 {status_emoji} Status: {status}
 
 📋 Execution Stats
@@ -447,15 +448,26 @@ Previous N analysis summaries:
 • Recommendations: N
 • Cost: $X.XXXX
 • Duration: X.XXs
+• Cache Read: N tokens (if cache hit)
 
 📊 Summary
 {summary_text}
 
-{Critical Issues section if any}
-{Warnings section if any}
-{Recommendations section if any}
-{Key Metrics section if any}
+🔴 Critical Issues (N) - if any
+{numbered list}
+
+⚡ Warnings (N) - if any
+{numbered list}
+
+💡 Recommendations - if any
+{numbered list}
+
+📈 Key Metrics - if any
+{key-value pairs}
 ```
+
+- `{Source}` is "Logwatch" or "Drupal Watchdog" based on `LOG_SOURCE_TYPE`
+- `{site_name}` shown only for multi-site Drupal deployments
 
 ### Status Emoji Mapping
 - `Good` → 🟢

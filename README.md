@@ -402,9 +402,10 @@ logwatch-ai-go/
 ## Telegram Notification Format
 
 ```
-🔍 Logwatch Analysis Report
+🔍 Logwatch Report
 🖥 Host: server01
 📅 Date: 2025-11-12 02:15:00
+🌍 Timezone: Europe/London
 🟢 Status: Good
 
 📋 Execution Stats
@@ -413,6 +414,7 @@ logwatch-ai-go/
 • Recommendations: 3
 • Cost: $0.0154
 • Duration: 12.62s
+• Cache Read: 1234 tokens
 
 📊 Summary
 System is operating normally with minor warnings...
@@ -429,6 +431,11 @@ System is operating normally with minor warnings...
 • Failed Logins: 5
 • Disk Usage: 85% on /var
 • Error Count: 0
+```
+
+For Drupal Watchdog with multi-site, the header shows site name:
+```
+🔍 Drupal Watchdog Report - Production Site
 ```
 
 ## Differences from Node.js Version
