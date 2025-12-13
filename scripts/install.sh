@@ -20,6 +20,12 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Check for jq (required for Drupal watchdog multi-site support)
+if ! command -v jq &> /dev/null; then
+    echo_warn "jq is not installed. Required for Drupal watchdog multi-site support."
+    echo_warn "Install with: apt-get install jq (Debian/Ubuntu) or brew install jq / port install jq (macOS)"
+fi
+
 echo_info "Installing Logwatch AI Analyzer to $INSTALL_DIR"
 
 # Create installation directory with secure permissions

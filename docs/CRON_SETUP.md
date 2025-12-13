@@ -16,6 +16,7 @@ The 15-minute delay ensures logwatch has finished generating the report before a
 - Logwatch installed on the system
 - logwatch-ai-go installed (preferably to `/opt/logwatch-ai`)
 - `.env` file configured with API keys
+- For Drupal watchdog: `jq` installed (`apt-get install jq` or `brew install jq` / `port install jq`)
 
 ## Step 1: Root Cron (Generate Logwatch)
 

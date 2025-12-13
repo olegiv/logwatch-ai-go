@@ -136,6 +136,12 @@ See [docs/CRON_SETUP.md](docs/CRON_SETUP.md) for detailed setup instructions.
 
 To analyze Drupal watchdog logs instead of logwatch:
 
+**Prerequisites:**
+- `jq` installed (required for multi-site configuration parsing)
+  - Debian/Ubuntu: `apt-get install jq`
+  - macOS: `brew install jq` or `port install jq`
+- drush installed in Drupal project
+
 1. **Configure drupal-sites.json** (see `configs/drupal-sites.json.example`):
 ```json
 {

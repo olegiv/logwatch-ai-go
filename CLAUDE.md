@@ -249,6 +249,7 @@ CREATE INDEX idx_source_site ON summaries(log_source_type, site_name);
 - `LOG_SOURCE_TYPE`: `logwatch` (default) or `drupal_watchdog`
 - When `LOG_SOURCE_TYPE=logwatch`: `LOGWATCH_OUTPUT_PATH` is required
 - When `LOG_SOURCE_TYPE=drupal_watchdog`:
+  - `jq` must be installed (`apt-get install jq` or `brew install jq` / `port install jq`)
   - `drupal-sites.json` is required (see configs/drupal-sites.json.example)
   - Site must be specified via `-drupal-site` flag or `default_site` in config
 
