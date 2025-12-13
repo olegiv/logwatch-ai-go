@@ -24,11 +24,40 @@ const (
 	exitFailure = 1
 )
 
+// Version information - injected at build time via ldflags
+var (
+	version   = "dev"
+	buildTime = "unknown"
+	gitCommit = "unknown"
+)
+
 func main() {
 	os.Exit(run())
 }
 
 func run() int {
+	// Parse CLI arguments first
+	cli := config.ParseCLI()
+
+	// Handle -help flag
+	if cli.ShowHelp {
+		// flag.Usage() is called automatically by flag.Parse() when -help is used
+		// but we handle it explicitly here for consistency
+		return exitSuccess
+	}
+
+	// Handle -version flag
+	if cli.ShowVersion {
+		fmt.Printf("logwatch-analyzer %s\n", version)
+		if gitCommit != "unknown" {
+			fmt.Printf("  commit: %s\n", gitCommit)
+		}
+		if buildTime != "unknown" {
+			fmt.Printf("  built:  %s\n", buildTime)
+		}
+		return exitSuccess
+	}
+
 	// Setup signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -40,8 +69,8 @@ func run() int {
 		cancel()
 	}()
 
-	// Load configuration
-	cfg, err := config.Load()
+	// Load configuration with CLI overrides
+	cfg, err := config.LoadWithCLI(cli)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
 		return exitFailure

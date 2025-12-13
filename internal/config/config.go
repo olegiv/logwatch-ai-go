@@ -2,13 +2,50 @@ package config
 
 import (
 	"crypto/subtle"
+	"flag"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
+
+// CLIOptions holds command-line argument overrides
+type CLIOptions struct {
+	SourceType  string // -source-type: log source type (logwatch, drupal_watchdog)
+	SourcePath  string // -source-path: path to log source file
+	ShowHelp    bool   // -help: show usage
+	ShowVersion bool   // -version: show version
+}
+
+// ParseCLI parses command-line arguments and returns CLIOptions
+func ParseCLI() *CLIOptions {
+	opts := &CLIOptions{}
+
+	flag.StringVar(&opts.SourceType, "source-type", "", "Log source type: logwatch, drupal_watchdog")
+	flag.StringVar(&opts.SourcePath, "source-path", "", "Path to log source file (overrides LOGWATCH_OUTPUT_PATH or DRUPAL_WATCHDOG_PATH)")
+	flag.BoolVar(&opts.ShowHelp, "help", false, "Show usage information")
+	flag.BoolVar(&opts.ShowVersion, "version", false, "Show version information")
+
+	// Custom usage message
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Logwatch AI Analyzer - Intelligent log analysis with Claude AI\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Options:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  %s -source-type logwatch\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -source-path /tmp/watchdog.json\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\nEnvironment variables can be set in .env file or exported directly.\n")
+		fmt.Fprintf(os.Stderr, "CLI arguments override environment variables.\n")
+	}
+
+	flag.Parse()
+
+	return opts
+}
 
 // Config holds all application configuration
 type Config struct {
@@ -55,7 +92,14 @@ type Config struct {
 
 // Load loads configuration from .env file and environment variables
 // Priority: .env file > OS environment variables
+// For CLI overrides, use LoadWithCLI instead
 func Load() (*Config, error) {
+	return LoadWithCLI(nil)
+}
+
+// LoadWithCLI loads configuration with CLI argument overrides
+// Priority: CLI args > .env file > OS environment variables
+func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 	// Set up viper first to read OS environment variables
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -88,6 +132,22 @@ func Load() (*Config, error) {
 		HTTPSProxy:             viper.GetString("HTTPS_PROXY"),
 		AITimeoutSeconds:       viper.GetInt("AI_TIMEOUT_SECONDS"),
 		AIMaxTokens:            viper.GetInt("AI_MAX_TOKENS"),
+	}
+
+	// Apply CLI overrides (highest priority)
+	if cli != nil {
+		if cli.SourceType != "" {
+			config.LogSourceType = cli.SourceType
+		}
+		if cli.SourcePath != "" {
+			// Apply source path based on source type
+			switch config.LogSourceType {
+			case "drupal_watchdog":
+				config.DrupalWatchdogPath = cli.SourcePath
+			default:
+				config.LogwatchOutputPath = cli.SourcePath
+			}
+		}
 	}
 
 	// Validate configuration
