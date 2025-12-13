@@ -7,29 +7,37 @@ INSTALL_DIR=/opt/logwatch-ai
 GO=go
 GOFLAGS=-v
 
+# Version info from git
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+# Linker flags for version injection
+LDFLAGS_VERSION=-X main.version=$(VERSION) -X main.gitCommit=$(GIT_COMMIT) -X main.buildTime=$(BUILD_TIME)
+
 # Build the application
 build:
-	@echo "Building $(BINARY_NAME)..."
+	@echo "Building $(BINARY_NAME) $(VERSION)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
+	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS_VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
 
 # Build with optimizations (smaller binary)
 build-prod:
-	@echo "Building $(BINARY_NAME) for production..."
+	@echo "Building $(BINARY_NAME) $(VERSION) for production..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -ldflags="-s -w" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
+	$(GO) build -ldflags="-s -w $(LDFLAGS_VERSION)" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
 
 # Build for Linux AMD64 (Debian 12/Ubuntu 24)
 build-linux-amd64:
-	@echo "Building $(BINARY_NAME) for Linux AMD64..."
+	@echo "Building $(BINARY_NAME) $(VERSION) for Linux AMD64..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-s -w" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/analyzer
+	GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-s -w $(LDFLAGS_VERSION)" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/analyzer
 
 # Build for macOS ARM64 (Apple Silicon)
 build-darwin-arm64:
-	@echo "Building $(BINARY_NAME) for macOS ARM64..."
+	@echo "Building $(BINARY_NAME) $(VERSION) for macOS ARM64..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=darwin GOARCH=arm64 $(GO) build -ldflags="-s -w" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/analyzer
+	GOOS=darwin GOARCH=arm64 $(GO) build -ldflags="-s -w $(LDFLAGS_VERSION)" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/analyzer
 
 # Build for all platforms
 build-all-platforms: build-linux-amd64 build-darwin-arm64

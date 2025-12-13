@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Logwatch AI Analyzer is an intelligent system log analyzer that uses Claude AI to analyze logwatch reports and send actionable insights via Telegram. This is a Go port of the original Node.js implementation, optimized for single-binary deployment with no runtime dependencies.
+Logwatch AI Analyzer is an intelligent system log analyzer that uses Claude AI to analyze log reports and send actionable insights via Telegram. This is a Go port of the original Node.js implementation, optimized for single-binary deployment with no runtime dependencies.
+
+**Supported Log Sources:**
+- **Logwatch** - Linux system log aggregation and analysis
+- **Drupal Watchdog** - PHP/Drupal application log analysis (JSON or drush export format)
 
 **Key Technologies:**
 - Go 1.25+ with pure Go SQLite (modernc.org/sqlite)
@@ -69,14 +73,17 @@ The project follows `golang-standards/project-layout`:
 cmd/analyzer/           - Main application entry point (main.go)
 internal/              - Private application packages (not importable)
   ├── ai/             - Claude AI client, prompts, response parsing
+  ├── analyzer/       - Multi-source abstraction (interfaces, registry)
   ├── config/         - Configuration loading (viper + .env)
+  ├── drupal/         - Drupal watchdog reader, preprocessor, prompts
   ├── errors/         - Error sanitization (credential redaction)
   ├── logging/        - Secure logger wrapper (credential filtering)
-  ├── logwatch/       - Log reading, preprocessing, token estimation
+  ├── logwatch/       - Logwatch reader, preprocessing, token estimation
   ├── notification/   - Telegram client and message formatting
   └── storage/        - SQLite operations (summaries table)
 scripts/              - Shell scripts (install.sh, generate-logwatch.sh)
 configs/              - Configuration templates (.env.example)
+testdata/             - Test fixtures (logwatch samples, drupal watchdog JSON)
 ```
 
 **External Dependencies:**
@@ -87,18 +94,27 @@ configs/              - Configuration templates (.env.example)
 **1. Component Initialization Flow (cmd/analyzer/main.go)**
 ```
 main() → run() → runAnalyzer()
-  1. Load config (internal/config)
-  2. Initialize secure logger (internal/logging wraps go-logger)
-  3. Initialize storage (internal/storage) - SQLite connection
-  4. Initialize Telegram client (internal/notification)
-  5. Initialize Claude client (internal/ai)
-  6. Initialize logwatch reader (internal/logwatch)
-  7. Read & preprocess logs
-  8. Retrieve historical context from DB
-  9. Analyze with Claude
-  10. Save to database
-  11. Send Telegram notifications
-  12. Cleanup old summaries (>90 days)
+  1. Parse CLI arguments (ParseCLI)
+  2. Handle -help, -version, -list-drupal-sites flags
+  3. Load config with CLI overrides (LoadWithCLI)
+     - Load .env file
+     - Apply CLI overrides
+     - Load drupal-sites.json for multi-site (if drupal_watchdog)
+     - Apply site-specific config
+  4. Initialize secure logger (internal/logging wraps go-logger)
+  5. Initialize storage (internal/storage) - SQLite connection
+  6. Initialize Telegram client (internal/notification)
+  7. Initialize Claude client (internal/ai)
+  8. Create log source based on LOG_SOURCE_TYPE:
+     - logwatch → internal/logwatch (Reader, Preprocessor, PromptBuilder)
+     - drupal_watchdog → internal/drupal (Reader, Preprocessor, PromptBuilder)
+  9. Read & preprocess logs using source-specific implementation
+  10. Retrieve historical context from DB (filtered by source type + site)
+  11. Build prompts using source-specific PromptBuilder
+  12. Analyze with Claude
+  13. Save to database (with source type + site name)
+  14. Send Telegram notifications
+  15. Cleanup old summaries (>90 days)
 ```
 
 **2. Configuration Management (internal/config/config.go)**
@@ -118,17 +134,75 @@ When logs exceed `MAX_PREPROCESSING_TOKENS` (default: 150,000):
 3. **Deduplication**: Group similar lines (IP/timestamp/number normalization)
 4. **Compression**: Keep 100% HIGH, 50% MEDIUM, 20% LOW priority content
 
-**4. Token Estimation Algorithm**
+**4. Multi-Source Log Analysis (internal/analyzer/)**
+
+The analyzer package provides a pluggable architecture for different log sources:
+
+```go
+// Core interfaces (internal/analyzer/interfaces.go)
+type LogReader interface {
+    Read(sourcePath string) (string, error)
+    Validate(content string) error
+    GetSourceInfo(sourcePath string) (map[string]interface{}, error)
+}
+
+type Preprocessor interface {
+    EstimateTokens(content string) int
+    Process(content string) (string, error)
+    ShouldProcess(content string, maxTokens int) bool
+}
+
+type PromptBuilder interface {
+    GetSystemPrompt() string
+    GetUserPrompt(logContent, historicalContext string) string
+    GetLogType() string
+}
+```
+
+**Supported Sources:**
+- `LogSourceLogwatch` - Traditional logwatch reports
+- `LogSourceDrupalWatchdog` - Drupal watchdog database exports
+
+**5. Drupal Watchdog Analysis (internal/drupal/)**
+
+Drupal-specific log analysis with RFC 5424 severity levels:
+```go
+// Severity levels (0=Emergency to 7=Debug)
+const (
+    SeverityEmergency = 0  // System is unusable
+    SeverityAlert     = 1  // Action must be taken immediately
+    SeverityCritical  = 2  // Critical conditions
+    SeverityError     = 3  // Error conditions
+    SeverityWarning   = 4  // Warning conditions
+    SeverityNotice    = 5  // Normal but significant condition
+    SeverityInfo      = 6  // Informational messages
+    SeverityDebug     = 7  // Debug-level messages
+)
+```
+
+**Supported Input Formats:**
+- `json` - JSON export from watchdog table (recommended)
+- `drush` - Output from `drush watchdog:show` command
+
+**Priority Keywords for Preprocessing:**
+- HIGH: security, PDO, SQL, fatal, emergency, alert, critical, access denied
+- MEDIUM: php, error, warning, cron, update, module
+- LOW: notice, info, debug, page not found
+
+**6. Token Estimation Algorithm**
 ```go
 // Same as Node.js version
 tokens = max(chars/4, words/0.75)
 ```
 
-**5. Database Schema (internal/storage/sqlite.go)**
+**7. Database Schema (internal/storage/sqlite.go)**
 ```sql
+-- Schema v2 (current)
 CREATE TABLE summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,           -- RFC3339 format
+    log_source_type TEXT NOT NULL DEFAULT 'logwatch',  -- v2: logwatch/drupal_watchdog
+    site_name TEXT NOT NULL DEFAULT '',                -- v2: Site identifier for multi-site
     system_status TEXT NOT NULL,       -- Good/Warning/Critical/Bad
     summary TEXT NOT NULL,
     critical_issues TEXT,              -- JSON array
@@ -139,11 +213,15 @@ CREATE TABLE summaries (
     output_tokens INTEGER,
     cost_usd REAL
 );
+
+CREATE INDEX idx_source_site ON summaries(log_source_type, site_name);
 ```
+- **Schema versioning**: Auto-migrates from v1 to v2 (adds log_source_type/site_name)
+- **Historical context filtering**: Queries filtered by source type and site name
 - Connection timeout: 5s busy timeout prevents indefinite waits on locks
 - Connection pool: Single connection (optimal for SQLite), 30-min lifetime
 
-**6. Claude AI Integration (internal/ai/client.go)**
+**8. Claude AI Integration (internal/ai/client.go)**
 - Retry logic: 3 attempts with exponential backoff (2^n seconds)
 - Prompt caching: System prompt cached for 90% cost reduction on subsequent calls
 - Cost calculation: Uses Sonnet 4.5 pricing ($3/MTok input, $15/MTok output)
@@ -152,7 +230,7 @@ CREATE TABLE summaries (
 - Configurable max tokens: `AI_MAX_TOKENS` (default: 8000, range: 1000-16000)
 - Input sanitization: Logwatch content filtered for prompt injection attempts
 
-**7. Telegram Notifications (internal/notification/telegram.go)**
+**9. Telegram Notifications (internal/notification/telegram.go)**
 - **Archive channel**: Always receives full analysis report
 - **Alerts channel**: Only for Warning/Critical/Bad statuses (optional)
 - Message format: MarkdownV2 with proper escaping
@@ -168,6 +246,49 @@ CREATE TABLE summaries (
 - `TELEGRAM_CHANNEL_ARCHIVE_ID` must be < -100 (supergroup/channel ID)
 - `MAX_LOG_SIZE_MB` range: 1-100
 - `LOG_LEVEL`: debug, info, warn, error
+- `LOG_SOURCE_TYPE`: `logwatch` (default) or `drupal_watchdog`
+- When `LOG_SOURCE_TYPE=logwatch`: `LOGWATCH_OUTPUT_PATH` is required
+- When `LOG_SOURCE_TYPE=drupal_watchdog`:
+  - `drupal-sites.json` is required (see configs/drupal-sites.json.example)
+  - Site must be specified via `-drupal-site` flag or `default_site` in config
+
+### Multi-Site Drupal Configuration
+
+Multi-site support uses `drupal-sites.json` for centralized configuration:
+
+**Configuration File (internal/config/drupal_sites.go):**
+```go
+type DrupalSite struct {
+    Name           string `json:"name"`            // Human-readable site name
+    DrupalRoot     string `json:"drupal_root"`     // Path to Drupal installation
+    WatchdogPath   string `json:"watchdog_path"`   // Path to watchdog export file
+    WatchdogFormat string `json:"watchdog_format"` // "json" or "drush"
+    MinSeverity    int    `json:"min_severity"`    // RFC 5424 severity (0-7)
+    WatchdogLimit  int    `json:"watchdog_limit"`  // Max entries in output
+}
+
+type DrupalSitesConfig struct {
+    Version     string                `json:"version"`
+    DefaultSite string                `json:"default_site"`
+    Sites       map[string]DrupalSite `json:"sites"`
+}
+```
+
+**Search Locations** (in order):
+1. Explicit path from `-drupal-sites-config` flag
+2. `./drupal-sites.json`
+3. `./configs/drupal-sites.json`
+4. `/opt/logwatch-ai/drupal-sites.json`
+5. `~/.config/logwatch-ai/drupal-sites.json`
+
+**CLI Options for Multi-Site:**
+```bash
+-drupal-site string          # Site ID from drupal-sites.json
+-drupal-sites-config string  # Custom path to drupal-sites.json
+-list-drupal-sites           # List available sites and exit
+```
+
+**Priority:** CLI args > drupal-sites.json > .env > defaults
 
 ### Proxy Support
 Both `HTTP_PROXY` and `HTTPS_PROXY` are supported:
@@ -201,13 +322,29 @@ Both `HTTP_PROXY` and `HTTPS_PROXY` are supported:
 ## Development Workflow
 
 ### Adding a New Feature
-1. Determine which package owns the feature (ai, config, logwatch, notification, storage)
+1. Determine which package owns the feature (ai, analyzer, config, drupal, logwatch, notification, storage)
 2. Add configuration fields to `internal/config/config.go` if needed
 3. Update `.env.example` with new variables
 4. Implement logic in appropriate package
 5. Update `cmd/analyzer/main.go` workflow if needed
 6. Add tests for new functionality
 7. Update README.md if user-facing
+
+### Adding a New Log Source
+1. Create a new package in `internal/` (e.g., `internal/newlog/`)
+2. Implement the three interfaces from `internal/analyzer/interfaces.go`:
+   - `LogReader` - Read and validate log files
+   - `Preprocessor` - Token estimation and content reduction
+   - `PromptBuilder` - System prompt and user prompt generation
+3. Add source type constant to `internal/analyzer/registry.go`
+4. Add configuration fields to `internal/config/config.go`:
+   - Add source-specific struct fields
+   - Update `validateLogSource()` for new source
+   - Update `GetLogSourcePath()` helper
+5. Add factory case in `cmd/analyzer/main.go:createLogSource()`
+6. Add test fixtures in `testdata/newlog/`
+7. Add tests for all three interface implementations
+8. Update `.env.example` and documentation
 
 ### Running Tests
 ```bash
@@ -217,6 +354,8 @@ make test
 # Run tests for a specific package
 go test -v ./internal/ai
 go test -v ./internal/logwatch
+go test -v ./internal/drupal
+go test -v ./internal/analyzer
 
 # Run with coverage
 make test-coverage
@@ -224,6 +363,7 @@ make test-coverage
 
 # Run specific test
 go test -v -run TestFormatMessage ./internal/notification
+go test -v -run TestReadJSON ./internal/drupal
 ```
 
 ### Testing with Real APIs
@@ -339,14 +479,21 @@ func ShouldTriggerAlert(status string) bool {
 
 ### Querying Historical Data
 ```go
-// Last 7 days (for Claude context)
-summaries, err := store.GetRecentSummaries(7)
+// Last 7 days with source/site filtering (for Claude context)
+filter := &storage.SourceFilter{
+    LogSourceType: "drupal_watchdog",
+    SiteName:      "production",  // Empty string for logwatch
+}
+summaries, err := store.GetRecentSummaries(7, filter)
 
 // Custom period
-summaries, err := store.GetRecentSummaries(30)
+summaries, err := store.GetRecentSummaries(30, filter)
 
-// Statistics
-stats, err := store.GetStatistics()
+// Historical context formatted for Claude (filtered by source/site)
+context, err := store.GetHistoricalContext(7, filter)
+
+// Statistics (optionally filtered)
+stats, err := store.GetStatistics(filter)  // Pass nil for all sources
 // Returns: total_summaries, status_distribution, total_cost_usd
 ```
 
@@ -372,6 +519,54 @@ stats, err := store.GetStatistics()
 - Default timeout: 120 seconds
 - Large logs may take longer to analyze
 - Consider increasing preprocessing aggressiveness
+
+### Drupal Watchdog Issues
+
+**"Invalid JSON format"**
+- Ensure the watchdog export is valid JSON array format
+- Check for UTF-8 encoding issues in log messages
+- Validate with: `jq . /path/to/watchdog.json`
+
+**"Unsupported drush output format"**
+- drush format parsing is more lenient but may miss entries
+- Prefer JSON export for reliable parsing
+- Export with: `drush watchdog:show --format=json > watchdog.json`
+
+**"Missing watchdog entries"**
+- Check `watchdog_format` in drupal-sites.json matches your file format
+- Verify file permissions and `watchdog_path`
+- Ensure watchdog table is being populated in Drupal
+
+**"Too many 'page not found' entries"**
+- Drupal preprocessing assigns LOW priority to 404s
+- These are compressed during preprocessing
+- For security analysis, check for patterns (wp-admin, .env probing)
+
+### Multi-Site Drupal Issues
+
+**"Site not found in drupal-sites.json"**
+- Use `-list-drupal-sites` to see available sites
+- Check that the site ID matches exactly (case-sensitive)
+- Verify drupal-sites.json is in a search location
+
+**"No drupal-sites.json found"**
+- Create the file in one of the search locations
+- Use `-drupal-sites-config` to specify a custom path
+- See `configs/drupal-sites.json.example` for format
+
+**Generate Script (scripts/generate-drupal-watchdog.sh):**
+```bash
+# List available sites
+./scripts/generate-drupal-watchdog.sh --list-sites
+
+# Export for specific site
+./scripts/generate-drupal-watchdog.sh --site production
+
+# Custom sites config path
+./scripts/generate-drupal-watchdog.sh --site staging --sites-config /path/to/sites.json
+```
+- Requires `jq` for configuration parsing
+- CLI args override site config (CLI > site config > defaults)
 
 ## Production Deployment Best Practices
 

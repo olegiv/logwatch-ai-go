@@ -24,9 +24,8 @@ echo_info "Installing Logwatch AI Analyzer to $INSTALL_DIR"
 
 # Create installation directory with secure permissions
 echo_info "Creating installation directory..."
-mkdir -p -m 750 "$INSTALL_DIR"
-mkdir -p -m 750 "$INSTALL_DIR/data"
-mkdir -p -m 750 "$INSTALL_DIR/logs"
+mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
+chmod 750 "$INSTALL_DIR" "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
 
 # Copy binary
 if [ -f "bin/$BINARY_NAME" ]; then
@@ -55,6 +54,15 @@ else
     chmod 600 "$INSTALL_DIR/.env"
 fi
 
+# Create drupal-sites.json for Drupal watchdog configuration
+if [ ! -f "$INSTALL_DIR/drupal-sites.json" ]; then
+    echo_info "Creating drupal-sites.json configuration file..."
+    cp "configs/drupal-sites.json.example" "$INSTALL_DIR/drupal-sites.json"
+    chmod 640 "$INSTALL_DIR/drupal-sites.json"
+else
+    echo_info "drupal-sites.json file already exists, skipping"
+fi
+
 # Set ownership
 echo_info "Setting ownership to $SERVICE_USER..."
 chown -R "$SERVICE_USER:$(id -gn "$SERVICE_USER")" "$INSTALL_DIR"
@@ -65,15 +73,16 @@ echo_info "Installation completed successfully!"
 echo_info "========================================"
 echo_info ""
 echo_info "Next steps:"
-echo_info "1. Configure $INSTALL_DIR/.env with your credentials"
-echo_info "2. Test the analyzer: $BINARY_NAME"
-echo_info "3. Set up cron jobs (see docs/CRON_SETUP.md)"
+echo_info "1. Configure $INSTALL_DIR/.env with your API credentials"
+echo_info "2. For Drupal: Edit $INSTALL_DIR/drupal-sites.json with your sites"
+echo_info "3. Test the analyzer: $BINARY_NAME"
+echo_info "4. Set up cron jobs (see docs/CRON_SETUP.md)"
 echo_info ""
-echo_info "Cron setup (as root):"
-echo_info "  # Generate logwatch report at 2:00 AM"
+echo_info "Cron setup for Logwatch (as root):"
 echo_info "  0 2 * * * $INSTALL_DIR/scripts/generate-logwatch.sh"
-echo_info ""
-echo_info "Cron setup (as $SERVICE_USER):"
-echo_info "  # Run analyzer at 2:15 AM"
 echo_info "  15 2 * * * cd $INSTALL_DIR && ./$BINARY_NAME >> logs/cron.log 2>&1"
+echo_info ""
+echo_info "Cron setup for Drupal (as $SERVICE_USER):"
+echo_info "  0 2 * * * $INSTALL_DIR/scripts/generate-drupal-watchdog.sh --site production"
+echo_info "  15 2 * * * cd $INSTALL_DIR && ./$BINARY_NAME -source-type drupal_watchdog -drupal-site production >> logs/cron.log 2>&1"
 echo_info ""

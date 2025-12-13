@@ -54,9 +54,10 @@ func NewTelegramClient(botToken string, archiveChannel, alertsChannel int64) (*T
 }
 
 // SendAnalysisReport sends the analysis report to Telegram channels
-func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Stats) error {
+// siteName is optional and used for multi-site Drupal deployments to identify the site in the report.
+func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Stats, logSourceType, siteName string) error {
 	// Format message
-	message := t.formatMessage(analysis, stats)
+	message := t.formatMessage(analysis, stats, logSourceType, siteName)
 
 	// Send to archive channel (always)
 	if err := t.sendToChannel(t.archiveChannel, message); err != nil {
@@ -75,14 +76,19 @@ func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Sta
 }
 
 // formatMessage formats the analysis into a Telegram message
-func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats) string {
+func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats, logSourceType, siteName string) string {
 
 	const formattedListTemplate = "%d\\. %s\n"
 
 	var msg strings.Builder
 
-	// Header
-	msg.WriteString("🔍 *Logwatch Analysis Report*\n")
+	// Header with log source type and optional site name
+	sourceDisplayName := getLogSourceDisplayName(logSourceType)
+	if siteName != "" {
+		msg.WriteString(fmt.Sprintf("🔍 *%s Report* \\- %s\n", sourceDisplayName, escapeMarkdown(siteName)))
+	} else {
+		msg.WriteString(fmt.Sprintf("🔍 *%s Report*\n", sourceDisplayName))
+	}
 	msg.WriteString(fmt.Sprintf("🖥 Host\\: %s\n", escapeMarkdown(t.hostname)))
 	msg.WriteString(fmt.Sprintf("📅 Date\\: %s\n", escapeMarkdown(time.Now().Format("2006-01-02 15:04:05"))))
 	msg.WriteString(fmt.Sprintf("🌍 Timezone\\: %s\n", escapeMarkdown(time.Now().Location().String())))
@@ -291,6 +297,18 @@ func (t *TelegramClient) splitMessage(message string) []string {
 	return messages
 }
 
+// getLogSourceDisplayName returns a human-readable display name for log source types
+func getLogSourceDisplayName(logSourceType string) string {
+	switch logSourceType {
+	case "logwatch":
+		return "Logwatch"
+	case "drupal_watchdog":
+		return "Drupal Watchdog"
+	default:
+		return "Log"
+	}
+}
+
 // escapeMarkdown escapes special characters for Telegram MarkdownV2
 func escapeMarkdown(text string) string {
 	// Characters that need to be escaped in MarkdownV2
@@ -305,6 +323,36 @@ func escapeMarkdown(text string) string {
 	}
 
 	return result
+}
+
+// SendNoEntriesReport sends an informational message when no log entries were found.
+// This is used for Drupal watchdog when there are no entries for the analyzed time period.
+// siteName is optional and used for multi-site Drupal deployments.
+func (t *TelegramClient) SendNoEntriesReport(logSourceType, siteName string) error {
+	var msg strings.Builder
+
+	// Header with log source type and optional site name
+	sourceDisplayName := getLogSourceDisplayName(logSourceType)
+	if siteName != "" {
+		msg.WriteString(fmt.Sprintf("ℹ️ *%s Report* \\- %s\n", sourceDisplayName, escapeMarkdown(siteName)))
+	} else {
+		msg.WriteString(fmt.Sprintf("ℹ️ *%s Report*\n", sourceDisplayName))
+	}
+	msg.WriteString(fmt.Sprintf("🖥 Host\\: %s\n", escapeMarkdown(t.hostname)))
+	msg.WriteString(fmt.Sprintf("📅 Date\\: %s\n", escapeMarkdown(time.Now().Format("2006-01-02 15:04:05"))))
+	msg.WriteString(fmt.Sprintf("🌍 Timezone\\: %s\n\n", escapeMarkdown(time.Now().Location().String())))
+
+	msg.WriteString("📭 *No Entries Found*\n\n")
+	msg.WriteString("No log entries were found for the analyzed time period \\(yesterday\\)\\.\n")
+	msg.WriteString("This is normal if no events occurred during this period\\.\n\n")
+	msg.WriteString("_No AI analysis was performed\\._")
+
+	// Send to archive channel only (not alerts - this is not an alert condition)
+	if err := t.sendToChannel(t.archiveChannel, msg.String()); err != nil {
+		return fmt.Errorf("failed to send no-entries report to archive channel: %w", err)
+	}
+
+	return nil
 }
 
 // GetBotInfo returns information about the bot

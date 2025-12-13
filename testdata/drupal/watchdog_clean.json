@@ -1,0 +1,54 @@
+[
+  {
+    "wid": 1001,
+    "uid": 1,
+    "type": "system",
+    "message": "Cron run completed.",
+    "variables": "a:0:{}",
+    "severity": 6,
+    "link": "",
+    "location": "https://example.com/admin/reports/status",
+    "referer": "",
+    "hostname": "127.0.0.1",
+    "timestamp": 1699900800
+  },
+  {
+    "wid": 1002,
+    "uid": 0,
+    "type": "user",
+    "message": "Session opened for admin.",
+    "variables": "a:0:{}",
+    "severity": 5,
+    "link": "",
+    "location": "https://example.com/user/login",
+    "referer": "https://example.com/",
+    "hostname": "192.168.1.100",
+    "timestamp": 1699900801
+  },
+  {
+    "wid": 1003,
+    "uid": 1,
+    "type": "content",
+    "message": "Article 'Test Article' has been created.",
+    "variables": "a:1:{s:5:\"title\";s:12:\"Test Article\";}",
+    "severity": 5,
+    "link": "/node/123",
+    "location": "https://example.com/node/add/article",
+    "referer": "https://example.com/admin/content",
+    "hostname": "192.168.1.100",
+    "timestamp": 1699900802
+  },
+  {
+    "wid": 1004,
+    "uid": 1,
+    "type": "system",
+    "message": "Cache cleared.",
+    "variables": "a:0:{}",
+    "severity": 5,
+    "link": "",
+    "location": "https://example.com/admin/config/development/performance",
+    "referer": "https://example.com/admin/config",
+    "hostname": "192.168.1.100",
+    "timestamp": 1699900803
+  }
+]

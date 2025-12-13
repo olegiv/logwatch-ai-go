@@ -19,6 +19,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -34,6 +35,7 @@ func TestValidate(t *testing.T) {
 			config: &Config{
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -47,6 +49,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "invalid-key",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -59,6 +62,7 @@ func TestValidate(t *testing.T) {
 			config: &Config{
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -72,6 +76,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "invalid-token",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -84,6 +89,7 @@ func TestValidate(t *testing.T) {
 			config: &Config{
 				AnthropicAPIKey:    "sk-ant-test-key-1234567890",
 				TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+				LogSourceType:      "logwatch",
 				LogwatchOutputPath: "/tmp/logwatch.txt",
 				MaxLogSizeMB:       10,
 				LogLevel:           "info",
@@ -97,6 +103,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -99,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -111,6 +118,7 @@ func TestValidate(t *testing.T) {
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
 				TelegramAlertsChannel:  -99,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -124,11 +132,12 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
 			},
 			expectError:   true,
-			errorContains: "LOGWATCH_OUTPUT_PATH is required",
+			errorContains: "LOGWATCH_OUTPUT_PATH is required when LOG_SOURCE_TYPE=logwatch",
 		},
 		{
 			name: "MaxLogSizeMB too small",
@@ -136,6 +145,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           0,
 				LogLevel:               "info",
@@ -149,6 +159,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           101,
 				LogLevel:               "info",
@@ -162,6 +173,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "invalid",
@@ -175,6 +187,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "debug",
@@ -189,6 +202,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "warn",
@@ -203,6 +217,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "error",
@@ -217,6 +232,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -232,6 +248,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -249,6 +266,7 @@ func TestValidate(t *testing.T) {
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
 				TelegramAlertsChannel:  -1009876543210,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -263,6 +281,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -278,6 +297,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -293,6 +313,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -308,6 +329,7 @@ func TestValidate(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -530,6 +552,7 @@ func TestTelegramTokenRegex(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       tt.token,
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               "info",
@@ -559,6 +582,7 @@ func TestLogLevelCaseInsensitive(t *testing.T) {
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
 				LogwatchOutputPath:     "/tmp/logwatch.txt",
 				MaxLogSizeMB:           10,
 				LogLevel:               level,
@@ -680,5 +704,227 @@ func TestConstantTimePrefixMatch(t *testing.T) {
 				t.Errorf("constantTimePrefixMatch(%q, %q) = %v, want %v", tt.s, tt.prefix, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateLogSource(t *testing.T) {
+	baseConfig := func() *Config {
+		return &Config{
+			AnthropicAPIKey:        "sk-ant-test-key-1234567890",
+			TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+			TelegramArchiveChannel: -1001234567890,
+			MaxLogSizeMB:           10,
+			LogLevel:               "info",
+			AITimeoutSeconds:       120,
+			AIMaxTokens:            8000,
+		}
+	}
+
+	tests := []struct {
+		name          string
+		setup         func(*Config)
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name: "Valid logwatch config",
+			setup: func(c *Config) {
+				c.LogSourceType = "logwatch"
+				c.LogwatchOutputPath = "/tmp/logwatch.txt"
+			},
+			expectError: false,
+		},
+		{
+			name: "Valid drupal_watchdog config with json format",
+			setup: func(c *Config) {
+				c.LogSourceType = "drupal_watchdog"
+				c.DrupalWatchdogPath = "/var/log/drupal-watchdog.json"
+				c.DrupalWatchdogFormat = "json"
+			},
+			expectError: false,
+		},
+		{
+			name: "Valid drupal_watchdog config with drush format",
+			setup: func(c *Config) {
+				c.LogSourceType = "drupal_watchdog"
+				c.DrupalWatchdogPath = "/var/log/drupal-watchdog.txt"
+				c.DrupalWatchdogFormat = "drush"
+			},
+			expectError: false,
+		},
+		{
+			name: "Invalid log source type",
+			setup: func(c *Config) {
+				c.LogSourceType = "invalid"
+				c.LogwatchOutputPath = "/tmp/logwatch.txt"
+			},
+			expectError:   true,
+			errorContains: "LOG_SOURCE_TYPE must be 'logwatch' or 'drupal_watchdog'",
+		},
+		{
+			name: "Missing logwatch path when logwatch selected",
+			setup: func(c *Config) {
+				c.LogSourceType = "logwatch"
+				c.LogwatchOutputPath = ""
+			},
+			expectError:   true,
+			errorContains: "LOGWATCH_OUTPUT_PATH is required when LOG_SOURCE_TYPE=logwatch",
+		},
+		{
+			name: "Missing drupal path when drupal_watchdog selected",
+			setup: func(c *Config) {
+				c.LogSourceType = "drupal_watchdog"
+				c.DrupalWatchdogPath = ""
+				c.DrupalWatchdogFormat = "json"
+			},
+			expectError:   true,
+			errorContains: "watchdog_path is required in drupal-sites.json",
+		},
+		{
+			name: "Invalid drupal watchdog format",
+			setup: func(c *Config) {
+				c.LogSourceType = "drupal_watchdog"
+				c.DrupalWatchdogPath = "/var/log/watchdog.json"
+				c.DrupalWatchdogFormat = "invalid"
+			},
+			expectError:   true,
+			errorContains: "watchdog_format must be 'json' or 'drush' in drupal-sites.json",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig()
+			tt.setup(cfg)
+
+			err := cfg.Validate()
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected an error but got none")
+					return
+				}
+				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error to contain '%s', got '%s'", tt.errorContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestGetLogSourcePath(t *testing.T) {
+	tests := []struct {
+		name           string
+		logSourceType  string
+		logwatchPath   string
+		drupalPath     string
+		expectedResult string
+	}{
+		{
+			name:           "Logwatch source type",
+			logSourceType:  "logwatch",
+			logwatchPath:   "/tmp/logwatch.txt",
+			drupalPath:     "/var/log/drupal.json",
+			expectedResult: "/tmp/logwatch.txt",
+		},
+		{
+			name:           "Drupal watchdog source type",
+			logSourceType:  "drupal_watchdog",
+			logwatchPath:   "/tmp/logwatch.txt",
+			drupalPath:     "/var/log/drupal.json",
+			expectedResult: "/var/log/drupal.json",
+		},
+		{
+			name:           "Unknown source type defaults to logwatch",
+			logSourceType:  "unknown",
+			logwatchPath:   "/tmp/logwatch.txt",
+			drupalPath:     "/var/log/drupal.json",
+			expectedResult: "/tmp/logwatch.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				LogSourceType:      tt.logSourceType,
+				LogwatchOutputPath: tt.logwatchPath,
+				DrupalWatchdogPath: tt.drupalPath,
+			}
+
+			result := cfg.GetLogSourcePath()
+			if result != tt.expectedResult {
+				t.Errorf("GetLogSourcePath() = %q, want %q", result, tt.expectedResult)
+			}
+		})
+	}
+}
+
+func TestIsDrupalWatchdog(t *testing.T) {
+	tests := []struct {
+		name          string
+		logSourceType string
+		expected      bool
+	}{
+		{"Drupal watchdog", "drupal_watchdog", true},
+		{"Logwatch", "logwatch", false},
+		{"Unknown", "unknown", false},
+		{"Empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{LogSourceType: tt.logSourceType}
+			if got := cfg.IsDrupalWatchdog(); got != tt.expected {
+				t.Errorf("IsDrupalWatchdog() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsLogwatch(t *testing.T) {
+	tests := []struct {
+		name          string
+		logSourceType string
+		expected      bool
+	}{
+		{"Logwatch", "logwatch", true},
+		{"Drupal watchdog", "drupal_watchdog", false},
+		{"Unknown", "unknown", false},
+		{"Empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{LogSourceType: tt.logSourceType}
+			if got := cfg.IsLogwatch(); got != tt.expected {
+				t.Errorf("IsLogwatch() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConfigStructure_WithDrupalFields(t *testing.T) {
+	config := &Config{
+		LogSourceType:        "drupal_watchdog",
+		DrupalWatchdogPath:   "/var/log/drupal-watchdog.json",
+		DrupalWatchdogFormat: "json",
+		DrupalSiteName:       "production",
+	}
+
+	if config.LogSourceType != "drupal_watchdog" {
+		t.Errorf("LogSourceType not set correctly")
+	}
+	if config.DrupalWatchdogPath != "/var/log/drupal-watchdog.json" {
+		t.Errorf("DrupalWatchdogPath not set correctly")
+	}
+	if config.DrupalWatchdogFormat != "json" {
+		t.Errorf("DrupalWatchdogFormat not set correctly")
+	}
+	if config.DrupalSiteName != "production" {
+		t.Errorf("DrupalSiteName not set correctly")
 	}
 }

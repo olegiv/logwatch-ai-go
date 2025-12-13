@@ -17,10 +17,12 @@ type Storage struct {
 	db *sql.DB
 }
 
-// Summary represents a logwatch analysis summary
+// Summary represents a log analysis summary
 type Summary struct {
 	ID              int64
 	Timestamp       time.Time
+	LogSourceType   string // "logwatch" or "drupal_watchdog"
+	SiteName        string // Site identifier (empty for logwatch, site ID for Drupal multi-site)
 	SystemStatus    string
 	Summary         string
 	CriticalIssues  []string
@@ -30,6 +32,12 @@ type Summary struct {
 	InputTokens     int
 	OutputTokens    int
 	CostUSD         float64
+}
+
+// SourceFilter specifies filtering criteria for log source and site
+type SourceFilter struct {
+	LogSourceType string // Required: "logwatch" or "drupal_watchdog"
+	SiteName      string // Optional: site identifier for Drupal multi-site
 }
 
 // Database configuration constants (L-04 fix)
@@ -83,8 +91,95 @@ func New(dbPath string) (*Storage, error) {
 	return storage, nil
 }
 
+// Schema version constants
+const (
+	// currentSchemaVersion is the latest schema version
+	// Increment this when adding new migrations
+	currentSchemaVersion = 2
+)
+
 // initSchema creates the database schema if it doesn't exist
 func (s *Storage) initSchema() error {
+	// Create schema_version table first (tracks migration state)
+	if _, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_version (
+			version INTEGER PRIMARY KEY
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create schema_version table: %w", err)
+	}
+
+	// Get current schema version
+	version := s.getSchemaVersion()
+
+	// Run migrations based on current version
+	if err := s.migrateSchema(version); err != nil {
+		return fmt.Errorf("schema migration failed: %w", err)
+	}
+
+	return nil
+}
+
+// getSchemaVersion returns the current schema version (0 if not set)
+func (s *Storage) getSchemaVersion() int {
+	var version int
+	err := s.db.QueryRow(`SELECT version FROM schema_version LIMIT 1`).Scan(&version)
+	if err != nil {
+		return 0 // No version set, needs full migration
+	}
+	return version
+}
+
+// setSchemaVersion updates the schema version
+func (s *Storage) setSchemaVersion(version int) error {
+	// Delete existing and insert new (simpler than upsert for single row)
+	if _, err := s.db.Exec(`DELETE FROM schema_version`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`INSERT INTO schema_version (version) VALUES (?)`, version); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateSchema runs migrations from currentVersion to latest
+func (s *Storage) migrateSchema(currentVersion int) error {
+	if currentVersion >= currentSchemaVersion {
+		return nil // Already up to date
+	}
+
+	log.Printf("storage: migrating schema from version %d to %d", currentVersion, currentSchemaVersion)
+
+	// Run each migration sequentially from current version to latest
+	// Uses a switch with fallthrough to run all migrations from currentVersion onwards
+	for v := currentVersion; v < currentSchemaVersion; v++ {
+		switch v {
+		case 0:
+			// Migration 0 -> 1: Create base summaries table
+			if err := s.migrateV1(); err != nil {
+				return fmt.Errorf("migration v1 failed: %w", err)
+			}
+		case 1:
+			// Migration 1 -> 2: Add log_source_type and site_name columns
+			if err := s.migrateV2(); err != nil {
+				return fmt.Errorf("migration v2 failed: %w", err)
+			}
+		}
+	}
+
+	// Update schema version
+	if err := s.setSchemaVersion(currentSchemaVersion); err != nil {
+		return fmt.Errorf("failed to update schema version: %w", err)
+	}
+
+	log.Printf("storage: schema migration completed successfully (now at version %d)", currentSchemaVersion)
+	return nil
+}
+
+// migrateV1 creates the base summaries table (original schema)
+func (s *Storage) migrateV1() error {
+	log.Printf("storage: running migration v1 - create base tables")
+
 	schema := `
 	CREATE TABLE IF NOT EXISTS summaries (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,6 +201,51 @@ func (s *Storage) initSchema() error {
 
 	_, err := s.db.Exec(schema)
 	return err
+}
+
+// migrateV2 adds log_source_type and site_name columns
+func (s *Storage) migrateV2() error {
+	log.Printf("storage: running migration v2 - add log_source_type and site_name columns")
+
+	// Check if columns already exist (for databases migrated before version tracking)
+	var hasLogSourceType bool
+	rows, err := s.db.Query("PRAGMA table_info(summaries)")
+	if err != nil {
+		return fmt.Errorf("failed to get table info: %w", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dfltValue interface{}
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("failed to scan column info: %w", err)
+		}
+		if name == "log_source_type" {
+			hasLogSourceType = true
+			break
+		}
+	}
+	_ = rows.Close()
+
+	// Only add columns if they don't exist
+	if !hasLogSourceType {
+		if _, err := s.db.Exec(`ALTER TABLE summaries ADD COLUMN log_source_type TEXT NOT NULL DEFAULT 'logwatch'`); err != nil {
+			return fmt.Errorf("failed to add log_source_type column: %w", err)
+		}
+
+		if _, err := s.db.Exec(`ALTER TABLE summaries ADD COLUMN site_name TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("failed to add site_name column: %w", err)
+		}
+	}
+
+	// Create index (IF NOT EXISTS handles duplicates)
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_source_site ON summaries(log_source_type, site_name)`); err != nil {
+		return fmt.Errorf("failed to create source_site index: %w", err)
+	}
+
+	return nil
 }
 
 // SaveSummary saves a new summary to the database
@@ -131,18 +271,26 @@ func (s *Storage) SaveSummary(summary *Summary) error {
 		return fmt.Errorf("failed to marshal metrics: %w", err)
 	}
 
+	// Default to "logwatch" if not specified
+	logSourceType := summary.LogSourceType
+	if logSourceType == "" {
+		logSourceType = "logwatch"
+	}
+
 	// Insert into database
 	query := `
 		INSERT INTO summaries (
-			timestamp, system_status, summary, critical_issues,
-			warnings, recommendations, metrics, input_tokens,
-			output_tokens, cost_usd
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			timestamp, log_source_type, site_name, system_status, summary,
+			critical_issues, warnings, recommendations, metrics,
+			input_tokens, output_tokens, cost_usd
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := s.db.Exec(
 		query,
 		summary.Timestamp.Format(time.RFC3339),
+		logSourceType,
+		summary.SiteName,
 		summary.SystemStatus,
 		summary.Summary,
 		string(criticalIssuesJSON),
@@ -166,20 +314,32 @@ func (s *Storage) SaveSummary(summary *Summary) error {
 	return nil
 }
 
-// GetRecentSummaries retrieves summaries from the last N days
-func (s *Storage) GetRecentSummaries(days int) ([]*Summary, error) {
+// GetRecentSummaries retrieves summaries from the last N days, filtered by source and site
+func (s *Storage) GetRecentSummaries(days int, filter *SourceFilter) ([]*Summary, error) {
 	cutoffDate := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
 
 	query := `
-		SELECT id, timestamp, system_status, summary, critical_issues,
-		       warnings, recommendations, metrics, input_tokens,
-		       output_tokens, cost_usd
+		SELECT id, timestamp, log_source_type, site_name, system_status, summary,
+		       critical_issues, warnings, recommendations, metrics,
+		       input_tokens, output_tokens, cost_usd
 		FROM summaries
 		WHERE timestamp >= ?
-		ORDER BY timestamp DESC
 	`
+	args := []interface{}{cutoffDate}
 
-	rows, err := s.db.Query(query, cutoffDate)
+	// Apply source filter if provided
+	if filter != nil && filter.LogSourceType != "" {
+		query += ` AND log_source_type = ?`
+		args = append(args, filter.LogSourceType)
+
+		// Filter by site name (empty string matches empty site_name)
+		query += ` AND site_name = ?`
+		args = append(args, filter.SiteName)
+	}
+
+	query += ` ORDER BY timestamp DESC`
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query summaries: %w", err)
 	}
@@ -203,8 +363,9 @@ func (s *Storage) GetRecentSummaries(days int) ([]*Summary, error) {
 }
 
 // GetHistoricalContext retrieves recent summaries formatted for Claude context
-func (s *Storage) GetHistoricalContext(days int) (string, error) {
-	summaries, err := s.GetRecentSummaries(days)
+// If filter is provided, only summaries matching the source type and site are included
+func (s *Storage) GetHistoricalContext(days int, filter *SourceFilter) (string, error) {
+	summaries, err := s.GetRecentSummaries(days, filter)
 	if err != nil {
 		return "", err
 	}
@@ -253,24 +414,30 @@ func (s *Storage) CleanupOldSummaries(days int) (int64, error) {
 	return affected, nil
 }
 
-// GetStatistics returns database statistics
-func (s *Storage) GetStatistics() (map[string]interface{}, error) {
+// GetStatistics returns database statistics, optionally filtered by source and site
+func (s *Storage) GetStatistics(filter *SourceFilter) (map[string]interface{}, error) {
 	stats := make(map[string]interface{})
+
+	// Build WHERE clause for filtering
+	whereClause := ""
+	var args []interface{}
+	if filter != nil && filter.LogSourceType != "" {
+		whereClause = " WHERE log_source_type = ? AND site_name = ?"
+		args = []interface{}{filter.LogSourceType, filter.SiteName}
+	}
 
 	// Total count
 	var total int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM summaries`).Scan(&total)
+	countQuery := `SELECT COUNT(*) FROM summaries` + whereClause
+	err := s.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, err
 	}
 	stats["total_summaries"] = total
 
 	// Status distribution
-	rows, err := s.db.Query(`
-		SELECT system_status, COUNT(*)
-		FROM summaries
-		GROUP BY system_status
-	`)
+	statusQuery := `SELECT system_status, COUNT(*) FROM summaries` + whereClause + ` GROUP BY system_status`
+	rows, err := s.db.Query(statusQuery, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +461,8 @@ func (s *Storage) GetStatistics() (map[string]interface{}, error) {
 
 	// Total cost
 	var totalCost float64
-	err = s.db.QueryRow(`SELECT COALESCE(SUM(cost_usd), 0) FROM summaries`).Scan(&totalCost)
+	costQuery := `SELECT COALESCE(SUM(cost_usd), 0) FROM summaries` + whereClause
+	err = s.db.QueryRow(costQuery, args...).Scan(&totalCost)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +476,7 @@ func (s *Storage) scanSummary(rows *sql.Rows) (*Summary, error) {
 	var (
 		id                                                    int64
 		timestamp                                             string
+		logSourceType, siteName                               string
 		systemStatus, summaryText                             string
 		criticalIssuesJSON, warningsJSON, recommendationsJSON string
 		metricsJSON                                           string
@@ -316,7 +485,7 @@ func (s *Storage) scanSummary(rows *sql.Rows) (*Summary, error) {
 	)
 
 	err := rows.Scan(
-		&id, &timestamp, &systemStatus, &summaryText,
+		&id, &timestamp, &logSourceType, &siteName, &systemStatus, &summaryText,
 		&criticalIssuesJSON, &warningsJSON, &recommendationsJSON,
 		&metricsJSON, &inputTokens, &outputTokens, &costUSD,
 	)
@@ -350,6 +519,8 @@ func (s *Storage) scanSummary(rows *sql.Rows) (*Summary, error) {
 	return &Summary{
 		ID:              id,
 		Timestamp:       ts,
+		LogSourceType:   logSourceType,
+		SiteName:        siteName,
 		SystemStatus:    systemStatus,
 		Summary:         summaryText,
 		CriticalIssues:  criticalIssues,
