@@ -24,9 +24,8 @@ echo_info "Installing Logwatch AI Analyzer to $INSTALL_DIR"
 
 # Create installation directory with secure permissions
 echo_info "Creating installation directory..."
-mkdir -p -m 750 "$INSTALL_DIR"
-mkdir -p -m 750 "$INSTALL_DIR/data"
-mkdir -p -m 750 "$INSTALL_DIR/logs"
+mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
+chmod 750 "$INSTALL_DIR" "$INSTALL_DIR/data" "$INSTALL_DIR/logs"
 
 # Copy binary
 if [ -f "bin/$BINARY_NAME" ]; then
