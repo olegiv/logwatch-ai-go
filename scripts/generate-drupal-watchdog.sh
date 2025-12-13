@@ -350,15 +350,6 @@ if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-# Calculate yesterday's time boundaries (00:00:00 to 23:59:59)
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    TODAY_START=$(date -j -f "%Y-%m-%d %H:%M:%S" "$(date +%Y-%m-%d) 00:00:00" +%s)
-else
-    TODAY_START=$(date -d "today 00:00:00" +%s)
-fi
-YESTERDAY_START=$((TODAY_START - 86400))
-YESTERDAY_END=$((TODAY_START - 1))
-
 log "Starting Drupal watchdog export"
 log "Configuration:"
 log "  Site: $DRUPAL_SITE"
@@ -369,7 +360,7 @@ log "  Format: $FORMAT"
 log "  Count: $COUNT (max entries to fetch)"
 log "  Limit: $LIMIT (max entries in output)"
 log "  Min severity: $MIN_SEVERITY (0=emergency to 7=debug)"
-log "  Time filter: yesterday only"
+log "  Date filter: yesterday only"
 [ -n "$LOG_TYPE" ] && log "  Type filter: $LOG_TYPE"
 
 # Check if Drupal root exists
@@ -428,34 +419,73 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
                 exit 1
             fi
 
+            # Get current year and yesterday's date for filtering
+            CURRENT_YEAR=$(date +%Y)
+            # Yesterday's date in drush format "DD/Mon" (e.g., "12/Dec")
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                YESTERDAY_DATE=$(date -v-1d +"%d/%b")
+            else
+                YESTERDAY_DATE=$(date -d "yesterday" +"%d/%b")
+            fi
+            log "  Filtering for date: $YESTERDAY_DATE"
+
             # Drush outputs object {wid: entry, ...} - convert to array and sort by wid (higher = newer)
-            # Also convert severity string to number, filter by severity and yesterday's time range
-            CONVERTED=$(echo "$OUTPUT" | jq --argjson minSev "$MIN_SEVERITY" \
-                --argjson yesterdayStart "$YESTERDAY_START" \
-                --argjson yesterdayEnd "$YESTERDAY_END" '
+            # Convert severity string to number, filter by severity and yesterday's date
+            # Convert drush date format "DD/Mon HH:MM" to Unix timestamp
+            CONVERTED=$(echo "$OUTPUT" | jq --argjson minSev "$MIN_SEVERITY" --arg year "$CURRENT_YEAR" --arg yesterday "$YESTERDAY_DATE" '
+                # Month name to number mapping
+                def month_to_num:
+                    if . == "Jan" then "01"
+                    elif . == "Feb" then "02"
+                    elif . == "Mar" then "03"
+                    elif . == "Apr" then "04"
+                    elif . == "May" then "05"
+                    elif . == "Jun" then "06"
+                    elif . == "Jul" then "07"
+                    elif . == "Aug" then "08"
+                    elif . == "Sep" then "09"
+                    elif . == "Oct" then "10"
+                    elif . == "Nov" then "11"
+                    elif . == "Dec" then "12"
+                    else "01" end;
+
                 [to_entries | .[].value] |
-                map({
-                    wid: (.wid | tonumber),
-                    uid: ((.uid // "0") | tonumber),
-                    type: .type,
-                    message: .message,
-                    severity: (
-                        if .severity == "Emergency" then 0
-                        elif .severity == "Alert" then 1
-                        elif .severity == "Critical" then 2
-                        elif .severity == "Error" then 3
-                        elif .severity == "Warning" then 4
-                        elif .severity == "Notice" then 5
-                        elif .severity == "Info" then 6
-                        elif .severity == "Debug" then 7
-                        else 5 end
-                    ),
-                    location: .location,
-                    hostname: .hostname,
-                    timestamp: (.timestamp | tonumber)
-                }) |
-                [.[] | select(.timestamp >= $yesterdayStart and .timestamp <= $yesterdayEnd)] |
+                map(
+                    # Parse date "DD/Mon HH:MM" -> extract components
+                    (.date | capture("^(?<day>[0-9]+)/(?<mon>[A-Za-z]+) (?<hour>[0-9]+):(?<min>[0-9]+)")) as $dt |
+                    {
+                        wid: (.wid | tonumber),
+                        uid: ((.uid // "0") | tonumber),
+                        type: .type,
+                        message: .message,
+                        severity: (
+                            # Severity strings: English, Russian, German, Spanish, French
+                            if .severity == "Emergency" or .severity == "Авария" or .severity == "Notfall" or .severity == "Emergencia" or .severity == "Urgence" then 0
+                            elif .severity == "Alert" or .severity == "Тревога" or .severity == "Alarm" or .severity == "Alerta" or .severity == "Alerte" then 1
+                            elif .severity == "Critical" or .severity == "Критический" or .severity == "Критическая" or .severity == "Kritisch" or .severity == "Crítico" or .severity == "Critique" then 2
+                            elif .severity == "Error" or .severity == "Ошибка" or .severity == "Fehler" or .severity == "Erreur" then 3
+                            elif .severity == "Warning" or .severity == "Предупреждение" or .severity == "Warnung" or .severity == "Advertencia" or .severity == "Aviso" or .severity == "Avertissement" then 4
+                            elif .severity == "Notice" or .severity == "Уведомление" or .severity == "Hinweis" or .severity == "Notificación" or .severity == "Avis" then 5
+                            elif .severity == "Info" or .severity == "Инфо" or .severity == "Информация" or .severity == "Información" or .severity == "Information" then 6
+                            elif .severity == "Debug" or .severity == "Отладка" or .severity == "Depuración" or .severity == "Débogage" then 7
+                            else 5 end
+                        ),
+                        severity_label: .severity,
+                        location: .location,
+                        hostname: .hostname,
+                        # Create ISO date string and convert to Unix timestamp
+                        timestamp: (
+                            if $dt then
+                                ($year + "-" + ($dt.mon | month_to_num) + "-" + (if ($dt.day | length) == 1 then "0" + $dt.day else $dt.day end) + "T" + $dt.hour + ":" + $dt.min + ":00Z") | fromdateiso8601
+                            else
+                                now | floor
+                            end
+                        ),
+                        date: .date
+                    }
+                ) |
                 [.[] | select(.severity <= $minSev)] |
+                [.[] | select(.date | startswith($yesterday))] |
                 sort_by(-.wid)
             ' 2>/dev/null)
 
@@ -475,7 +505,7 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
                 ENTRY_COUNT=$(echo "$FILTERED" | jq 'length' 2>/dev/null || echo "unknown")
                 log "Exported $ENTRY_COUNT entries (limited from $ORIGINAL_COUNT total)"
             else
-                log_warning "No watchdog entries found"
+                log "No watchdog entries found for the specified criteria"
                 echo "[]" > "$OUTPUT_PATH"
             fi
         else
