@@ -26,6 +26,49 @@ func TestNewReader(t *testing.T) {
 	}
 }
 
+func TestIsNoEntriesContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name:    "NoEntriesContent constant",
+			content: NoEntriesContent,
+			want:    true,
+		},
+		{
+			name:    "content starting with marker",
+			content: "=== NO WATCHDOG ENTRIES ===\n\nCustom message",
+			want:    true,
+		},
+		{
+			name:    "regular watchdog content",
+			content: "=== DRUPAL WATCHDOG LOG ANALYSIS ===\n\n## Summary",
+			want:    false,
+		},
+		{
+			name:    "empty content",
+			content: "",
+			want:    false,
+		},
+		{
+			name:    "random content",
+			content: "Some random log content",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsNoEntriesContent(tt.content)
+			if got != tt.want {
+				t.Errorf("IsNoEntriesContent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestReader_Validate(t *testing.T) {
 	r := NewReader(10, false, 150000, FormatJSON)
 
@@ -48,6 +91,11 @@ func TestReader_Validate(t *testing.T) {
 			name:    "too small",
 			content: "small",
 			wantErr: true,
+		},
+		{
+			name:    "no entries content",
+			content: NoEntriesContent,
+			wantErr: false, // NoEntriesContent is a valid state
 		},
 	}
 
@@ -263,8 +311,14 @@ func TestReader_formatEntriesForAnalysis_Empty(t *testing.T) {
 
 	result := r.formatEntriesForAnalysis(nil)
 
-	if !strings.Contains(result, "No watchdog entries found") {
-		t.Error("formatEntriesForAnalysis() should indicate no entries")
+	// Should return NoEntriesContent constant
+	if result != NoEntriesContent {
+		t.Errorf("formatEntriesForAnalysis() = %q, want NoEntriesContent", result)
+	}
+
+	// Verify IsNoEntriesContent detects it correctly
+	if !IsNoEntriesContent(result) {
+		t.Error("IsNoEntriesContent() should return true for empty entries result")
 	}
 }
 

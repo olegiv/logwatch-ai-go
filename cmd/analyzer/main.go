@@ -195,6 +195,21 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		Float64("age_hours", sourceInfo["age_hours"].(float64)).
 		Msg("Log file read successfully")
 
+	// Check for no entries (Drupal watchdog specific)
+	// When there are no log entries for the time period, skip AI analysis
+	// and send an informational notification instead
+	if cfg.LogSourceType == "drupal_watchdog" && drupal.IsNoEntriesContent(logContent) {
+		log.Info().Msg("No watchdog entries found for the time period - skipping AI analysis")
+
+		// Send informational Telegram notification
+		if err := telegramClient.SendNoEntriesReport(cfg.LogSourceType, cfg.DrupalSiteName); err != nil {
+			return fmt.Errorf("failed to send no-entries notification: %w", err)
+		}
+
+		log.Info().Msg("No-entries notification sent to Telegram")
+		return nil
+	}
+
 	// Get historical context (if database enabled)
 	// Filter by source type and site to get relevant historical data only
 	var historicalContext string

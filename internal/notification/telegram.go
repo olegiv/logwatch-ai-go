@@ -325,6 +325,36 @@ func escapeMarkdown(text string) string {
 	return result
 }
 
+// SendNoEntriesReport sends an informational message when no log entries were found.
+// This is used for Drupal watchdog when there are no entries for the analyzed time period.
+// siteName is optional and used for multi-site Drupal deployments.
+func (t *TelegramClient) SendNoEntriesReport(logSourceType, siteName string) error {
+	var msg strings.Builder
+
+	// Header with log source type and optional site name
+	sourceDisplayName := getLogSourceDisplayName(logSourceType)
+	if siteName != "" {
+		msg.WriteString(fmt.Sprintf("ℹ️ *%s Report* \\- %s\n", sourceDisplayName, escapeMarkdown(siteName)))
+	} else {
+		msg.WriteString(fmt.Sprintf("ℹ️ *%s Report*\n", sourceDisplayName))
+	}
+	msg.WriteString(fmt.Sprintf("🖥 Host\\: %s\n", escapeMarkdown(t.hostname)))
+	msg.WriteString(fmt.Sprintf("📅 Date\\: %s\n", escapeMarkdown(time.Now().Format("2006-01-02 15:04:05"))))
+	msg.WriteString(fmt.Sprintf("🌍 Timezone\\: %s\n\n", escapeMarkdown(time.Now().Location().String())))
+
+	msg.WriteString("📭 *No Entries Found*\n\n")
+	msg.WriteString("No log entries were found for the analyzed time period \\(yesterday\\)\\.\n")
+	msg.WriteString("This is normal if no events occurred during this period\\.\n\n")
+	msg.WriteString("_No AI analysis was performed\\._")
+
+	// Send to archive channel only (not alerts - this is not an alert condition)
+	if err := t.sendToChannel(t.archiveChannel, msg.String()); err != nil {
+		return fmt.Errorf("failed to send no-entries report to archive channel: %w", err)
+	}
+
+	return nil
+}
+
 // GetBotInfo returns information about the bot
 func (t *TelegramClient) GetBotInfo() map[string]interface{} {
 	return map[string]interface{}{

@@ -14,6 +14,16 @@ import (
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
 
+// NoEntriesContent is returned when the watchdog file contains no log entries.
+// This is a valid state - it means there were no entries for the time period.
+// Use IsNoEntriesContent() to check for this condition.
+const NoEntriesContent = "=== NO WATCHDOG ENTRIES ===\n\nNo Drupal watchdog entries were found for the analyzed time period.\nThis typically means the system had no logged events during this period."
+
+// IsNoEntriesContent checks if the content indicates no watchdog entries were found.
+func IsNoEntriesContent(content string) bool {
+	return strings.HasPrefix(content, "=== NO WATCHDOG ENTRIES ===")
+}
+
 // Compile-time interface check
 var _ analyzer.LogReader = (*Reader)(nil)
 
@@ -121,6 +131,11 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 func (r *Reader) Validate(content string) error {
 	if len(content) == 0 {
 		return fmt.Errorf("watchdog content is empty")
+	}
+
+	// NoEntriesContent is a valid state - no entries for the time period
+	if IsNoEntriesContent(content) {
+		return nil
 	}
 
 	// Check for minimal expected content
@@ -256,7 +271,7 @@ func (r *Reader) parseDrush(content string) ([]WatchdogEntry, error) {
 // formatEntriesForAnalysis formats watchdog entries into a readable format for Claude.
 func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 	if len(entries) == 0 {
-		return "No watchdog entries found."
+		return NoEntriesContent
 	}
 
 	var sb strings.Builder
