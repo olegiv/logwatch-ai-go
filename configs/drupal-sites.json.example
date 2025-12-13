@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "default_site": "production",
+  "sites": {
+    "production": {
+      "name": "Production Site",
+      "drupal_root": "/var/www/production/drupal",
+      "watchdog_path": "/var/log/drupal/production-watchdog.json",
+      "watchdog_format": "json",
+      "min_severity": 3,
+      "watchdog_limit": 100
+    },
+    "staging": {
+      "name": "Staging Site",
+      "drupal_root": "/var/www/staging/drupal",
+      "watchdog_path": "/var/log/drupal/staging-watchdog.json",
+      "watchdog_format": "json",
+      "min_severity": 4,
+      "watchdog_limit": 200
+    },
+    "dev": {
+      "name": "Development Site",
+      "drupal_root": "/var/www/dev/drupal",
+      "watchdog_path": "/var/log/drupal/dev-watchdog.json",
+      "watchdog_format": "json",
+      "min_severity": 5,
+      "watchdog_limit": 500
+    }
+  }
+}

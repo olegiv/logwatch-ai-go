@@ -14,10 +14,13 @@ import (
 
 // CLIOptions holds command-line argument overrides
 type CLIOptions struct {
-	SourceType  string // -source-type: log source type (logwatch, drupal_watchdog)
-	SourcePath  string // -source-path: path to log source file
-	ShowHelp    bool   // -help: show usage
-	ShowVersion bool   // -version: show version
+	SourceType        string // -source-type: log source type (logwatch, drupal_watchdog)
+	SourcePath        string // -source-path: path to log source file
+	DrupalSite        string // -drupal-site: Drupal site ID from drupal-sites.json
+	DrupalSitesConfig string // -drupal-sites-config: path to drupal-sites.json
+	ListDrupalSites   bool   // -list-drupal-sites: list available sites and exit
+	ShowHelp          bool   // -help: show usage
+	ShowVersion       bool   // -version: show version
 }
 
 // ParseCLI parses command-line arguments and returns CLIOptions
@@ -26,6 +29,9 @@ func ParseCLI() *CLIOptions {
 
 	flag.StringVar(&opts.SourceType, "source-type", "", "Log source type: logwatch, drupal_watchdog")
 	flag.StringVar(&opts.SourcePath, "source-path", "", "Path to log source file (overrides LOGWATCH_OUTPUT_PATH or DRUPAL_WATCHDOG_PATH)")
+	flag.StringVar(&opts.DrupalSite, "drupal-site", "", "Drupal site ID from drupal-sites.json (for multi-site deployments)")
+	flag.StringVar(&opts.DrupalSitesConfig, "drupal-sites-config", "", "Path to drupal-sites.json configuration file")
+	flag.BoolVar(&opts.ListDrupalSites, "list-drupal-sites", false, "List available Drupal sites from drupal-sites.json and exit")
 	flag.BoolVar(&opts.ShowHelp, "help", false, "Show usage information")
 	flag.BoolVar(&opts.ShowVersion, "version", false, "Show version information")
 
@@ -38,6 +44,11 @@ func ParseCLI() *CLIOptions {
 		_, _ = fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type logwatch\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -source-path /tmp/watchdog.json\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -drupal-site production\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -list-drupal-sites\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "\nMulti-site Drupal:\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  Create drupal-sites.json with site configurations.\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  Use -drupal-site to select which site to analyze.\n")
 		_, _ = fmt.Fprintf(os.Stderr, "\nEnvironment variables can be set in .env file or exported directly.\n")
 		_, _ = fmt.Fprintf(os.Stderr, "CLI arguments override environment variables.\n")
 	}
@@ -73,6 +84,11 @@ type Config struct {
 	DrupalWatchdogPath   string // Path to watchdog export file
 	DrupalWatchdogFormat string // "json" or "drush"
 	DrupalSiteName       string // Optional: site identifier for multi-site
+
+	// Multi-site Drupal configuration (loaded from drupal-sites.json)
+	DrupalSiteID          string             // Selected site ID from drupal-sites.json
+	DrupalSitesConfig     *DrupalSitesConfig // Loaded multi-site config (nil if single-site mode)
+	DrupalSitesConfigPath string             // Path to drupal-sites.json (if used)
 
 	// Common Log Settings
 	MaxLogSizeMB int
@@ -155,12 +171,88 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 		}
 	}
 
+	// Handle multi-site Drupal configuration
+	if err := config.applyDrupalMultiSiteConfig(cli); err != nil {
+		return nil, err
+	}
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
 	return config, nil
+}
+
+// applyDrupalMultiSiteConfig loads and applies multi-site Drupal configuration
+func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
+	// Only process for drupal_watchdog source type
+	if c.LogSourceType != "drupal_watchdog" {
+		return nil
+	}
+
+	// Determine config path from CLI or auto-detect
+	var configPath string
+	if cli != nil && cli.DrupalSitesConfig != "" {
+		configPath = cli.DrupalSitesConfig
+	}
+
+	// Try to load drupal-sites.json
+	sitesConfig, foundPath, err := LoadDrupalSitesConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load drupal sites config: %w", err)
+	}
+
+	// If no config file found, use single-site mode (existing behavior)
+	if sitesConfig == nil {
+		return nil
+	}
+
+	// Store the loaded config
+	c.DrupalSitesConfig = sitesConfig
+	c.DrupalSitesConfigPath = foundPath
+
+	// Determine which site to use
+	var siteID string
+	if cli != nil && cli.DrupalSite != "" {
+		siteID = cli.DrupalSite
+	} else if sitesConfig.DefaultSite != "" {
+		siteID = sitesConfig.DefaultSite
+	}
+
+	// If no site specified and no default, keep using env config
+	if siteID == "" {
+		return nil
+	}
+
+	// Get the site configuration
+	site, err := sitesConfig.GetSite(siteID)
+	if err != nil {
+		return fmt.Errorf("failed to get drupal site '%s': %w", siteID, err)
+	}
+
+	// Store the selected site ID
+	c.DrupalSiteID = siteID
+
+	// Apply site-specific configuration (only if not already overridden by CLI)
+	// CLI -source-path takes precedence over site config
+	if cli == nil || cli.SourcePath == "" {
+		c.DrupalWatchdogPath = site.WatchdogPath
+	}
+
+	// Apply format from site config (default to json if not specified)
+	if site.WatchdogFormat != "" {
+		c.DrupalWatchdogFormat = site.WatchdogFormat
+	}
+
+	// Apply site name for display
+	if site.Name != "" {
+		c.DrupalSiteName = site.Name
+	} else {
+		c.DrupalSiteName = siteID
+	}
+
+	return nil
 }
 
 // setDefaults sets default configuration values

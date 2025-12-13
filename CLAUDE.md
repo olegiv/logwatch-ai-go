@@ -94,21 +94,27 @@ testdata/             - Test fixtures (logwatch samples, drupal watchdog JSON)
 **1. Component Initialization Flow (cmd/analyzer/main.go)**
 ```
 main() → run() → runAnalyzer()
-  1. Load config (internal/config)
-  2. Initialize secure logger (internal/logging wraps go-logger)
-  3. Initialize storage (internal/storage) - SQLite connection
-  4. Initialize Telegram client (internal/notification)
-  5. Initialize Claude client (internal/ai)
-  6. Create log source based on LOG_SOURCE_TYPE:
+  1. Parse CLI arguments (ParseCLI)
+  2. Handle -help, -version, -list-drupal-sites flags
+  3. Load config with CLI overrides (LoadWithCLI)
+     - Load .env file
+     - Apply CLI overrides
+     - Load drupal-sites.json for multi-site (if drupal_watchdog)
+     - Apply site-specific config
+  4. Initialize secure logger (internal/logging wraps go-logger)
+  5. Initialize storage (internal/storage) - SQLite connection
+  6. Initialize Telegram client (internal/notification)
+  7. Initialize Claude client (internal/ai)
+  8. Create log source based on LOG_SOURCE_TYPE:
      - logwatch → internal/logwatch (Reader, Preprocessor, PromptBuilder)
      - drupal_watchdog → internal/drupal (Reader, Preprocessor, PromptBuilder)
-  7. Read & preprocess logs using source-specific implementation
-  8. Retrieve historical context from DB
-  9. Build prompts using source-specific PromptBuilder
-  10. Analyze with Claude
-  11. Save to database
-  12. Send Telegram notifications
-  13. Cleanup old summaries (>90 days)
+  9. Read & preprocess logs using source-specific implementation
+  10. Retrieve historical context from DB (filtered by source type + site)
+  11. Build prompts using source-specific PromptBuilder
+  12. Analyze with Claude
+  13. Save to database (with source type + site name)
+  14. Send Telegram notifications
+  15. Cleanup old summaries (>90 days)
 ```
 
 **2. Configuration Management (internal/config/config.go)**
@@ -191,9 +197,12 @@ tokens = max(chars/4, words/0.75)
 
 **7. Database Schema (internal/storage/sqlite.go)**
 ```sql
+-- Schema v2 (current)
 CREATE TABLE summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,           -- RFC3339 format
+    log_source_type TEXT NOT NULL DEFAULT 'logwatch',  -- v2: logwatch/drupal_watchdog
+    site_name TEXT NOT NULL DEFAULT '',                -- v2: Site identifier for multi-site
     system_status TEXT NOT NULL,       -- Good/Warning/Critical/Bad
     summary TEXT NOT NULL,
     critical_issues TEXT,              -- JSON array
@@ -204,7 +213,11 @@ CREATE TABLE summaries (
     output_tokens INTEGER,
     cost_usd REAL
 );
+
+CREATE INDEX idx_source_site ON summaries(log_source_type, site_name);
 ```
+- **Schema versioning**: Auto-migrates from v1 to v2 (adds log_source_type/site_name)
+- **Historical context filtering**: Queries filtered by source type and site name
 - Connection timeout: 5s busy timeout prevents indefinite waits on locks
 - Connection pool: Single connection (optimal for SQLite), 30-min lifetime
 
@@ -239,6 +252,44 @@ CREATE TABLE summaries (
   - `DRUPAL_WATCHDOG_PATH` is required
   - `DRUPAL_WATCHDOG_FORMAT`: `json` (default) or `drush`
   - `DRUPAL_SITE_NAME`: optional, for multi-site deployments
+
+### Multi-Site Drupal Configuration
+
+Multi-site support uses `drupal-sites.json` for centralized configuration:
+
+**Configuration File (internal/config/drupal_sites.go):**
+```go
+type DrupalSite struct {
+    Name           string `json:"name"`            // Human-readable site name
+    DrupalRoot     string `json:"drupal_root"`     // Path to Drupal installation
+    WatchdogPath   string `json:"watchdog_path"`   // Path to watchdog export file
+    WatchdogFormat string `json:"watchdog_format"` // "json" or "drush"
+    MinSeverity    int    `json:"min_severity"`    // RFC 5424 severity (0-7)
+    WatchdogLimit  int    `json:"watchdog_limit"`  // Max entries in output
+}
+
+type DrupalSitesConfig struct {
+    Version     string                `json:"version"`
+    DefaultSite string                `json:"default_site"`
+    Sites       map[string]DrupalSite `json:"sites"`
+}
+```
+
+**Search Locations** (in order):
+1. Explicit path from `-drupal-sites-config` flag
+2. `./drupal-sites.json`
+3. `./configs/drupal-sites.json`
+4. `/opt/logwatch-ai/drupal-sites.json`
+5. `~/.config/logwatch-ai/drupal-sites.json`
+
+**CLI Options for Multi-Site:**
+```bash
+-drupal-site string          # Site ID from drupal-sites.json
+-drupal-sites-config string  # Custom path to drupal-sites.json
+-list-drupal-sites           # List available sites and exit
+```
+
+**Priority:** CLI args > drupal-sites.json > .env > defaults
 
 ### Proxy Support
 Both `HTTP_PROXY` and `HTTPS_PROXY` are supported:
@@ -429,14 +480,21 @@ func ShouldTriggerAlert(status string) bool {
 
 ### Querying Historical Data
 ```go
-// Last 7 days (for Claude context)
-summaries, err := store.GetRecentSummaries(7)
+// Last 7 days with source/site filtering (for Claude context)
+filter := &storage.SourceFilter{
+    LogSourceType: "drupal_watchdog",
+    SiteName:      "production",  // Empty string for logwatch
+}
+summaries, err := store.GetRecentSummaries(7, filter)
 
 // Custom period
-summaries, err := store.GetRecentSummaries(30)
+summaries, err := store.GetRecentSummaries(30, filter)
 
-// Statistics
-stats, err := store.GetStatistics()
+// Historical context formatted for Claude (filtered by source/site)
+context, err := store.GetHistoricalContext(7, filter)
+
+// Statistics (optionally filtered)
+stats, err := store.GetStatistics(filter)  // Pass nil for all sources
 // Returns: total_summaries, status_distribution, total_cost_usd
 ```
 
@@ -484,6 +542,32 @@ stats, err := store.GetStatistics()
 - Drupal preprocessing assigns LOW priority to 404s
 - These are compressed during preprocessing
 - For security analysis, check for patterns (wp-admin, .env probing)
+
+### Multi-Site Drupal Issues
+
+**"Site not found in drupal-sites.json"**
+- Use `-list-drupal-sites` to see available sites
+- Check that the site ID matches exactly (case-sensitive)
+- Verify drupal-sites.json is in a search location
+
+**"No drupal-sites.json found"**
+- Create the file in one of the search locations
+- Use `-drupal-sites-config` to specify a custom path
+- Single-site mode will use .env configuration as fallback
+
+**Generate Script Multi-Site Support (scripts/generate-drupal-watchdog.sh):**
+```bash
+# List available sites
+./scripts/generate-drupal-watchdog.sh --list-sites
+
+# Export for specific site
+./scripts/generate-drupal-watchdog.sh --site production
+
+# Custom sites config path
+./scripts/generate-drupal-watchdog.sh --site staging --sites-config /path/to/sites.json
+```
+- Requires `jq` for multi-site configuration parsing
+- Site config overrides .env values (CLI > site config > .env > defaults)
 
 ## Production Deployment Best Practices
 

@@ -51,6 +51,11 @@ func run() int {
 		return exitSuccess
 	}
 
+	// Handle -list-drupal-sites flag
+	if cli.ListDrupalSites {
+		return handleListDrupalSites(cli)
+	}
+
 	// Setup signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -85,7 +90,15 @@ func run() int {
 		}
 	}()
 
-	log.Info().Str("source_type", cfg.LogSourceType).Msg("Starting Log AI Analyzer")
+	// Log startup info with optional site details
+	logEvent := log.Info().Str("source_type", cfg.LogSourceType)
+	if cfg.DrupalSiteID != "" {
+		logEvent = logEvent.Str("drupal_site", cfg.DrupalSiteID)
+	}
+	if cfg.DrupalSiteName != "" && cfg.DrupalSiteName != cfg.DrupalSiteID {
+		logEvent = logEvent.Str("site_name", cfg.DrupalSiteName)
+	}
+	logEvent.Msg("Starting Log AI Analyzer")
 	log.Info().Str("model", cfg.ClaudeModel).Msg("Configured AI model")
 
 	// Run the analyzer
@@ -183,10 +196,15 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		Msg("Log file read successfully")
 
 	// Get historical context (if database enabled)
+	// Filter by source type and site to get relevant historical data only
 	var historicalContext string
+	sourceFilter := &storage.SourceFilter{
+		LogSourceType: cfg.LogSourceType,
+		SiteName:      cfg.DrupalSiteName, // Empty for logwatch
+	}
 	if store != nil {
 		log.Info().Msg("Retrieving historical context...")
-		historicalContext, err = store.GetHistoricalContext(7) // Last 7 days
+		historicalContext, err = store.GetHistoricalContext(7, sourceFilter) // Last 7 days
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to get historical context, continuing without it")
 		} else if historicalContext != "" {
@@ -229,6 +247,8 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		log.Info().Msg("Saving analysis to database...")
 		summary := &storage.Summary{
 			Timestamp:       time.Now(),
+			LogSourceType:   cfg.LogSourceType,
+			SiteName:        cfg.DrupalSiteName, // Empty for logwatch
 			SystemStatus:    analysis.SystemStatus,
 			Summary:         analysis.Summary,
 			CriticalIssues:  analysis.CriticalIssues,
@@ -258,7 +278,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 
 	// Send Telegram notifications
 	log.Info().Msg("Sending Telegram notifications...")
-	if err := telegramClient.SendAnalysisReport(analysis, stats, cfg.LogSourceType); err != nil {
+	if err := telegramClient.SendAnalysisReport(analysis, stats, cfg.LogSourceType, cfg.DrupalSiteName); err != nil {
 		return fmt.Errorf("failed to send Telegram notification: %w", err)
 	}
 
@@ -291,6 +311,10 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 		}, nil
 
 	case "drupal_watchdog":
+		promptBuilder := drupal.NewPromptBuilder()
+		if cfg.DrupalSiteName != "" {
+			promptBuilder.SetSiteName(cfg.DrupalSiteName)
+		}
 		return &analyzer.LogSource{
 			Type: analyzer.LogSourceDrupalWatchdog,
 			Reader: drupal.NewReader(
@@ -300,10 +324,64 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 				drupal.InputFormat(cfg.DrupalWatchdogFormat),
 			),
 			Preprocessor:  drupal.NewPreprocessor(cfg.MaxPreprocessingTokens),
-			PromptBuilder: drupal.NewPromptBuilder(),
+			PromptBuilder: promptBuilder,
 		}, nil
 
 	default:
 		return nil, fmt.Errorf("unsupported log source type: %s", cfg.LogSourceType)
 	}
+}
+
+// handleListDrupalSites lists available Drupal sites from drupal-sites.json
+func handleListDrupalSites(cli *config.CLIOptions) int {
+	sitesConfig, configPath, err := config.LoadDrupalSitesConfig(cli.DrupalSitesConfig)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return exitFailure
+	}
+
+	if sitesConfig == nil {
+		_, _ = fmt.Fprintf(os.Stderr, "No drupal-sites.json configuration file found.\n")
+		_, _ = fmt.Fprintf(os.Stderr, "\nSearch locations:\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  - ./drupal-sites.json\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  - ./configs/drupal-sites.json\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  - /opt/logwatch-ai/drupal-sites.json\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  - ~/.config/logwatch-ai/drupal-sites.json\n")
+		_, _ = fmt.Fprintf(os.Stderr, "\nUse -drupal-sites-config to specify a custom path.\n")
+		return exitFailure
+	}
+
+	fmt.Printf("Drupal sites configuration: %s\n", configPath)
+	fmt.Printf("Version: %s\n\n", sitesConfig.Version)
+	fmt.Printf("Available sites:\n")
+
+	for _, siteID := range sitesConfig.ListSites() {
+		site := sitesConfig.Sites[siteID]
+		defaultMarker := ""
+		if siteID == sitesConfig.DefaultSite {
+			defaultMarker = " (default)"
+		}
+
+		displayName := site.Name
+		if displayName == "" {
+			displayName = siteID
+		}
+
+		fmt.Printf("  %-20s %s%s\n", siteID, displayName, defaultMarker)
+		fmt.Printf("    Drupal root:    %s\n", site.DrupalRoot)
+		fmt.Printf("    Watchdog path:  %s\n", site.WatchdogPath)
+		fmt.Printf("    Format:         %s\n", getFormatOrDefault(site.WatchdogFormat))
+		fmt.Printf("    Min severity:   %d\n", site.MinSeverity)
+		fmt.Println()
+	}
+
+	return exitSuccess
+}
+
+// getFormatOrDefault returns the format or "json" if empty
+func getFormatOrDefault(format string) string {
+	if format == "" {
+		return "json"
+	}
+	return format
 }

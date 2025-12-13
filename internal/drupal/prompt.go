@@ -11,11 +11,24 @@ import (
 var _ analyzer.PromptBuilder = (*PromptBuilder)(nil)
 
 // PromptBuilder implements analyzer.PromptBuilder for Drupal watchdog analysis.
-type PromptBuilder struct{}
+type PromptBuilder struct {
+	siteName string // Optional site name for multi-site deployments
+}
 
 // NewPromptBuilder creates a new Drupal prompt builder.
 func NewPromptBuilder() *PromptBuilder {
 	return &PromptBuilder{}
+}
+
+// SetSiteName sets the site name for display in prompts.
+// Used for multi-site Drupal deployments.
+func (p *PromptBuilder) SetSiteName(name string) {
+	p.siteName = name
+}
+
+// GetSiteName returns the configured site name.
+func (p *PromptBuilder) GetSiteName() string {
+	return p.siteName
 }
 
 // GetLogType returns the log type identifier.
@@ -139,6 +152,13 @@ You MUST respond with a valid JSON object (and ONLY JSON) in this exact format:
 // GetUserPrompt constructs the user prompt with Drupal watchdog content and historical context.
 func (p *PromptBuilder) GetUserPrompt(logContent, historicalContext string) string {
 	var prompt strings.Builder
+
+	// Include site name if configured (multi-site deployment)
+	if p.siteName != "" {
+		prompt.WriteString("DRUPAL SITE: ")
+		prompt.WriteString(p.siteName)
+		prompt.WriteString("\n\n")
+	}
 
 	prompt.WriteString("DRUPAL WATCHDOG LOGS:\n")
 	prompt.WriteString(ai.SanitizeLogContent(logContent))

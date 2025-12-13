@@ -21,6 +21,9 @@
 #   -s, --severity      Filter by severity: emergency,alert,critical,error,warning,notice,info,debug
 #   -t, --type          Filter by log type (e.g., php, cron, system)
 #   --since             Export entries from the last N hours (default: 24)
+#   -S, --site          Drupal site ID from drupal-sites.json (for multi-site deployments)
+#   --sites-config      Path to drupal-sites.json configuration file
+#   --list-sites        List available Drupal sites from drupal-sites.json and exit
 #   -h, --help          Show this help message
 #   -v, --version       Show version information
 #
@@ -45,6 +48,12 @@
 #
 #   # Export PHP errors only
 #   ./scripts/generate-drupal-watchdog.sh -t php -c 200
+#
+#   # Multi-site: List available sites
+#   ./scripts/generate-drupal-watchdog.sh --list-sites
+#
+#   # Multi-site: Export from specific site
+#   ./scripts/generate-drupal-watchdog.sh --site production
 #
 # Crontab example (export daily at 2:00 AM before analyzer runs):
 #   0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh
@@ -117,6 +126,110 @@ LIMIT=""
 SEVERITY=""
 LOG_TYPE=""
 SINCE_HOURS="24"
+
+# Multi-site configuration
+DRUPAL_SITE=""
+SITES_CONFIG_FILE=""
+LIST_SITES=false
+
+# Find drupal-sites.json configuration file
+find_sites_config() {
+    local explicit_path="$1"
+    local locations=(
+        "$explicit_path"
+        "$SCRIPT_DIR/../drupal-sites.json"
+        "$SCRIPT_DIR/../configs/drupal-sites.json"
+        "/opt/logwatch-ai/drupal-sites.json"
+    )
+
+    for loc in "${locations[@]}"; do
+        if [ -n "$loc" ] && [ -f "$loc" ]; then
+            echo "$loc"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Get site configuration field using jq
+get_site_config() {
+    local config_file="$1"
+    local site_id="$2"
+    local field="$3"
+
+    jq -r ".sites[\"$site_id\"].$field // empty" "$config_file" 2>/dev/null
+}
+
+# List all available sites from drupal-sites.json
+list_drupal_sites() {
+    local config_file="$1"
+    local default_site
+
+    if ! command -v jq &> /dev/null; then
+        log_error "jq is required for multi-site configuration"
+        log_error "Install jq: apt-get install jq (Debian/Ubuntu) or brew install jq (macOS)"
+        exit 1
+    fi
+
+    default_site=$(jq -r '.default_site // empty' "$config_file" 2>/dev/null)
+    version=$(jq -r '.version // "unknown"' "$config_file" 2>/dev/null)
+
+    echo "Drupal sites configuration: $config_file"
+    echo "Version: $version"
+    echo ""
+    echo "Available sites:"
+
+    # List all sites with their details
+    jq -r '.sites | to_entries[] | "\(.key)|\(.value.name // .key)|\(.value.drupal_root)|\(.value.watchdog_path)"' "$config_file" 2>/dev/null | while IFS='|' read -r site_id name drupal_root watchdog_path; do
+        default_marker=""
+        if [ "$site_id" = "$default_site" ]; then
+            default_marker=" (default)"
+        fi
+        printf "  %-20s %s%s\n" "$site_id" "$name" "$default_marker"
+        printf "    Drupal root:    %s\n" "$drupal_root"
+        printf "    Watchdog path:  %s\n" "$watchdog_path"
+        echo ""
+    done
+
+    exit 0
+}
+
+# Apply site-specific configuration from drupal-sites.json
+apply_site_config() {
+    local config_file="$1"
+    local site_id="$2"
+
+    if ! command -v jq &> /dev/null; then
+        log_error "jq is required for multi-site configuration"
+        log_error "Install jq: apt-get install jq (Debian/Ubuntu) or brew install jq (macOS)"
+        exit 1
+    fi
+
+    # Validate site exists
+    if ! jq -e ".sites[\"$site_id\"]" "$config_file" > /dev/null 2>&1; then
+        log_error "Site '$site_id' not found in $config_file"
+        log_error "Use --list-sites to see available sites"
+        exit 1
+    fi
+
+    log "Using site configuration: $site_id from $config_file"
+
+    # Get site-specific configuration
+    local site_drupal_root site_watchdog_path site_watchdog_format site_min_severity site_watchdog_limit
+
+    site_drupal_root=$(get_site_config "$config_file" "$site_id" "drupal_root")
+    site_watchdog_path=$(get_site_config "$config_file" "$site_id" "watchdog_path")
+    site_watchdog_format=$(get_site_config "$config_file" "$site_id" "watchdog_format")
+    site_min_severity=$(get_site_config "$config_file" "$site_id" "min_severity")
+    site_watchdog_limit=$(get_site_config "$config_file" "$site_id" "watchdog_limit")
+
+    # Apply site config (CLI > site config > .env > defaults)
+    [ -z "$CLI_DRUPAL_ROOT" ] && [ -n "$site_drupal_root" ] && DRUPAL_ROOT="$site_drupal_root"
+    [ -z "$CLI_OUTPUT_PATH" ] && [ -n "$site_watchdog_path" ] && OUTPUT_PATH="$site_watchdog_path"
+    [ -z "$CLI_FORMAT" ] && [ -n "$site_watchdog_format" ] && FORMAT="$site_watchdog_format"
+    [ -z "$CLI_LIMIT" ] && [ -n "$site_watchdog_limit" ] && LIMIT="$site_watchdog_limit"
+    [ -n "$site_min_severity" ] && MIN_SEVERITY="$site_min_severity"
+}
 
 # Color output (disabled if not terminal)
 if [ -t 1 ]; then
@@ -206,6 +319,18 @@ while [[ $# -gt 0 ]]; do
             SINCE_HOURS="$2"
             shift 2
             ;;
+        -S|--site)
+            DRUPAL_SITE="$2"
+            shift 2
+            ;;
+        --sites-config)
+            SITES_CONFIG_FILE="$2"
+            shift 2
+            ;;
+        --list-sites)
+            LIST_SITES=true
+            shift
+            ;;
         -h|--help|-help)
             show_help
             ;;
@@ -229,7 +354,33 @@ else
     log_warning "No .env file found. Using defaults and command line arguments."
 fi
 
-# Apply configuration priority: CLI args > .env > defaults
+# Handle --list-sites flag
+if [ "$LIST_SITES" = true ]; then
+    FOUND_SITES_CONFIG=$(find_sites_config "$SITES_CONFIG_FILE") || {
+        log_error "No drupal-sites.json configuration file found."
+        echo ""
+        echo "Search locations:"
+        echo "  - ./drupal-sites.json"
+        echo "  - ./configs/drupal-sites.json"
+        echo "  - /opt/logwatch-ai/drupal-sites.json"
+        echo ""
+        echo "Use --sites-config to specify a custom path."
+        exit 1
+    }
+    list_drupal_sites "$FOUND_SITES_CONFIG"
+fi
+
+# Apply multi-site configuration if --site specified
+if [ -n "$DRUPAL_SITE" ]; then
+    FOUND_SITES_CONFIG=$(find_sites_config "$SITES_CONFIG_FILE") || {
+        log_error "No drupal-sites.json found. Required when using --site"
+        log_error "Use --list-sites to check configuration, or --sites-config to specify path"
+        exit 1
+    }
+    apply_site_config "$FOUND_SITES_CONFIG" "$DRUPAL_SITE"
+fi
+
+# Apply configuration priority: CLI args > site config > .env > defaults
 DRUPAL_ROOT="${CLI_DRUPAL_ROOT:-${DRUPAL_ROOT:-/var/www/html}}"
 OUTPUT_PATH="${CLI_OUTPUT_PATH:-${DRUPAL_WATCHDOG_PATH:-/tmp/drupal-watchdog.json}}"
 FORMAT="${CLI_FORMAT:-${DRUPAL_WATCHDOG_FORMAT:-json}}"
@@ -263,6 +414,7 @@ fi
 
 log "Starting Drupal watchdog export"
 log "Configuration:"
+[ -n "$DRUPAL_SITE" ] && log "  Site: $DRUPAL_SITE"
 log "  Drupal root: $DRUPAL_ROOT"
 log "  Output: $OUTPUT_PATH"
 log "  Format: $FORMAT"
@@ -271,6 +423,7 @@ log "  Limit: $LIMIT (max entries in output)"
 log "  Min severity: $MIN_SEVERITY (0=emergency to 7=debug)"
 [ -n "$LOG_TYPE" ] && log "  Type filter: $LOG_TYPE"
 [ -n "$FOUND_ENV_FILE" ] && log "  Config source: $FOUND_ENV_FILE"
+[ -n "$FOUND_SITES_CONFIG" ] && log "  Sites config: $FOUND_SITES_CONFIG"
 
 # Check if Drupal root exists
 if [ ! -d "$DRUPAL_ROOT" ]; then

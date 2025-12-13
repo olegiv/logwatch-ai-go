@@ -183,6 +183,76 @@ DRUPAL_WATCHDOG_FORMAT=json
 ]
 ```
 
+### Multi-Site Drupal Support
+
+For organizations managing multiple Drupal sites, the analyzer supports a centralized configuration file.
+
+1. **Create `drupal-sites.json`** (search locations: `./`, `./configs/`, `/opt/logwatch-ai/`):
+```json
+{
+  "version": "1.0",
+  "default_site": "production",
+  "sites": {
+    "production": {
+      "name": "Production Site",
+      "drupal_root": "/var/www/production/drupal",
+      "watchdog_path": "/var/log/drupal/production-watchdog.json",
+      "watchdog_format": "json",
+      "min_severity": 3,
+      "watchdog_limit": 100
+    },
+    "staging": {
+      "name": "Staging Site",
+      "drupal_root": "/var/www/staging/drupal",
+      "watchdog_path": "/var/log/drupal/staging-watchdog.json",
+      "watchdog_format": "json",
+      "min_severity": 4,
+      "watchdog_limit": 200
+    }
+  }
+}
+```
+
+2. **List available sites**:
+```bash
+# Analyzer
+./logwatch-analyzer -list-drupal-sites
+
+# Export script
+./scripts/generate-drupal-watchdog.sh --list-sites
+```
+
+3. **Analyze a specific site**:
+```bash
+./logwatch-analyzer -source-type drupal_watchdog -drupal-site production
+```
+
+4. **Export watchdog for a specific site**:
+```bash
+./scripts/generate-drupal-watchdog.sh --site production
+```
+
+5. **Automated multi-site cron** (analyze all sites daily):
+```bash
+# Export watchdog for each site at 2:00 AM
+0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh --site production
+5 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh --site staging
+
+# Analyze each site at 2:15 AM
+15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -drupal-site production >> logs/cron.log 2>&1
+20 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -drupal-site staging >> logs/cron.log 2>&1
+```
+
+**Site Configuration Fields:**
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | No | Human-readable site name for reports |
+| `drupal_root` | Yes | Path to Drupal installation root |
+| `watchdog_path` | Yes | Path to watchdog export file |
+| `watchdog_format` | No | `json` (default) or `drush` |
+| `min_severity` | No | RFC 5424 severity level 0-7 (default: 3=error) |
+| `watchdog_limit` | No | Max entries in output (default: 100) |
+
 ## Usage
 
 ### Manual Run
@@ -193,6 +263,39 @@ DRUPAL_WATCHDOG_FORMAT=json
 
 # Or if installed system-wide
 logwatch-analyzer
+```
+
+### Command-Line Options
+
+```bash
+./logwatch-analyzer [options]
+
+Options:
+  -source-type string        Log source type: logwatch, drupal_watchdog
+  -source-path string        Path to log source file (overrides env config)
+  -drupal-site string        Drupal site ID from drupal-sites.json
+  -drupal-sites-config string  Path to drupal-sites.json configuration file
+  -list-drupal-sites         List available Drupal sites and exit
+  -help                      Show usage information
+  -version                   Show version information
+```
+
+**Examples:**
+```bash
+# Analyze logwatch with default config
+./logwatch-analyzer
+
+# Override source type
+./logwatch-analyzer -source-type drupal_watchdog
+
+# Analyze specific Drupal site
+./logwatch-analyzer -drupal-site production
+
+# Use custom watchdog file
+./logwatch-analyzer -source-type drupal_watchdog -source-path /tmp/custom-watchdog.json
+
+# List available Drupal sites
+./logwatch-analyzer -list-drupal-sites
 ```
 
 ### Build Options

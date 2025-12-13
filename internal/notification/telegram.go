@@ -54,9 +54,10 @@ func NewTelegramClient(botToken string, archiveChannel, alertsChannel int64) (*T
 }
 
 // SendAnalysisReport sends the analysis report to Telegram channels
-func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Stats, logSourceType string) error {
+// siteName is optional and used for multi-site Drupal deployments to identify the site in the report.
+func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Stats, logSourceType, siteName string) error {
 	// Format message
-	message := t.formatMessage(analysis, stats, logSourceType)
+	message := t.formatMessage(analysis, stats, logSourceType, siteName)
 
 	// Send to archive channel (always)
 	if err := t.sendToChannel(t.archiveChannel, message); err != nil {
@@ -75,15 +76,19 @@ func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Sta
 }
 
 // formatMessage formats the analysis into a Telegram message
-func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats, logSourceType string) string {
+func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats, logSourceType, siteName string) string {
 
 	const formattedListTemplate = "%d\\. %s\n"
 
 	var msg strings.Builder
 
-	// Header with log source type
+	// Header with log source type and optional site name
 	sourceDisplayName := getLogSourceDisplayName(logSourceType)
-	msg.WriteString(fmt.Sprintf("🔍 *%s Report*\n", sourceDisplayName))
+	if siteName != "" {
+		msg.WriteString(fmt.Sprintf("🔍 *%s Report* \\- %s\n", sourceDisplayName, escapeMarkdown(siteName)))
+	} else {
+		msg.WriteString(fmt.Sprintf("🔍 *%s Report*\n", sourceDisplayName))
+	}
 	msg.WriteString(fmt.Sprintf("🖥 Host\\: %s\n", escapeMarkdown(t.hostname)))
 	msg.WriteString(fmt.Sprintf("📅 Date\\: %s\n", escapeMarkdown(time.Now().Format("2006-01-02 15:04:05"))))
 	msg.WriteString(fmt.Sprintf("🌍 Timezone\\: %s\n", escapeMarkdown(time.Now().Location().String())))
