@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-12-13
+
 ### Added
 
 #### Drupal Watchdog Analysis
@@ -255,7 +257,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.0.0...v0.1.0
