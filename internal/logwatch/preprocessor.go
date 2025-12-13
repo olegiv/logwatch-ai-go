@@ -5,9 +5,15 @@ import (
 	"math"
 	"regexp"
 	"strings"
+
+	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
 
-// Preprocessor handles logwatch content preprocessing for large files
+// Compile-time interface check
+var _ analyzer.Preprocessor = (*Preprocessor)(nil)
+
+// Preprocessor handles logwatch content preprocessing for large files.
+// Implements analyzer.Preprocessor interface.
 type Preprocessor struct {
 	maxTokens int
 }
@@ -26,7 +32,7 @@ func NewPreprocessor(maxTokens int) *Preprocessor {
 	}
 }
 
-// EstimateTokens estimates the number of tokens in the content
+// EstimateTokens estimates the number of tokens in the content.
 // Uses the same algorithm as Node.js version: max(chars/4, words/0.75)
 func (p *Preprocessor) EstimateTokens(content string) int {
 	chars := len(content)
@@ -39,6 +45,12 @@ func (p *Preprocessor) EstimateTokens(content string) int {
 		return charsEstimate
 	}
 	return wordsEstimate
+}
+
+// ShouldProcess determines if preprocessing is needed based on token count.
+// Returns true if the estimated tokens exceed maxTokens.
+func (p *Preprocessor) ShouldProcess(content string, maxTokens int) bool {
+	return p.EstimateTokens(content) > maxTokens
 }
 
 // Process preprocesses the content to reduce its size while preserving critical information

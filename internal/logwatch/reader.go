@@ -4,9 +4,15 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
 
-// Reader handles reading and validating logwatch output files
+// Compile-time interface check
+var _ analyzer.LogReader = (*Reader)(nil)
+
+// Reader handles reading and validating logwatch output files.
+// Implements analyzer.LogReader interface.
 type Reader struct {
 	maxSizeMB           int
 	enablePreprocessing bool
@@ -24,7 +30,14 @@ func NewReader(maxSizeMB int, enablePreprocessing bool, maxTokens int) *Reader {
 	}
 }
 
-// ReadLogwatchOutput reads and processes the logwatch output file
+// Read implements analyzer.LogReader.Read.
+// Reads and processes the logwatch output file.
+func (r *Reader) Read(sourcePath string) (string, error) {
+	return r.ReadLogwatchOutput(sourcePath)
+}
+
+// ReadLogwatchOutput reads and processes the logwatch output file.
+// Deprecated: Use Read() instead. This method is kept for backward compatibility.
 func (r *Reader) ReadLogwatchOutput(filePath string) (string, error) {
 	// Check if file exists
 	fileInfo, err := os.Stat(filePath)
@@ -83,6 +96,12 @@ func (r *Reader) ReadLogwatchOutput(filePath string) (string, error) {
 	return contentStr, nil
 }
 
+// Validate implements analyzer.LogReader.Validate.
+// Performs basic validation on logwatch content.
+func (r *Reader) Validate(content string) error {
+	return r.validateContent(content)
+}
+
 // validateContent performs basic validation on logwatch content
 func (r *Reader) validateContent(content string) error {
 	if len(content) == 0 {
@@ -98,7 +117,14 @@ func (r *Reader) validateContent(content string) error {
 	return nil
 }
 
-// GetFileInfo returns information about the logwatch file
+// GetSourceInfo implements analyzer.LogReader.GetSourceInfo.
+// Returns metadata about the logwatch file.
+func (r *Reader) GetSourceInfo(sourcePath string) (map[string]interface{}, error) {
+	return r.GetFileInfo(sourcePath)
+}
+
+// GetFileInfo returns information about the logwatch file.
+// Deprecated: Use GetSourceInfo() instead. This method is kept for backward compatibility.
 func (r *Reader) GetFileInfo(filePath string) (map[string]interface{}, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
