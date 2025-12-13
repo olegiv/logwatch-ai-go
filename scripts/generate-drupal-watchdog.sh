@@ -5,57 +5,54 @@
 # This script exports Drupal watchdog logs using drush for analysis
 # with the logwatch-ai-go analyzer.
 #
-# Configuration is loaded from .env file (same as logwatch-ai-go analyzer).
-# Command line arguments override .env values.
+# Configuration is loaded from drupal-sites.json (same as logwatch-ai-go analyzer).
+# Command line arguments override site configuration values.
 #
 # Usage:
 #   ./scripts/generate-drupal-watchdog.sh [options]
 #
 # Options:
-#   -e, --env-file      Path to .env file (default: auto-detect)
-#   -d, --drupal-root   Path to Drupal project root (env: DRUPAL_ROOT)
-#   -o, --output        Output file path (env: DRUPAL_WATCHDOG_PATH)
-#   -f, --format        Output format: json or table (env: DRUPAL_WATCHDOG_FORMAT)
-#   -c, --count         Max entries to fetch from drush (default: 10000)
-#   -l, --limit         Max entries in output file (env: DRUPAL_WATCHDOG_LIMIT, default: 100)
-#   -s, --severity      Filter by severity: emergency,alert,critical,error,warning,notice,info,debug
-#   -t, --type          Filter by log type (e.g., php, cron, system)
-#   -S, --site          Drupal site ID from drupal-sites.json (for multi-site deployments)
+#   -S, --site          Drupal site ID from drupal-sites.json (required unless default_site set)
 #   --sites-config      Path to drupal-sites.json configuration file
 #   --list-sites        List available Drupal sites from drupal-sites.json and exit
+#   -d, --drupal-root   Override Drupal project root from site config
+#   -o, --output        Override output file path from site config
+#   -f, --format        Override output format: json or table
+#   -c, --count         Max entries to fetch from drush (default: 10000)
+#   -l, --limit         Override max entries in output file from site config
+#   -s, --severity      Filter by severity: emergency,alert,critical,error,warning,notice,info,debug
+#   -t, --type          Filter by log type (e.g., php, cron, system)
 #   -h, --help          Show this help message
 #   -v, --version       Show version information
 #
-# Environment Variables (from .env):
-#   DRUPAL_ROOT              - Path to Drupal project root
-#   DRUPAL_WATCHDOG_PATH     - Output file path for watchdog export
-#   DRUPAL_WATCHDOG_FORMAT   - Output format (json or drush)
-#   DRUPAL_WATCHDOG_LIMIT    - Max entries in output file (default: 100)
-#   DRUPAL_MIN_SEVERITY      - Minimum severity (0-7, default: 3=error)
-#                              0=emergency, 1=alert, 2=critical, 3=error,
-#                              4=warning, 5=notice, 6=info, 7=debug
+# Configuration:
+#   Site configuration is loaded from drupal-sites.json (see configs/drupal-sites.json.example)
+#   Search locations:
+#     - ./drupal-sites.json
+#     - ./configs/drupal-sites.json
+#     - /opt/logwatch-ai/drupal-sites.json
 #
 # Examples:
-#   # Export using .env configuration
-#   ./scripts/generate-drupal-watchdog.sh
-#
-#   # Export last 500 error and warning entries
-#   ./scripts/generate-drupal-watchdog.sh -c 500 -s error,warning
-#
-#   # Override .env with custom paths
-#   ./scripts/generate-drupal-watchdog.sh -d /var/www/mysite/drupal -o /tmp/mysite-watchdog.json
-#
-#   # Export PHP errors only
-#   ./scripts/generate-drupal-watchdog.sh -t php -c 200
-#
-#   # Multi-site: List available sites
+#   # List available sites
 #   ./scripts/generate-drupal-watchdog.sh --list-sites
 #
-#   # Multi-site: Export from specific site
+#   # Export from default site (requires default_site in drupal-sites.json)
+#   ./scripts/generate-drupal-watchdog.sh
+#
+#   # Export from specific site
 #   ./scripts/generate-drupal-watchdog.sh --site production
 #
+#   # Export last 500 error and warning entries
+#   ./scripts/generate-drupal-watchdog.sh --site production -c 500 -s error,warning
+#
+#   # Override output path from site config
+#   ./scripts/generate-drupal-watchdog.sh --site staging -o /tmp/staging-watchdog.json
+#
+#   # Export PHP errors only
+#   ./scripts/generate-drupal-watchdog.sh --site production -t php -c 200
+#
 # Crontab example (export daily at 2:00 AM before analyzer runs):
-#   0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh
+#   0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh --site production
 #
 
 set -e  # Exit on error
@@ -70,53 +67,7 @@ get_version() {
     echo "$version"
 }
 
-# Find .env file (check multiple locations)
-find_env_file() {
-    local locations=(
-        "$ENV_FILE"                           # Explicit path from -e flag
-        "$SCRIPT_DIR/../.env"                 # Project root (relative to script)
-        "$SCRIPT_DIR/.env"                    # Scripts directory
-        "/opt/logwatch-ai/.env"               # Production install location
-        "./.env"                              # Current directory
-    )
-
-    for loc in "${locations[@]}"; do
-        if [ -n "$loc" ] && [ -f "$loc" ]; then
-            echo "$loc"
-            return 0
-        fi
-    done
-    return 1
-}
-
-# Load .env file
-load_env() {
-    local env_file="$1"
-    if [ -f "$env_file" ]; then
-        # Export variables from .env (ignore comments and empty lines)
-        while IFS='=' read -r key value; do
-            # Skip comments and empty lines
-            [[ "$key" =~ ^[[:space:]]*# ]] && continue
-            [[ -z "$key" ]] && continue
-            # Remove leading/trailing whitespace from key
-            key=$(echo "$key" | xargs)
-            # Only process valid variable names
-            if [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
-                # Remove surrounding quotes from value if present
-                value="${value%\"}"
-                value="${value#\"}"
-                value="${value%\'}"
-                value="${value#\'}"
-                export "$key=$value"
-            fi
-        done < "$env_file"
-        return 0
-    fi
-    return 1
-}
-
-# Default configuration (will be overridden by .env and CLI args)
-ENV_FILE=""
+# Default configuration (will be overridden by site config and CLI args)
 DRUPAL_ROOT=""
 OUTPUT_PATH=""
 FORMAT=""
@@ -124,6 +75,7 @@ COUNT="10000"
 LIMIT=""
 SEVERITY=""
 LOG_TYPE=""
+MIN_SEVERITY=""
 
 # Multi-site configuration
 DRUPAL_SITE=""
@@ -273,7 +225,7 @@ show_version() {
     exit 0
 }
 
-# Parse command line arguments (first pass for --env-file)
+# Parse command line arguments
 CLI_DRUPAL_ROOT=""
 CLI_OUTPUT_PATH=""
 CLI_FORMAT=""
@@ -281,10 +233,6 @@ CLI_LIMIT=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -e|--env-file)
-            ENV_FILE="$2"
-            shift 2
-            ;;
         -d|--drupal-root)
             CLI_DRUPAL_ROOT="$2"
             shift 2
@@ -339,50 +287,50 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Load .env file
-FOUND_ENV_FILE=$(find_env_file) || true
-if [ -n "$FOUND_ENV_FILE" ]; then
-    log "Loading configuration from: $FOUND_ENV_FILE"
-    load_env "$FOUND_ENV_FILE"
-else
-    log_warning "No .env file found. Using defaults and command line arguments."
-fi
+# Find drupal-sites.json (required)
+FOUND_SITES_CONFIG=$(find_sites_config "$SITES_CONFIG_FILE") || {
+    log_error "No drupal-sites.json configuration file found."
+    echo ""
+    echo "Search locations:"
+    echo "  - ./drupal-sites.json"
+    echo "  - ./configs/drupal-sites.json"
+    echo "  - /opt/logwatch-ai/drupal-sites.json"
+    echo ""
+    echo "Use --sites-config to specify a custom path."
+    echo "See configs/drupal-sites.json.example for format."
+    exit 1
+}
 
 # Handle --list-sites flag
 if [ "$LIST_SITES" = true ]; then
-    FOUND_SITES_CONFIG=$(find_sites_config "$SITES_CONFIG_FILE") || {
-        log_error "No drupal-sites.json configuration file found."
-        echo ""
-        echo "Search locations:"
-        echo "  - ./drupal-sites.json"
-        echo "  - ./configs/drupal-sites.json"
-        echo "  - /opt/logwatch-ai/drupal-sites.json"
-        echo ""
-        echo "Use --sites-config to specify a custom path."
-        exit 1
-    }
     list_drupal_sites "$FOUND_SITES_CONFIG"
 fi
 
-# Apply multi-site configuration if --site specified
-if [ -n "$DRUPAL_SITE" ]; then
-    FOUND_SITES_CONFIG=$(find_sites_config "$SITES_CONFIG_FILE") || {
-        log_error "No drupal-sites.json found. Required when using --site"
-        log_error "Use --list-sites to check configuration, or --sites-config to specify path"
-        exit 1
-    }
-    apply_site_config "$FOUND_SITES_CONFIG" "$DRUPAL_SITE"
+# Determine site to use (from CLI or default_site in config)
+if [ -z "$DRUPAL_SITE" ]; then
+    # Try to get default_site from config
+    if command -v jq &> /dev/null; then
+        DRUPAL_SITE=$(jq -r '.default_site // empty' "$FOUND_SITES_CONFIG" 2>/dev/null)
+    fi
 fi
 
-# Apply configuration priority: CLI args > site config > .env > defaults
-DRUPAL_ROOT="${CLI_DRUPAL_ROOT:-${DRUPAL_ROOT:-/var/www/html}}"
-OUTPUT_PATH="${CLI_OUTPUT_PATH:-${DRUPAL_WATCHDOG_PATH:-/tmp/drupal-watchdog.json}}"
-FORMAT="${CLI_FORMAT:-${DRUPAL_WATCHDOG_FORMAT:-json}}"
-LIMIT="${CLI_LIMIT:-${DRUPAL_WATCHDOG_LIMIT:-100}}"
+if [ -z "$DRUPAL_SITE" ]; then
+    log_error "No site specified. Use --site <site_id> or set default_site in drupal-sites.json"
+    log_error "Use --list-sites to see available sites"
+    exit 1
+fi
 
-# Use DRUPAL_MIN_SEVERITY for jq filtering (drush doesn't support multiple severities)
-# Default: 3 (error) = include emergency(0), alert(1), critical(2), error(3)
-MIN_SEVERITY="${DRUPAL_MIN_SEVERITY:-3}"
+# Apply site configuration
+apply_site_config "$FOUND_SITES_CONFIG" "$DRUPAL_SITE"
+
+# Apply configuration priority: CLI args > site config > defaults
+DRUPAL_ROOT="${CLI_DRUPAL_ROOT:-${DRUPAL_ROOT}}"
+OUTPUT_PATH="${CLI_OUTPUT_PATH:-${OUTPUT_PATH}}"
+FORMAT="${CLI_FORMAT:-${FORMAT:-json}}"
+LIMIT="${CLI_LIMIT:-${LIMIT:-100}}"
+
+# Default min_severity: 3 (error) = include emergency(0), alert(1), critical(2), error(3)
+MIN_SEVERITY="${MIN_SEVERITY:-3}"
 
 # Validate format
 if [[ "$FORMAT" != "json" && "$FORMAT" != "table" ]]; then
@@ -413,7 +361,8 @@ YESTERDAY_END=$((TODAY_START - 1))
 
 log "Starting Drupal watchdog export"
 log "Configuration:"
-[ -n "$DRUPAL_SITE" ] && log "  Site: $DRUPAL_SITE"
+log "  Site: $DRUPAL_SITE"
+log "  Sites config: $FOUND_SITES_CONFIG"
 log "  Drupal root: $DRUPAL_ROOT"
 log "  Output: $OUTPUT_PATH"
 log "  Format: $FORMAT"
@@ -422,8 +371,6 @@ log "  Limit: $LIMIT (max entries in output)"
 log "  Min severity: $MIN_SEVERITY (0=emergency to 7=debug)"
 log "  Time filter: yesterday only"
 [ -n "$LOG_TYPE" ] && log "  Type filter: $LOG_TYPE"
-[ -n "$FOUND_ENV_FILE" ] && log "  Config source: $FOUND_ENV_FILE"
-[ -n "$FOUND_SITES_CONFIG" ] && log "  Sites config: $FOUND_SITES_CONFIG"
 
 # Check if Drupal root exists
 if [ ! -d "$DRUPAL_ROOT" ]; then
@@ -562,10 +509,8 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
 
     # Show usage hint
     echo ""
-    echo "To analyze with logwatch-ai-go, configure .env:"
-    echo "  LOG_SOURCE_TYPE=drupal_watchdog"
-    echo "  DRUPAL_WATCHDOG_PATH=$OUTPUT_PATH"
-    echo "  DRUPAL_WATCHDOG_FORMAT=$FORMAT"
+    echo "To analyze with logwatch-ai-go:"
+    echo "  ./bin/logwatch-analyzer -source-type drupal_watchdog -drupal-site $DRUPAL_SITE"
     echo ""
 
     exit 0

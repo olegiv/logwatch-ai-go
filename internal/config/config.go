@@ -28,7 +28,7 @@ func ParseCLI() *CLIOptions {
 	opts := &CLIOptions{}
 
 	flag.StringVar(&opts.SourceType, "source-type", "", "Log source type: logwatch, drupal_watchdog")
-	flag.StringVar(&opts.SourcePath, "source-path", "", "Path to log source file (overrides LOGWATCH_OUTPUT_PATH or DRUPAL_WATCHDOG_PATH)")
+	flag.StringVar(&opts.SourcePath, "source-path", "", "Path to log source file (overrides config)")
 	flag.StringVar(&opts.DrupalSite, "drupal-site", "", "Drupal site ID from drupal-sites.json (for multi-site deployments)")
 	flag.StringVar(&opts.DrupalSitesConfig, "drupal-sites-config", "", "Path to drupal-sites.json configuration file")
 	flag.BoolVar(&opts.ListDrupalSites, "list-drupal-sites", false, "List available Drupal sites from drupal-sites.json and exit")
@@ -140,9 +140,8 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 		TelegramAlertsChannel:  viper.GetInt64("TELEGRAM_CHANNEL_ALERTS_ID"),
 		LogSourceType:          viper.GetString("LOG_SOURCE_TYPE"),
 		LogwatchOutputPath:     viper.GetString("LOGWATCH_OUTPUT_PATH"),
-		DrupalWatchdogPath:     viper.GetString("DRUPAL_WATCHDOG_PATH"),
-		DrupalWatchdogFormat:   viper.GetString("DRUPAL_WATCHDOG_FORMAT"),
-		DrupalSiteName:         viper.GetString("DRUPAL_SITE_NAME"),
+		// Drupal settings are loaded from drupal-sites.json, not env vars
+		DrupalWatchdogFormat:   "json", // default, overridden by site config
 		MaxLogSizeMB:           viper.GetInt("MAX_LOG_SIZE_MB"),
 		LogLevel:               viper.GetString("LOG_LEVEL"),
 		EnableDatabase:         viper.GetBool("ENABLE_DATABASE"),
@@ -184,7 +183,7 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 	return config, nil
 }
 
-// applyDrupalMultiSiteConfig loads and applies multi-site Drupal configuration
+// applyDrupalMultiSiteConfig loads and applies Drupal site configuration from drupal-sites.json
 func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
 	// Only process for drupal_watchdog source type
 	if c.LogSourceType != "drupal_watchdog" {
@@ -197,15 +196,18 @@ func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
 		configPath = cli.DrupalSitesConfig
 	}
 
-	// Try to load drupal-sites.json
+	// Try to load drupal-sites.json (required for drupal_watchdog)
 	sitesConfig, foundPath, err := LoadDrupalSitesConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load drupal sites config: %w", err)
 	}
 
-	// If no config file found, use single-site mode (existing behavior)
+	// drupal-sites.json is required for drupal_watchdog source type
 	if sitesConfig == nil {
-		return nil
+		return fmt.Errorf("drupal-sites.json is required when LOG_SOURCE_TYPE=drupal_watchdog. " +
+			"Create drupal-sites.json in one of: ./drupal-sites.json, ./configs/drupal-sites.json, " +
+			"/opt/logwatch-ai/drupal-sites.json, or ~/.config/logwatch-ai/drupal-sites.json. " +
+			"See configs/drupal-sites.json.example for format")
 	}
 
 	// Store the loaded config
@@ -220,9 +222,10 @@ func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
 		siteID = sitesConfig.DefaultSite
 	}
 
-	// If no site specified and no default, keep using env config
+	// A site must be selected (either via CLI or default_site in config)
 	if siteID == "" {
-		return nil
+		return fmt.Errorf("no Drupal site specified. Use -drupal-site <site_id> or set default_site in drupal-sites.json. " +
+			"Available sites: use -list-drupal-sites to see options")
 	}
 
 	// Get the site configuration
@@ -234,8 +237,7 @@ func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
 	// Store the selected site ID
 	c.DrupalSiteID = siteID
 
-	// Apply site-specific configuration (only if not already overridden by CLI)
-	// CLI -source-path takes precedence over site config
+	// Apply site-specific configuration (CLI -source-path takes precedence)
 	if cli == nil || cli.SourcePath == "" {
 		c.DrupalWatchdogPath = site.WatchdogPath
 	}
@@ -260,9 +262,7 @@ func setDefaults() {
 	viper.SetDefault("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 	viper.SetDefault("LOG_SOURCE_TYPE", "logwatch")
 	viper.SetDefault("LOGWATCH_OUTPUT_PATH", "/tmp/logwatch-output.txt")
-	viper.SetDefault("DRUPAL_WATCHDOG_PATH", "/tmp/drupal-watchdog.json")
-	viper.SetDefault("DRUPAL_WATCHDOG_FORMAT", "json")
-	viper.SetDefault("DRUPAL_SITE_NAME", "")
+	// Drupal settings come from drupal-sites.json, not env vars
 	viper.SetDefault("MAX_LOG_SIZE_MB", 10)
 	viper.SetDefault("LOG_LEVEL", "info")
 	viper.SetDefault("ENABLE_DATABASE", true)
@@ -390,14 +390,14 @@ func (c *Config) validateLogSource() error {
 		}
 	case "drupal_watchdog":
 		if c.DrupalWatchdogPath == "" {
-			return fmt.Errorf("DRUPAL_WATCHDOG_PATH is required when LOG_SOURCE_TYPE=drupal_watchdog")
+			return fmt.Errorf("watchdog_path is required in drupal-sites.json site configuration")
 		}
 		validFormats := map[string]bool{
 			"json":  true,
 			"drush": true,
 		}
 		if !validFormats[c.DrupalWatchdogFormat] {
-			return fmt.Errorf("DRUPAL_WATCHDOG_FORMAT must be 'json' or 'drush' (got: %s)", c.DrupalWatchdogFormat)
+			return fmt.Errorf("watchdog_format must be 'json' or 'drush' in drupal-sites.json (got: %s)", c.DrupalWatchdogFormat)
 		}
 	}
 

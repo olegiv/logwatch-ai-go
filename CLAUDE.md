@@ -249,9 +249,8 @@ CREATE INDEX idx_source_site ON summaries(log_source_type, site_name);
 - `LOG_SOURCE_TYPE`: `logwatch` (default) or `drupal_watchdog`
 - When `LOG_SOURCE_TYPE=logwatch`: `LOGWATCH_OUTPUT_PATH` is required
 - When `LOG_SOURCE_TYPE=drupal_watchdog`:
-  - `DRUPAL_WATCHDOG_PATH` is required
-  - `DRUPAL_WATCHDOG_FORMAT`: `json` (default) or `drush`
-  - `DRUPAL_SITE_NAME`: optional, for multi-site deployments
+  - `drupal-sites.json` is required (see configs/drupal-sites.json.example)
+  - Site must be specified via `-drupal-site` flag or `default_site` in config
 
 ### Multi-Site Drupal Configuration
 
@@ -534,8 +533,8 @@ stats, err := store.GetStatistics(filter)  // Pass nil for all sources
 - Export with: `drush watchdog:show --format=json > watchdog.json`
 
 **"Missing watchdog entries"**
-- Check `DRUPAL_WATCHDOG_FORMAT` matches your file format
-- Verify file permissions and path
+- Check `watchdog_format` in drupal-sites.json matches your file format
+- Verify file permissions and `watchdog_path`
 - Ensure watchdog table is being populated in Drupal
 
 **"Too many 'page not found' entries"**
@@ -553,9 +552,9 @@ stats, err := store.GetStatistics(filter)  // Pass nil for all sources
 **"No drupal-sites.json found"**
 - Create the file in one of the search locations
 - Use `-drupal-sites-config` to specify a custom path
-- Single-site mode will use .env configuration as fallback
+- See `configs/drupal-sites.json.example` for format
 
-**Generate Script Multi-Site Support (scripts/generate-drupal-watchdog.sh):**
+**Generate Script (scripts/generate-drupal-watchdog.sh):**
 ```bash
 # List available sites
 ./scripts/generate-drupal-watchdog.sh --list-sites
@@ -566,8 +565,8 @@ stats, err := store.GetStatistics(filter)  // Pass nil for all sources
 # Custom sites config path
 ./scripts/generate-drupal-watchdog.sh --site staging --sites-config /path/to/sites.json
 ```
-- Requires `jq` for multi-site configuration parsing
-- Site config overrides .env values (CLI > site config > .env > defaults)
+- Requires `jq` for configuration parsing
+- CLI args override site config (CLI > site config > defaults)
 
 ## Production Deployment Best Practices
 

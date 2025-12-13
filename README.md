@@ -81,9 +81,7 @@ LOG_SOURCE_TYPE=logwatch
 LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt
 
 # Drupal Watchdog Configuration (used when LOG_SOURCE_TYPE=drupal_watchdog)
-# DRUPAL_WATCHDOG_PATH=/var/log/drupal-watchdog.json
-# DRUPAL_WATCHDOG_FORMAT=json    # "json" (recommended) or "drush"
-# DRUPAL_SITE_NAME=              # Optional: for multi-site deployments
+# Configure in drupal-sites.json (see configs/drupal-sites.json.example)
 
 # Common Log Settings
 MAX_LOG_SIZE_MB=10
@@ -138,30 +136,31 @@ See [docs/CRON_SETUP.md](docs/CRON_SETUP.md) for detailed setup instructions.
 
 To analyze Drupal watchdog logs instead of logwatch:
 
-1. **Export watchdog logs as JSON** (recommended):
-```bash
-# Via drush
-drush watchdog:show --format=json > /var/log/drupal-watchdog.json
-
-# Or via MySQL/MariaDB
-mysql -u user -p drupal_db -e "SELECT * FROM watchdog ORDER BY wid DESC LIMIT 1000" | \
-  jq -s '.' > /var/log/drupal-watchdog.json
+1. **Configure drupal-sites.json** (see `configs/drupal-sites.json.example`):
+```json
+{
+  "version": "1.0",
+  "default_site": "production",
+  "sites": {
+    "production": {
+      "name": "Production Site",
+      "drupal_root": "/var/www/html",
+      "watchdog_path": "/var/log/drupal-watchdog.json",
+      "watchdog_format": "json",
+      "min_severity": 3,
+      "watchdog_limit": 100
+    }
+  }
+}
 ```
 
-2. **Configure environment**:
-```bash
-LOG_SOURCE_TYPE=drupal_watchdog
-DRUPAL_WATCHDOG_PATH=/var/log/drupal-watchdog.json
-DRUPAL_WATCHDOG_FORMAT=json
-```
-
-3. **Set up automated export** (cron example):
+2. **Set up cron jobs**:
 ```bash
 # Export watchdog logs daily at 2:00 AM
-0 2 * * * drush -r /var/www/html watchdog:show --format=json --count=1000 > /var/log/drupal-watchdog.json
+0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh --site production
 
 # Run analyzer at 2:15 AM
-15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer >> logs/cron.log 2>&1
+15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type drupal_watchdog -drupal-site production >> logs/cron.log 2>&1
 ```
 
 **Drupal Watchdog JSON Format:**
@@ -501,8 +500,8 @@ go test -v ./internal/logwatch
 - Validate with: `jq . /path/to/watchdog.json`
 
 **Drupal Watchdog: "Missing entries"**
-- Check `DRUPAL_WATCHDOG_FORMAT` matches your file format
-- Verify file permissions and path
+- Check `watchdog_format` in drupal-sites.json matches your file format
+- Verify file permissions and watchdog_path
 - Ensure drush export includes `--count` parameter
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more solutions.

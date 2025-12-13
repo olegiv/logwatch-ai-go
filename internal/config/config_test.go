@@ -778,7 +778,7 @@ func TestValidateLogSource(t *testing.T) {
 				c.DrupalWatchdogFormat = "json"
 			},
 			expectError:   true,
-			errorContains: "DRUPAL_WATCHDOG_PATH is required when LOG_SOURCE_TYPE=drupal_watchdog",
+			errorContains: "watchdog_path is required in drupal-sites.json",
 		},
 		{
 			name: "Invalid drupal watchdog format",
@@ -788,7 +788,7 @@ func TestValidateLogSource(t *testing.T) {
 				c.DrupalWatchdogFormat = "invalid"
 			},
 			expectError:   true,
-			errorContains: "DRUPAL_WATCHDOG_FORMAT must be 'json' or 'drush'",
+			errorContains: "watchdog_format must be 'json' or 'drush' in drupal-sites.json",
 		},
 	}
 
