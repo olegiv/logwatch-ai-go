@@ -71,13 +71,10 @@ func NewClient(apiKey, model, proxyURL string, timeoutSeconds, maxTokens int) (*
 	}, nil
 }
 
-// AnalyzeLogwatch analyzes logwatch content using Claude
-func (c *Client) AnalyzeLogwatch(ctx context.Context, logwatchContent, historicalContext string) (*Analysis, *Stats, error) {
+// Analyze performs log analysis using provided prompts.
+// This is the generic analysis method that accepts custom system and user prompts.
+func (c *Client) Analyze(ctx context.Context, systemPrompt, userPrompt string) (*Analysis, *Stats, error) {
 	startTime := time.Now()
-
-	// Prepare messages
-	systemPrompt := GetSystemPrompt()
-	userPrompt := GetUserPrompt(logwatchContent, historicalContext)
 
 	// Create request with retry logic
 	var response anthropic.MessagesResponse
@@ -124,6 +121,14 @@ func (c *Client) AnalyzeLogwatch(ctx context.Context, logwatchContent, historica
 	stats := c.calculateStats(response, time.Since(startTime).Seconds())
 
 	return analysis, stats, nil
+}
+
+// AnalyzeLogwatch analyzes logwatch content using Claude.
+// Deprecated: Use Analyze() with a PromptBuilder instead. This method is kept for backward compatibility.
+func (c *Client) AnalyzeLogwatch(ctx context.Context, logwatchContent, historicalContext string) (*Analysis, *Stats, error) {
+	systemPrompt := GetSystemPrompt()
+	userPrompt := GetUserPrompt(logwatchContent, historicalContext)
+	return c.Analyze(ctx, systemPrompt, userPrompt)
 }
 
 // callAPI makes the actual API call to Claude

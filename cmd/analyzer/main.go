@@ -10,7 +10,9 @@ import (
 
 	"github.com/olegiv/go-logger"
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
+	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 	"github.com/olegiv/logwatch-ai-go/internal/config"
+	"github.com/olegiv/logwatch-ai-go/internal/drupal"
 	"github.com/olegiv/logwatch-ai-go/internal/logging"
 	"github.com/olegiv/logwatch-ai-go/internal/logwatch"
 	"github.com/olegiv/logwatch-ai-go/internal/notification"
@@ -61,7 +63,7 @@ func run() int {
 		}
 	}()
 
-	log.Info().Msg("Starting Logwatch AI Analyzer")
+	log.Info().Str("source_type", cfg.LogSourceType).Msg("Starting Log AI Analyzer")
 	log.Info().Str("model", cfg.ClaudeModel).Msg("Configured AI model")
 
 	// Run the analyzer
@@ -132,25 +134,31 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		Int("max_tokens", modelInfo["max_tokens"].(int)).
 		Msg("Claude client initialized")
 
-	// 4. Initialize logwatch reader
-	reader := logwatch.NewReader(
-		cfg.MaxLogSizeMB,
-		cfg.EnablePreprocessing,
-		cfg.MaxPreprocessingTokens,
-	)
-
-	// Read logwatch output
-	log.Info().Str("path", cfg.LogwatchOutputPath).Msg("Reading logwatch output...")
-	logwatchContent, err := reader.ReadLogwatchOutput(cfg.LogwatchOutputPath)
+	// 4. Initialize log source based on configuration
+	logSource, err := createLogSource(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to read logwatch output: %w", err)
+		return fmt.Errorf("failed to create log source: %w", err)
 	}
 
-	fileInfo, _ := reader.GetFileInfo(cfg.LogwatchOutputPath)
+	// Get source path
+	sourcePath := cfg.GetLogSourcePath()
+
+	// Read log content
 	log.Info().
-		Float64("size_mb", fileInfo["size_mb"].(float64)).
-		Float64("age_hours", fileInfo["age_hours"].(float64)).
-		Msg("Logwatch file read successfully")
+		Str("path", sourcePath).
+		Str("type", cfg.LogSourceType).
+		Msg("Reading log content...")
+
+	logContent, err := logSource.Reader.Read(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to read log content: %w", err)
+	}
+
+	sourceInfo, _ := logSource.Reader.GetSourceInfo(sourcePath)
+	log.Info().
+		Float64("size_mb", sourceInfo["size_mb"].(float64)).
+		Float64("age_hours", sourceInfo["age_hours"].(float64)).
+		Msg("Log file read successfully")
 
 	// Get historical context (if database enabled)
 	var historicalContext string
@@ -164,9 +172,15 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		}
 	}
 
+	// Build prompts using the log source's prompt builder
+	systemPrompt := logSource.PromptBuilder.GetSystemPrompt()
+	userPrompt := logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext)
+
 	// Analyze with Claude
-	log.Info().Msg("Analyzing with Claude AI...")
-	analysis, stats, err := claudeClient.AnalyzeLogwatch(ctx, logwatchContent, historicalContext)
+	log.Info().
+		Str("log_type", logSource.PromptBuilder.GetLogType()).
+		Msg("Analyzing with Claude AI...")
+	analysis, stats, err := claudeClient.Analyze(ctx, systemPrompt, userPrompt)
 	if err != nil {
 		return fmt.Errorf("claude analysis failed: %w", err)
 	}
@@ -237,4 +251,37 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		Msg("All operations completed successfully")
 
 	return nil
+}
+
+// createLogSource creates the appropriate log source based on configuration
+func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
+	switch cfg.LogSourceType {
+	case "logwatch":
+		return &analyzer.LogSource{
+			Type: analyzer.LogSourceLogwatch,
+			Reader: logwatch.NewReader(
+				cfg.MaxLogSizeMB,
+				cfg.EnablePreprocessing,
+				cfg.MaxPreprocessingTokens,
+			),
+			Preprocessor:  logwatch.NewPreprocessor(cfg.MaxPreprocessingTokens),
+			PromptBuilder: logwatch.NewPromptBuilder(),
+		}, nil
+
+	case "drupal_watchdog":
+		return &analyzer.LogSource{
+			Type: analyzer.LogSourceDrupalWatchdog,
+			Reader: drupal.NewReader(
+				cfg.MaxLogSizeMB,
+				cfg.EnablePreprocessing,
+				cfg.MaxPreprocessingTokens,
+				drupal.InputFormat(cfg.DrupalWatchdogFormat),
+			),
+			Preprocessor:  drupal.NewPreprocessor(cfg.MaxPreprocessingTokens),
+			PromptBuilder: drupal.NewPromptBuilder(),
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported log source type: %s", cfg.LogSourceType)
+	}
 }
