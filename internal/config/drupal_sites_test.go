@@ -267,7 +267,7 @@ func TestDrupalSitesConfig_GetSite_NoDefault(t *testing.T) {
 
 	_, err := config.GetSite("")
 	if err == nil {
-		t.Errorf("GetSite('') expected error when no default_site, got nil")
+		t.Fatal("GetSite('') expected error when no default_site, got nil")
 	}
 	if !contains(err.Error(), "no site ID specified") {
 		t.Errorf("GetSite('') error = %v, want error about no site ID", err)
@@ -381,7 +381,7 @@ func TestLoadDrupalSitesConfig_NotFound(t *testing.T) {
 func TestLoadDrupalSitesConfig_ExplicitPathNotFound(t *testing.T) {
 	_, _, err := LoadDrupalSitesConfig("/nonexistent/path/drupal-sites.json")
 	if err == nil {
-		t.Error("LoadDrupalSitesConfig() expected error for explicit non-existent path")
+		t.Fatal("LoadDrupalSitesConfig() expected error for explicit non-existent path")
 	}
 	if !contains(err.Error(), "not found") {
 		t.Errorf("LoadDrupalSitesConfig() error = %v, want error containing 'not found'", err)
@@ -399,7 +399,7 @@ func TestLoadDrupalSitesConfig_InvalidJSON(t *testing.T) {
 
 	_, _, err := LoadDrupalSitesConfig(configPath)
 	if err == nil {
-		t.Error("LoadDrupalSitesConfig() expected error for invalid JSON")
+		t.Fatal("LoadDrupalSitesConfig() expected error for invalid JSON")
 	}
 	if !contains(err.Error(), "failed to parse") {
 		t.Errorf("LoadDrupalSitesConfig() error = %v, want error containing 'failed to parse'", err)
@@ -418,7 +418,7 @@ func TestLoadDrupalSitesConfig_ValidationFails(t *testing.T) {
 
 	_, _, err := LoadDrupalSitesConfig(configPath)
 	if err == nil {
-		t.Error("LoadDrupalSitesConfig() expected error for invalid config")
+		t.Fatal("LoadDrupalSitesConfig() expected error for invalid config")
 	}
 	if !contains(err.Error(), "invalid config") {
 		t.Errorf("LoadDrupalSitesConfig() error = %v, want error containing 'invalid config'", err)

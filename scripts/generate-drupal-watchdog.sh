@@ -20,7 +20,6 @@
 #   -l, --limit         Max entries in output file (env: DRUPAL_WATCHDOG_LIMIT, default: 100)
 #   -s, --severity      Filter by severity: emergency,alert,critical,error,warning,notice,info,debug
 #   -t, --type          Filter by log type (e.g., php, cron, system)
-#   --since             Export entries from the last N hours (default: 24)
 #   -S, --site          Drupal site ID from drupal-sites.json (for multi-site deployments)
 #   --sites-config      Path to drupal-sites.json configuration file
 #   --list-sites        List available Drupal sites from drupal-sites.json and exit
@@ -125,7 +124,6 @@ COUNT="10000"
 LIMIT=""
 SEVERITY=""
 LOG_TYPE=""
-SINCE_HOURS="24"
 
 # Multi-site configuration
 DRUPAL_SITE=""
@@ -315,10 +313,6 @@ while [[ $# -gt 0 ]]; do
             LOG_TYPE="$2"
             shift 2
             ;;
-        --since)
-            SINCE_HOURS="$2"
-            shift 2
-            ;;
         -S|--site)
             DRUPAL_SITE="$2"
             shift 2
@@ -408,9 +402,14 @@ if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-# Note: --since validation removed; drush watchdog:show doesn't provide
-# timestamp fields suitable for filtering by time window. The --since
-# option is accepted but currently has no effect on output.
+# Calculate yesterday's time boundaries (00:00:00 to 23:59:59)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    TODAY_START=$(date -j -f "%Y-%m-%d %H:%M:%S" "$(date +%Y-%m-%d) 00:00:00" +%s)
+else
+    TODAY_START=$(date -d "today 00:00:00" +%s)
+fi
+YESTERDAY_START=$((TODAY_START - 86400))
+YESTERDAY_END=$((TODAY_START - 1))
 
 log "Starting Drupal watchdog export"
 log "Configuration:"
@@ -421,6 +420,7 @@ log "  Format: $FORMAT"
 log "  Count: $COUNT (max entries to fetch)"
 log "  Limit: $LIMIT (max entries in output)"
 log "  Min severity: $MIN_SEVERITY (0=emergency to 7=debug)"
+log "  Time filter: yesterday only"
 [ -n "$LOG_TYPE" ] && log "  Type filter: $LOG_TYPE"
 [ -n "$FOUND_ENV_FILE" ] && log "  Config source: $FOUND_ENV_FILE"
 [ -n "$FOUND_SITES_CONFIG" ] && log "  Sites config: $FOUND_SITES_CONFIG"
@@ -482,8 +482,10 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
             fi
 
             # Drush outputs object {wid: entry, ...} - convert to array and sort by wid (higher = newer)
-            # Also convert severity string to number, filter by severity, and add timestamp
-            CONVERTED=$(echo "$OUTPUT" | jq --argjson minSev "$MIN_SEVERITY" '
+            # Also convert severity string to number, filter by severity and yesterday's time range
+            CONVERTED=$(echo "$OUTPUT" | jq --argjson minSev "$MIN_SEVERITY" \
+                --argjson yesterdayStart "$YESTERDAY_START" \
+                --argjson yesterdayEnd "$YESTERDAY_END" '
                 [to_entries | .[].value] |
                 map({
                     wid: (.wid | tonumber),
@@ -503,8 +505,9 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
                     ),
                     location: .location,
                     hostname: .hostname,
-                    timestamp: (now | floor)
+                    timestamp: (.timestamp | tonumber)
                 }) |
+                [.[] | select(.timestamp >= $yesterdayStart and .timestamp <= $yesterdayEnd)] |
                 [.[] | select(.severity <= $minSev)] |
                 sort_by(-.wid)
             ' 2>/dev/null)
