@@ -150,17 +150,20 @@ func (s *Storage) migrateSchema(currentVersion int) error {
 
 	log.Printf("storage: migrating schema from version %d to %d", currentVersion, currentSchemaVersion)
 
-	// Migration 0 -> 1: Create base summaries table
-	if currentVersion < 1 {
-		if err := s.migrateV1(); err != nil {
-			return fmt.Errorf("migration v1 failed: %w", err)
-		}
-	}
-
-	// Migration 1 -> 2: Add log_source_type and site_name columns
-	if currentVersion < 2 {
-		if err := s.migrateV2(); err != nil {
-			return fmt.Errorf("migration v2 failed: %w", err)
+	// Run each migration sequentially from current version to latest
+	// Uses a switch with fallthrough to run all migrations from currentVersion onwards
+	for v := currentVersion; v < currentSchemaVersion; v++ {
+		switch v {
+		case 0:
+			// Migration 0 -> 1: Create base summaries table
+			if err := s.migrateV1(); err != nil {
+				return fmt.Errorf("migration v1 failed: %w", err)
+			}
+		case 1:
+			// Migration 1 -> 2: Add log_source_type and site_name columns
+			if err := s.migrateV2(); err != nil {
+				return fmt.Errorf("migration v2 failed: %w", err)
+			}
 		}
 	}
 
