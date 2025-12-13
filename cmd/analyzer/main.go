@@ -189,11 +189,16 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		return fmt.Errorf("failed to read log content: %w", err)
 	}
 
-	sourceInfo, _ := logSource.Reader.GetSourceInfo(sourcePath)
-	log.Info().
-		Float64("size_mb", sourceInfo["size_mb"].(float64)).
-		Float64("age_hours", sourceInfo["age_hours"].(float64)).
-		Msg("Log file read successfully")
+	sourceInfo, err := logSource.Reader.GetSourceInfo(sourcePath)
+	if err != nil {
+		log.Warn().Err(err).Msg("Could not get source file info")
+		log.Info().Msg("Log file read successfully")
+	} else {
+		log.Info().
+			Float64("size_mb", sourceInfo["size_mb"].(float64)).
+			Float64("age_hours", sourceInfo["age_hours"].(float64)).
+			Msg("Log file read successfully")
+	}
 
 	// Check for no entries (Drupal watchdog specific)
 	// When there are no log entries for the time period, skip AI analysis
