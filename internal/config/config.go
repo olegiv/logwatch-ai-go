@@ -31,15 +31,15 @@ func ParseCLI() *CLIOptions {
 
 	// Custom usage message
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Logwatch AI Analyzer - Intelligent log analysis with Claude AI\n\n")
-		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Options:\n")
+		_, _ = fmt.Fprintf(os.Stderr, "Logwatch AI Analyzer - Intelligent log analysis with Claude AI\n\n")
+		_, _ = fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  %s -source-type logwatch\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -source-path /tmp/watchdog.json\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "\nEnvironment variables can be set in .env file or exported directly.\n")
-		fmt.Fprintf(os.Stderr, "CLI arguments override environment variables.\n")
+		_, _ = fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type logwatch\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -source-path /tmp/watchdog.json\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "\nEnvironment variables can be set in .env file or exported directly.\n")
+		_, _ = fmt.Fprintf(os.Stderr, "CLI arguments override environment variables.\n")
 	}
 
 	flag.Parse()

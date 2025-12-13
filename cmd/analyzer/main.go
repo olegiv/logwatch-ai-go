@@ -47,13 +47,7 @@ func run() int {
 
 	// Handle -version flag
 	if cli.ShowVersion {
-		fmt.Printf("logwatch-analyzer %s\n", version)
-		if gitCommit != "unknown" {
-			fmt.Printf("  commit: %s\n", gitCommit)
-		}
-		if buildTime != "unknown" {
-			fmt.Printf("  built:  %s\n", buildTime)
-		}
+		fmt.Printf("logwatch-analyzer %s (commit: %s, built: %s)\n", version, gitCommit, buildTime)
 		return exitSuccess
 	}
 
