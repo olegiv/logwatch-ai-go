@@ -47,6 +47,11 @@ func ParseCLI() *CLIOptions {
 	return opts
 }
 
+// PrintUsage prints the command-line usage information
+func PrintUsage() {
+	flag.Usage()
+}
+
 // Config holds all application configuration
 type Config struct {
 	// AI Provider

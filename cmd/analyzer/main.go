@@ -41,8 +41,7 @@ func run() int {
 
 	// Handle -help flag
 	if cli.ShowHelp {
-		// flag.Usage() is called automatically by flag.Parse() when -help is used
-		// but we handle it explicitly here for consistency
+		config.PrintUsage()
 		return exitSuccess
 	}
 
