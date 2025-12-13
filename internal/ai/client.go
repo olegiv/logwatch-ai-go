@@ -194,3 +194,11 @@ func (c *Client) GetModelInfo() map[string]interface{} {
 		"context_limit": 200000,
 	}
 }
+
+// GetProviderName returns the name of the provider
+func (c *Client) GetProviderName() string {
+	return "Anthropic"
+}
+
+// Ensure Client implements Provider interface
+var _ Provider = (*Client)(nil)
