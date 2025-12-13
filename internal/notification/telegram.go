@@ -54,9 +54,9 @@ func NewTelegramClient(botToken string, archiveChannel, alertsChannel int64) (*T
 }
 
 // SendAnalysisReport sends the analysis report to Telegram channels
-func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Stats) error {
+func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Stats, logSourceType string) error {
 	// Format message
-	message := t.formatMessage(analysis, stats)
+	message := t.formatMessage(analysis, stats, logSourceType)
 
 	// Send to archive channel (always)
 	if err := t.sendToChannel(t.archiveChannel, message); err != nil {
@@ -75,14 +75,15 @@ func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Sta
 }
 
 // formatMessage formats the analysis into a Telegram message
-func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats) string {
+func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats, logSourceType string) string {
 
 	const formattedListTemplate = "%d\\. %s\n"
 
 	var msg strings.Builder
 
-	// Header
-	msg.WriteString("🔍 *Logwatch Analysis Report*\n")
+	// Header with log source type
+	sourceDisplayName := getLogSourceDisplayName(logSourceType)
+	msg.WriteString(fmt.Sprintf("🔍 *%s Report*\n", sourceDisplayName))
 	msg.WriteString(fmt.Sprintf("🖥 Host\\: %s\n", escapeMarkdown(t.hostname)))
 	msg.WriteString(fmt.Sprintf("📅 Date\\: %s\n", escapeMarkdown(time.Now().Format("2006-01-02 15:04:05"))))
 	msg.WriteString(fmt.Sprintf("🌍 Timezone\\: %s\n", escapeMarkdown(time.Now().Location().String())))
@@ -289,6 +290,18 @@ func (t *TelegramClient) splitMessage(message string) []string {
 	}
 
 	return messages
+}
+
+// getLogSourceDisplayName returns a human-readable display name for log source types
+func getLogSourceDisplayName(logSourceType string) string {
+	switch logSourceType {
+	case "logwatch":
+		return "Logwatch"
+	case "drupal_watchdog":
+		return "Drupal Watchdog"
+	default:
+		return "Log"
+	}
 }
 
 // escapeMarkdown escapes special characters for Telegram MarkdownV2

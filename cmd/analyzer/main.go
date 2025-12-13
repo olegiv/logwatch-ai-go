@@ -236,7 +236,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 
 	// Send Telegram notifications
 	log.Info().Msg("Sending Telegram notifications...")
-	if err := telegramClient.SendAnalysisReport(analysis, stats); err != nil {
+	if err := telegramClient.SendAnalysisReport(analysis, stats, cfg.LogSourceType); err != nil {
 		return fmt.Errorf("failed to send Telegram notification: %w", err)
 	}
 

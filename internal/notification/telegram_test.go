@@ -45,7 +45,7 @@ func TestFormatMessage(t *testing.T) {
 	}
 
 	// Format message
-	message := client.formatMessage(analysis, stats)
+	message := client.formatMessage(analysis, stats, "logwatch")
 
 	// Print the message to see what it looks like
 	fmt.Println("=== FORMATTED MESSAGE ===")
@@ -202,7 +202,7 @@ func TestFormatMessage_EmptyFields(t *testing.T) {
 		DurationSeconds:     1.5,
 	}
 
-	message := client.formatMessage(analysis, stats)
+	message := client.formatMessage(analysis, stats, "logwatch")
 
 	if message == "" {
 		t.Error("Message should not be empty")
@@ -242,7 +242,7 @@ func TestFormatMessage_WithCacheTokens(t *testing.T) {
 		DurationSeconds:     5.0,
 	}
 
-	message := client.formatMessage(analysis, stats)
+	message := client.formatMessage(analysis, stats, "logwatch")
 
 	// Should contain cache read info when cache is used
 	if !strings.Contains(message, "Cache Read") {
@@ -273,7 +273,7 @@ func TestFormatMessage_WithoutCacheTokens(t *testing.T) {
 		DurationSeconds:     5.0,
 	}
 
-	message := client.formatMessage(analysis, stats)
+	message := client.formatMessage(analysis, stats, "logwatch")
 
 	// Should not contain cache info when no cache is used
 	if strings.Contains(message, "Cache Read") {
@@ -306,7 +306,7 @@ func TestFormatMessage_AllStatuses(t *testing.T) {
 				DurationSeconds: 5.0,
 			}
 
-			message := client.formatMessage(analysis, stats)
+			message := client.formatMessage(analysis, stats, "logwatch")
 
 			if !strings.Contains(message, status) {
 				t.Errorf("Message should contain status '%s'", status)
@@ -377,7 +377,7 @@ func TestFormatMessage_MultipleIssues(t *testing.T) {
 		DurationSeconds: 8.5,
 	}
 
-	message := client.formatMessage(analysis, stats)
+	message := client.formatMessage(analysis, stats, "logwatch")
 
 	// Verify all critical issues are present
 	for i, issue := range analysis.CriticalIssues {
@@ -451,6 +451,73 @@ func TestIsRateLimitError(t *testing.T) {
 	}
 }
 
+func TestGetLogSourceDisplayName(t *testing.T) {
+	tests := []struct {
+		name           string
+		logSourceType  string
+		expectedResult string
+	}{
+		{
+			name:           "logwatch source",
+			logSourceType:  "logwatch",
+			expectedResult: "Logwatch",
+		},
+		{
+			name:           "drupal_watchdog source",
+			logSourceType:  "drupal_watchdog",
+			expectedResult: "Drupal Watchdog",
+		},
+		{
+			name:           "unknown source",
+			logSourceType:  "unknown",
+			expectedResult: "Log",
+		},
+		{
+			name:           "empty source",
+			logSourceType:  "",
+			expectedResult: "Log",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getLogSourceDisplayName(tt.logSourceType)
+			if result != tt.expectedResult {
+				t.Errorf("Expected '%s', got '%s'", tt.expectedResult, result)
+			}
+		})
+	}
+}
+
+func TestFormatMessage_DrupalWatchdogHeader(t *testing.T) {
+	client := &TelegramClient{
+		hostname: "test-server",
+	}
+
+	analysis := &ai.Analysis{
+		SystemStatus:    "Good",
+		Summary:         "Drupal site running well",
+		CriticalIssues:  []string{},
+		Warnings:        []string{},
+		Recommendations: []string{},
+		Metrics:         map[string]interface{}{},
+	}
+
+	stats := &ai.Stats{
+		InputTokens:     1000,
+		OutputTokens:    500,
+		CostUSD:         0.01,
+		DurationSeconds: 5.0,
+	}
+
+	message := client.formatMessage(analysis, stats, "drupal_watchdog")
+
+	// Should contain Drupal Watchdog in header
+	if !strings.Contains(message, "Drupal Watchdog Report") {
+		t.Error("Message should contain 'Drupal Watchdog Report' in header")
+	}
+}
+
 func TestExtractRetryAfter(t *testing.T) {
 	tests := []struct {
 		name string
@@ -498,4 +565,3 @@ func TestExtractRetryAfter(t *testing.T) {
 		})
 	}
 }
-
