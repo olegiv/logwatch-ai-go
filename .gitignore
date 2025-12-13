@@ -52,3 +52,7 @@ Thumbs.db
 
 # Audit files
 .audit
+
+# Drupal configuration (except testdata)
+drupal-sites.json
+!testdata/**/drupal-sites.json
