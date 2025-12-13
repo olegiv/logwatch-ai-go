@@ -9,7 +9,7 @@
 # Command line arguments override .env values.
 #
 # Usage:
-#   ./scripts/export-drupal-watchdog.sh [options]
+#   ./scripts/generate-drupal-watchdog.sh [options]
 #
 # Options:
 #   -e, --env-file      Path to .env file (default: auto-detect)
@@ -22,6 +22,7 @@
 #   -t, --type          Filter by log type (e.g., php, cron, system)
 #   --since             Export entries from the last N hours (default: 24)
 #   -h, --help          Show this help message
+#   -v, --version       Show version information
 #
 # Environment Variables (from .env):
 #   DRUPAL_ROOT              - Path to Drupal project root
@@ -34,25 +35,32 @@
 #
 # Examples:
 #   # Export using .env configuration
-#   ./scripts/export-drupal-watchdog.sh
+#   ./scripts/generate-drupal-watchdog.sh
 #
 #   # Export last 500 error and warning entries
-#   ./scripts/export-drupal-watchdog.sh -c 500 -s error,warning
+#   ./scripts/generate-drupal-watchdog.sh -c 500 -s error,warning
 #
 #   # Override .env with custom paths
-#   ./scripts/export-drupal-watchdog.sh -d /var/www/mysite/drupal -o /tmp/mysite-watchdog.json
+#   ./scripts/generate-drupal-watchdog.sh -d /var/www/mysite/drupal -o /tmp/mysite-watchdog.json
 #
 #   # Export PHP errors only
-#   ./scripts/export-drupal-watchdog.sh -t php -c 200
+#   ./scripts/generate-drupal-watchdog.sh -t php -c 200
 #
 # Crontab example (export daily at 2:00 AM before analyzer runs):
-#   0 2 * * * /opt/logwatch-ai/scripts/export-drupal-watchdog.sh
+#   0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh
 #
 
 set -e  # Exit on error
 
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Version from git (matches logwatch-analyzer versioning)
+get_version() {
+    local version
+    version=$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo "dev")
+    echo "$version"
+}
 
 # Find .env file (check multiple locations)
 find_env_file() {
@@ -148,6 +156,12 @@ show_help() {
     exit 0
 }
 
+# Version function
+show_version() {
+    echo "$SCRIPT_NAME $(get_version)"
+    exit 0
+}
+
 # Parse command line arguments (first pass for --env-file)
 CLI_DRUPAL_ROOT=""
 CLI_OUTPUT_PATH=""
@@ -192,8 +206,11 @@ while [[ $# -gt 0 ]]; do
             SINCE_HOURS="$2"
             shift 2
             ;;
-        -h|--help)
+        -h|--help|-help)
             show_help
+            ;;
+        -v|--version|-version)
+            show_version
             ;;
         *)
             log_error "Unknown option: $1"

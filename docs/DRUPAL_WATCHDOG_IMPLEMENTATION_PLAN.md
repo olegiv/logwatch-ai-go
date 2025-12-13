@@ -723,7 +723,7 @@ Create `docs/DRUPAL_WATCHDOG_SETUP.md`:
 
 ### 7.1 Create Drupal Drush Script
 
-Create `scripts/export-drupal-watchdog.sh`:
+Create `scripts/generate-drupal-watchdog.sh`:
 
 ```bash
 #!/bin/bash
@@ -797,7 +797,7 @@ logwatch-ai-go/
 │   │   └── ...
 │   └── ...
 ├── scripts/
-│   ├── export-drupal-watchdog.sh # NEW: Drupal export script
+│   ├── generate-drupal-watchdog.sh # NEW: Drupal export script
 │   └── ...
 ├── testdata/
 │   └── drupal/                   # NEW: Test fixtures
