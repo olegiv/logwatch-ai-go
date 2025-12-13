@@ -153,7 +153,6 @@ CLI_DRUPAL_ROOT=""
 CLI_OUTPUT_PATH=""
 CLI_FORMAT=""
 CLI_LIMIT=""
-ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -241,14 +240,9 @@ if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-# Validate since hours is a number
-if ! [[ "$SINCE_HOURS" =~ ^[0-9]+$ ]]; then
-    log_error "Since hours must be a positive number (got: $SINCE_HOURS)"
-    exit 1
-fi
-
-# Calculate cutoff timestamp (N hours ago)
-CUTOFF_TIMESTAMP=$(($(date +%s) - SINCE_HOURS * 3600))
+# Note: --since validation removed; drush watchdog:show doesn't provide
+# timestamp fields suitable for filtering by time window. The --since
+# option is accepted but currently has no effect on output.
 
 log "Starting Drupal watchdog export"
 log "Configuration:"
@@ -257,7 +251,6 @@ log "  Output: $OUTPUT_PATH"
 log "  Format: $FORMAT"
 log "  Count: $COUNT (max entries to fetch)"
 log "  Limit: $LIMIT (max entries in output)"
-log "  Since: last $SINCE_HOURS hours"
 log "  Min severity: $MIN_SEVERITY (0=emergency to 7=debug)"
 [ -n "$LOG_TYPE" ] && log "  Type filter: $LOG_TYPE"
 [ -n "$FOUND_ENV_FILE" ] && log "  Config source: $FOUND_ENV_FILE"
