@@ -1,0 +1,93 @@
+[
+  {
+    "wid": 2001,
+    "uid": 0,
+    "type": "user",
+    "message": "Login attempt failed for admin.",
+    "variables": "a:1:{s:4:\"name\";s:5:\"admin\";}",
+    "severity": 4,
+    "link": "",
+    "location": "https://example.com/user/login",
+    "referer": "",
+    "hostname": "45.33.32.156",
+    "timestamp": 1699900800
+  },
+  {
+    "wid": 2002,
+    "uid": 0,
+    "type": "user",
+    "message": "Login attempt failed for admin.",
+    "variables": "a:1:{s:4:\"name\";s:5:\"admin\";}",
+    "severity": 4,
+    "link": "",
+    "location": "https://example.com/user/login",
+    "referer": "",
+    "hostname": "45.33.32.156",
+    "timestamp": 1699900801
+  },
+  {
+    "wid": 2003,
+    "uid": 0,
+    "type": "user",
+    "message": "Login attempt failed for admin.",
+    "variables": "a:1:{s:4:\"name\";s:5:\"admin\";}",
+    "severity": 4,
+    "link": "",
+    "location": "https://example.com/user/login",
+    "referer": "",
+    "hostname": "45.33.32.156",
+    "timestamp": 1699900802
+  },
+  {
+    "wid": 2004,
+    "uid": 0,
+    "type": "access denied",
+    "message": "node/1/edit",
+    "variables": "a:0:{}",
+    "severity": 4,
+    "link": "",
+    "location": "https://example.com/node/1/edit",
+    "referer": "https://example.com/node/1",
+    "hostname": "203.0.113.50",
+    "timestamp": 1699900803
+  },
+  {
+    "wid": 2005,
+    "uid": 0,
+    "type": "access denied",
+    "message": "admin/config",
+    "variables": "a:0:{}",
+    "severity": 4,
+    "link": "",
+    "location": "https://example.com/admin/config",
+    "referer": "",
+    "hostname": "203.0.113.50",
+    "timestamp": 1699900804
+  },
+  {
+    "wid": 2006,
+    "uid": 0,
+    "type": "security",
+    "message": "Blocked IP address 45.33.32.156 after 5 failed login attempts.",
+    "variables": "a:1:{s:2:\"ip\";s:12:\"45.33.32.156\";}",
+    "severity": 4,
+    "link": "",
+    "location": "",
+    "referer": "",
+    "hostname": "127.0.0.1",
+    "timestamp": 1699900805
+  },
+  {
+    "wid": 2007,
+    "uid": 0,
+    "type": "php",
+    "message": "Attempted SQL injection detected in query parameter.",
+    "variables": "a:1:{s:5:\"query\";s:25:\"1' OR '1'='1'; DROP TABLE\";}",
+    "severity": 3,
+    "link": "",
+    "location": "https://example.com/search",
+    "referer": "",
+    "hostname": "198.51.100.23",
+    "timestamp": 1699900806
+  }
+]
