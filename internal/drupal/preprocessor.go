@@ -52,6 +52,11 @@ func (p *Preprocessor) ShouldProcess(content string, maxTokens int) bool {
 // - Sampling info/notice entries
 // - Grouping similar messages
 func (p *Preprocessor) Process(content string) (string, error) {
+	// Return empty content as-is
+	if content == "" {
+		return "", nil
+	}
+
 	// Parse sections from the formatted content
 	sections := p.parseSections(content)
 	if len(sections) == 0 {
@@ -281,6 +286,9 @@ func (p *Preprocessor) normalizeLine(line string) string {
 		return ""
 	}
 
+	// Replace UUIDs FIRST (before numbers, since UUIDs contain numbers)
+	line = regexp.MustCompile(`[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`).ReplaceAllString(line, "UUID")
+
 	// Replace IPs
 	line = regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`).ReplaceAllString(line, "IP")
 
@@ -288,11 +296,11 @@ func (p *Preprocessor) normalizeLine(line string) string {
 	line = regexp.MustCompile(`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}`).ReplaceAllString(line, "TIMESTAMP")
 	line = regexp.MustCompile(`\b\d{2}:\d{2}:\d{2}\b`).ReplaceAllString(line, "TIME")
 
-	// Replace numbers
-	line = regexp.MustCompile(`\b\d+\b`).ReplaceAllString(line, "N")
+	// Replace numbers with unit suffixes (e.g., 500ms, 10KB, 5s)
+	line = regexp.MustCompile(`\b\d+([a-zA-Z]+)\b`).ReplaceAllString(line, "N$1")
 
-	// Replace UUIDs
-	line = regexp.MustCompile(`[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`).ReplaceAllString(line, "UUID")
+	// Replace standalone numbers
+	line = regexp.MustCompile(`\b\d+\b`).ReplaceAllString(line, "N")
 
 	return line
 }

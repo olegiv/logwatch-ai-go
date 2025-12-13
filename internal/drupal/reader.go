@@ -244,8 +244,16 @@ func (r *Reader) parseDrush(content string) ([]WatchdogEntry, error) {
 			continue
 		}
 
-		wid, _ := strconv.ParseInt(matches[1], 10, 64)
-		timestamp, _ := time.Parse("2006-01-02 15:04:05", matches[2])
+		wid, err := strconv.ParseInt(matches[1], 10, 64)
+		if err != nil {
+			continue // Skip entries with invalid WID
+		}
+
+		timestamp, err := time.Parse("2006-01-02 15:04:05", matches[2])
+		if err != nil {
+			continue // Skip entries with invalid timestamp
+		}
+
 		severity := SeverityFromName(strings.ToLower(matches[4]))
 		if severity == -1 {
 			severity = SeverityNotice // Default
@@ -490,12 +498,12 @@ func (r *Reader) normalizeMessage(msg string) string {
 	}
 
 	// Replace common variable patterns
-	// IPs
+	// UUIDs FIRST (before numbers, since UUIDs contain hex digits and numbers)
+	msg = regexp.MustCompile(`[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`).ReplaceAllString(msg, "[UUID]")
+	// IPs (before numbers)
 	msg = regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`).ReplaceAllString(msg, "[IP]")
 	// Numbers
 	msg = regexp.MustCompile(`\b\d+\b`).ReplaceAllString(msg, "[N]")
-	// UUIDs
-	msg = regexp.MustCompile(`[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`).ReplaceAllString(msg, "[UUID]")
 	// Paths
 	msg = regexp.MustCompile(`/[a-zA-Z0-9/_-]+`).ReplaceAllString(msg, "[PATH]")
 
