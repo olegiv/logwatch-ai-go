@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2025-12-14
+
+### Added
+- Short CLI options `-h` (help) and `-v` (version) as aliases for `-help` and `-version`
+- Rate limit detection with extended backoff for Anthropic API (429 status handling with exponential backoff up to 60s)
+
+### Fixed
+- Telegram MarkdownV2 escaping for backslash characters (proper `\\` handling)
+- JSON parsing for invalid escape sequences in LLM responses (graceful handling of malformed JSON)
+
 ## [0.5.0] - 2025-12-14
 
 ### Added
@@ -310,7 +320,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.2.0...v0.3.0
