@@ -90,7 +90,7 @@ func (c *DrupalSitesConfig) ListSites() []string {
 // If configPath is empty, it searches standard locations.
 // Returns nil, nil if no config file is found (not an error - single-site mode).
 func LoadDrupalSitesConfig(configPath string) (*DrupalSitesConfig, string, error) {
-	searchPaths := []string{}
+	var searchPaths []string
 
 	// If explicit path provided, only search that
 	if configPath != "" {

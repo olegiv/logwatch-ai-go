@@ -6,6 +6,24 @@ import (
 	"testing"
 )
 
+// checkError is a helper to verify error expectations in tests
+func checkError(t *testing.T, err error, expectError bool, errorContains string) {
+	t.Helper()
+	if expectError {
+		if err == nil {
+			t.Error("Expected an error but got none")
+			return
+		}
+		if errorContains != "" && !strings.Contains(err.Error(), errorContains) {
+			t.Errorf("Expected error to contain '%s', got '%s'", errorContains, err.Error())
+		}
+	} else {
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -388,20 +406,7 @@ func TestValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
-
-			if tt.expectError {
-				if err == nil {
-					t.Error("Expected an error but got none")
-					return
-				}
-				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("Expected error to contain '%s', got '%s'", tt.errorContains, err.Error())
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
-			}
+			checkError(t, err, tt.expectError, tt.errorContains)
 		})
 	}
 }
@@ -850,20 +855,7 @@ func TestValidateLogSource(t *testing.T) {
 			tt.setup(cfg)
 
 			err := cfg.Validate()
-
-			if tt.expectError {
-				if err == nil {
-					t.Error("Expected an error but got none")
-					return
-				}
-				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("Expected error to contain '%s', got '%s'", tt.errorContains, err.Error())
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
-			}
+			checkError(t, err, tt.expectError, tt.errorContains)
 		})
 	}
 }

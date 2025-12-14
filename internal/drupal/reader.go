@@ -19,6 +19,9 @@ import (
 // Use IsNoEntriesContent() to check for this condition.
 const NoEntriesContent = "=== NO WATCHDOG ENTRIES ===\n\nNo Drupal watchdog entries were found for the analyzed time period.\nThis typically means the system had no logged events during this period."
 
+// timeFormatDateTime is the standard date-time format for watchdog entries.
+const timeFormatDateTime = "2006-01-02 15:04:05"
+
 // IsNoEntriesContent checks if the content indicates no watchdog entries were found.
 func IsNoEntriesContent(content string) bool {
 	return strings.HasPrefix(content, "=== NO WATCHDOG ENTRIES ===")
@@ -249,7 +252,7 @@ func (r *Reader) parseDrush(content string) ([]WatchdogEntry, error) {
 			continue // Skip entries with invalid WID
 		}
 
-		timestamp, err := time.Parse("2006-01-02 15:04:05", matches[2])
+		timestamp, err := time.Parse(timeFormatDateTime, matches[2])
 		if err != nil {
 			continue // Skip entries with invalid timestamp
 		}
@@ -424,8 +427,8 @@ func (r *Reader) calculateStats(entries []WatchdogEntry) map[string]interface{} 
 			newest = e.Timestamp
 		}
 	}
-	stats["oldest"] = time.Unix(oldest, 0).Format("2006-01-02 15:04:05")
-	stats["newest"] = time.Unix(newest, 0).Format("2006-01-02 15:04:05")
+	stats["oldest"] = time.Unix(oldest, 0).Format(timeFormatDateTime)
+	stats["newest"] = time.Unix(newest, 0).Format(timeFormatDateTime)
 
 	// Count by severity
 	severityCounts := make(map[string]int)
@@ -472,7 +475,7 @@ func (r *Reader) filterByType(entries []WatchdogEntry, types ...string) []Watchd
 // formatEntry formats a single entry for display.
 func (r *Reader) formatEntry(entry WatchdogEntry) string {
 	return fmt.Sprintf("[%s] %s | %s | %s | %s\n  Message: %s",
-		entry.Time().Format("2006-01-02 15:04:05"),
+		entry.Time().Format(timeFormatDateTime),
 		strings.ToUpper(entry.SeverityName()),
 		entry.Type,
 		entry.Hostname,
