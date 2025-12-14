@@ -27,13 +27,3 @@ const (
 func ValidProviderTypes() []ProviderType {
 	return []ProviderType{ProviderAnthropic, ProviderOllama, ProviderLMStudio}
 }
-
-// IsValidProviderType checks if the given provider type is valid
-func IsValidProviderType(pt string) bool {
-	for _, valid := range ValidProviderTypes() {
-		if string(valid) == pt {
-			return true
-		}
-	}
-	return false
-}

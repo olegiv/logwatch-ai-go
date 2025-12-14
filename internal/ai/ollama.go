@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,37 +26,12 @@ type OllamaConfig struct {
 	MaxTokens      int    // Max tokens in response
 }
 
-// ollamaGenerateRequest is the request body for Ollama's /api/generate endpoint
-type ollamaGenerateRequest struct {
-	Model   string        `json:"model"`
-	Prompt  string        `json:"prompt"`
-	System  string        `json:"system,omitempty"`
-	Stream  bool          `json:"stream"`
-	Options ollamaOptions `json:"options,omitempty"`
-	Format  string        `json:"format,omitempty"`
-}
-
 // ollamaOptions contains model parameters
 type ollamaOptions struct {
 	NumPredict  int     `json:"num_predict,omitempty"` // Max tokens to generate
 	Temperature float64 `json:"temperature,omitempty"`
 	TopP        float64 `json:"top_p,omitempty"`
 	TopK        int     `json:"top_k,omitempty"`
-}
-
-// ollamaGenerateResponse is the response from Ollama's /api/generate endpoint
-type ollamaGenerateResponse struct {
-	Model              string    `json:"model"`
-	CreatedAt          time.Time `json:"created_at"`
-	Response           string    `json:"response"`
-	Done               bool      `json:"done"`
-	Context            []int     `json:"context,omitempty"`
-	TotalDuration      int64     `json:"total_duration,omitempty"`
-	LoadDuration       int64     `json:"load_duration,omitempty"`
-	PromptEvalCount    int       `json:"prompt_eval_count,omitempty"`
-	PromptEvalDuration int64     `json:"prompt_eval_duration,omitempty"`
-	EvalCount          int       `json:"eval_count,omitempty"`
-	EvalDuration       int64     `json:"eval_duration,omitempty"`
 }
 
 // ollamaChatRequest is the request body for Ollama's /api/chat endpoint
@@ -167,45 +141,17 @@ func (c *OllamaClient) callAPI(ctx context.Context, systemPrompt, userPrompt str
 		Format: "json", // Request JSON output format
 	}
 
-	reqBody, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
 	url := c.baseURL + "/api/chat"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	response, err := doJSONPost[ollamaChatResponse](ctx, c.httpClient, url, request)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API call failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var response ollamaChatResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		return nil, err
 	}
 
 	if !response.Done {
 		return nil, fmt.Errorf("incomplete response from Ollama")
 	}
 
-	return &response, nil
+	return response, nil
 }
 
 // calculateStats calculates statistics from Ollama response
@@ -257,7 +203,7 @@ func (c *OllamaClient) CheckConnection(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ollama is not running at %s: %w", c.baseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ollama returned status %d", resp.StatusCode)
