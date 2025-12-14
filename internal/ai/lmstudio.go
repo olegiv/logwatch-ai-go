@@ -162,6 +162,9 @@ func (c *LMStudioClient) Analyze(ctx context.Context, systemPrompt, userPrompt s
 
 // callAPI makes the actual API call to LM Studio using the OpenAI-compatible endpoint
 func (c *LMStudioClient) callAPI(ctx context.Context, systemPrompt, userPrompt string) (*openAIChatResponse, error) {
+	// Note: LM Studio doesn't support "json_object" response_format like OpenAI.
+	// It only accepts "json_schema" (requires full schema) or "text".
+	// We rely on the system prompt to request JSON output instead.
 	request := openAIChatRequest{
 		Model: c.model,
 		Messages: []openAIMessage{
@@ -172,9 +175,7 @@ func (c *LMStudioClient) callAPI(ctx context.Context, systemPrompt, userPrompt s
 		Temperature: 0.1, // Low temperature for consistent, factual output
 		TopP:        0.9,
 		Stream:      false,
-		ResponseFormat: &responseFormat{
-			Type: "json_object", // Request JSON output format
-		},
+		// ResponseFormat omitted - not all LM Studio models support json_object mode
 	}
 
 	reqBody, err := json.Marshal(request)
