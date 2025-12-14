@@ -2,16 +2,17 @@ package ai
 
 import (
 	"fmt"
-	"math"
 	"time"
 )
 
 const (
-	// defaultMaxRetries is the default number of retry attempts
+	// defaultMaxRetries is the default number of retry attempts for normal errors
 	defaultMaxRetries = 3
 )
 
-// retryWithBackoff executes fn with exponential backoff retry logic.
+// retryWithBackoff executes fn with error-aware exponential backoff retry logic.
+// Rate limit and overload errors get longer backoff times (60-120 seconds),
+// while other errors use standard exponential backoff (2^n seconds).
 // Returns the result of the first successful call or the last error after maxAttempts.
 func retryWithBackoff[T any](maxAttempts int, fn func() (T, error)) (T, error) {
 	var result T
@@ -26,8 +27,8 @@ func retryWithBackoff[T any](maxAttempts int, fn func() (T, error)) (T, error) {
 
 		lastErr = err
 		if attempt < maxAttempts {
-			// Exponential backoff: 2^n * 1000ms
-			backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
+			// Use error-aware backoff duration
+			backoff := getBackoffDuration(err, attempt)
 			time.Sleep(backoff)
 		}
 	}
