@@ -7,31 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-12-14
+
 ### Added
 
-#### Ollama LLM Integration
-- New `LLM_PROVIDER` configuration option to select between Anthropic and Ollama
-- `internal/ai/provider.go` with `Provider` interface for pluggable LLM backends
-- `internal/ai/ollama.go` with full Ollama REST API client implementation
+#### Local LLM Provider Support
+Three LLM backends now supported via `LLM_PROVIDER` configuration:
+
+**Ollama Integration (`internal/ai/ollama.go`)**
+- Full Ollama REST API client implementation
 - Connection check to verify Ollama server and model availability before analysis
 - JSON format mode for structured output from local models
-- Retry logic with exponential backoff (3 attempts) matching Anthropic client
 - Zero-cost tracking for local inference (CostUSD = 0)
-- Support for recommended models: llama3.3:latest, qwen2.5:72b, deepseek-coder-v2:33b
+- Recommended models: llama3.3:latest, qwen2.5:72b, deepseek-coder-v2:33b
+
+**LM Studio Integration (`internal/ai/lmstudio.go`)**
+- OpenAI-compatible API client for LM Studio's `/v1/chat/completions` endpoint
+- Connection check to verify LM Studio is running and model is loaded
+- Zero-cost tracking for local inference (CostUSD = 0)
+- Recommended models: Llama-3.3-70B-Instruct, Qwen2.5-32B-Instruct, Mistral-Small-24B-Instruct, Phi-4-14B
+
+#### Provider Architecture
+- `internal/ai/provider.go` with `Provider` interface for pluggable LLM backends
+- `internal/ai/retry.go` with shared retry logic (3 attempts, exponential backoff)
+- `internal/ai/http.go` with HTTP helper functions for API clients
 
 #### Configuration
-- `LLM_PROVIDER` environment variable: `anthropic` (default) or `ollama`
+- `LLM_PROVIDER` environment variable: `anthropic` (default), `ollama`, or `lmstudio`
 - `OLLAMA_BASE_URL` for custom Ollama server location (default: `http://localhost:11434`)
 - `OLLAMA_MODEL` for model selection (default: `llama3.3:latest`)
+- `LMSTUDIO_BASE_URL` for LM Studio server location (default: `http://localhost:1234`)
+- `LMSTUDIO_MODEL` for model identifier (default: `local-model`)
 - Validation ensures appropriate settings based on selected provider
 
 #### Telegram Notifications
 - LLM model and provider info now displayed in Telegram reports (e.g., "LLM: llama3.3:latest (Ollama)")
 - `Provider` and `Model` fields added to `ai.Stats` struct for tracking
 
+#### Dependencies
+- Added `jq` dependency check for Drupal watchdog support
+
 ### Changed
 - AI client initialization now uses provider factory pattern based on `LLM_PROVIDER`
 - Configuration validation adapts to selected LLM provider (Anthropic API key only required for anthropic)
+- Removed deprecated `AnalyzeLogwatch` method from Anthropic client
+- Extracted retry logic into shared helper function for all providers
+
+### Fixed
+- Shell script exit code checking in Drupal watchdog export
+- Static analysis warnings across codebase
+- Linter warnings and code style issues
+- Unchecked error returns in test files
+- Struct field alignment in lmstudio.go
 
 ## [0.4.0] - 2025-12-13
 
@@ -283,7 +310,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.1.0...v0.2.0
