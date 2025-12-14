@@ -157,6 +157,37 @@ func SanitizeLogContent(content string) string {
 // Maximum allowed JSON response size (1MB) to prevent memory exhaustion
 const maxJSONResponseSize = 1024 * 1024
 
+// sanitizeJSONEscapes fixes invalid JSON escape sequences in LLM responses.
+// JSON only allows: \" \\ \/ \b \f \n \r \t \uXXXX
+// LLMs sometimes produce invalid sequences like \. \( \) \- etc.
+func sanitizeJSONEscapes(s string) string {
+	var result strings.Builder
+	result.Grow(len(s))
+
+	i := 0
+	for i < len(s) {
+		if s[i] == '\\' && i+1 < len(s) {
+			next := s[i+1]
+			// Valid JSON escapes: " \ / b f n r t u
+			if next == '"' || next == '\\' || next == '/' ||
+				next == 'b' || next == 'f' || next == 'n' ||
+				next == 'r' || next == 't' || next == 'u' {
+				result.WriteByte(s[i])
+				result.WriteByte(next)
+				i += 2
+				continue
+			}
+			// Invalid escape - skip the backslash, keep the character
+			result.WriteByte(next)
+			i += 2
+			continue
+		}
+		result.WriteByte(s[i])
+		i++
+	}
+	return result.String()
+}
+
 // ParseAnalysis extracts and parses the JSON analysis from Claude's response
 func ParseAnalysis(response string) (*Analysis, error) {
 	// Extract JSON from response using balanced brace matching
@@ -171,9 +202,12 @@ func ParseAnalysis(response string) (*Analysis, error) {
 		return nil, fmt.Errorf("JSON response too large: %d bytes (max: %d)", len(jsonMatch), maxJSONResponseSize)
 	}
 
+	// Sanitize invalid JSON escape sequences that LLMs sometimes produce
+	sanitizedJSON := sanitizeJSONEscapes(jsonMatch)
+
 	// Parse JSON
 	var analysis Analysis
-	if err := json.Unmarshal([]byte(jsonMatch), &analysis); err != nil {
+	if err := json.Unmarshal([]byte(sanitizedJSON), &analysis); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 

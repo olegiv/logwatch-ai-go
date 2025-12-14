@@ -648,3 +648,163 @@ func TestAnalysisJSONSerialization(t *testing.T) {
 	// Verify fields
 	assertAnalysisEqual(t, &restored, original)
 }
+
+func TestSanitizeJSONEscapes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Backslash dot",
+			input:    `test\.path`,
+			expected: `test.path`,
+		},
+		{
+			name:     "Backslash parentheses",
+			input:    `\(test\)`,
+			expected: `(test)`,
+		},
+		{
+			name:     "Valid quote escape preserved",
+			input:    `\"quoted\"`,
+			expected: `\"quoted\"`,
+		},
+		{
+			name:     "Valid backslash preserved",
+			input:    `path\\file`,
+			expected: `path\\file`,
+		},
+		{
+			name:     "Valid newline preserved",
+			input:    `line1\nline2`,
+			expected: `line1\nline2`,
+		},
+		{
+			name:     "Valid tab preserved",
+			input:    `col1\tcol2`,
+			expected: `col1\tcol2`,
+		},
+		{
+			name:     "Valid carriage return preserved",
+			input:    `line1\rline2`,
+			expected: `line1\rline2`,
+		},
+		{
+			name:     "Valid unicode escape preserved",
+			input:    `\u0041\u0042`,
+			expected: `\u0041\u0042`,
+		},
+		{
+			name:     "Mixed valid and invalid escapes",
+			input:    `config\.d\n\(test\)`,
+			expected: `config.d\n(test)`,
+		},
+		{
+			name:     "No escapes",
+			input:    `plain text without escapes`,
+			expected: `plain text without escapes`,
+		},
+		{
+			name:     "Empty string",
+			input:    ``,
+			expected: ``,
+		},
+		{
+			name:     "Multiple invalid escapes",
+			input:    `\.\-\:\[\]`,
+			expected: `.-:[]`,
+		},
+		{
+			name:     "Backslash at end of string",
+			input:    `test\`,
+			expected: `test\`,
+		},
+		{
+			name:     "Real world example from Claude",
+			input:    `Check /etc/config\.d/logwatch\.conf`,
+			expected: `Check /etc/config.d/logwatch.conf`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeJSONEscapes(tt.input)
+			if result != tt.expected {
+				t.Errorf("sanitizeJSONEscapes(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseAnalysis_InvalidEscapes(t *testing.T) {
+	tests := []struct {
+		name          string
+		response      string
+		wantErr       bool
+		wantStatus    string
+		wantInSummary string
+	}{
+		{
+			name:          "Invalid backslash dot in summary",
+			response:      `{"systemStatus": "Good", "summary": "Check /etc/config\.d/file for errors", "criticalIssues": [], "warnings": [], "recommendations": [], "metrics": {}}`,
+			wantErr:       false,
+			wantStatus:    "Good",
+			wantInSummary: "Check /etc/config.d/file for errors",
+		},
+		{
+			name:          "Invalid backslash parentheses",
+			response:      `{"systemStatus": "Good", "summary": "Run command \(test\) now", "criticalIssues": [], "warnings": [], "recommendations": [], "metrics": {}}`,
+			wantErr:       false,
+			wantStatus:    "Good",
+			wantInSummary: "Run command (test) now",
+		},
+		{
+			name:          "Mixed valid and invalid escapes",
+			response:      `{"systemStatus": "Satisfactory", "summary": "Path: /var/log\.d\nCheck config", "criticalIssues": [], "warnings": [], "recommendations": [], "metrics": {}}`,
+			wantErr:       false,
+			wantStatus:    "Satisfactory",
+			wantInSummary: "Path: /var/log.d\nCheck config",
+		},
+		{
+			name:          "Valid escapes only - should still work",
+			response:      `{"systemStatus": "Excellent", "summary": "Line 1\nLine 2\tTabbed \"quoted\"", "criticalIssues": [], "warnings": [], "recommendations": [], "metrics": {}}`,
+			wantErr:       false,
+			wantStatus:    "Excellent",
+			wantInSummary: "Line 1\nLine 2\tTabbed \"quoted\"",
+		},
+		{
+			name:          "Multiple invalid escapes in critical issues",
+			response:      `{"systemStatus": "Bad", "summary": "Issues found", "criticalIssues": ["Error in /etc\.conf", "Check \[brackets\]"], "warnings": [], "recommendations": [], "metrics": {}}`,
+			wantErr:       false,
+			wantStatus:    "Bad",
+			wantInSummary: "Issues found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			analysis, err := ParseAnalysis(tt.response)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if analysis.SystemStatus != tt.wantStatus {
+				t.Errorf("Expected status %q, got %q", tt.wantStatus, analysis.SystemStatus)
+			}
+
+			if tt.wantInSummary != "" && analysis.Summary != tt.wantInSummary {
+				t.Errorf("Expected summary %q, got %q", tt.wantInSummary, analysis.Summary)
+			}
+		})
+	}
+}
