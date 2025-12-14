@@ -86,6 +86,7 @@ OLLAMA_MODEL=llama3.3:latest
 
 # LM Studio Configuration (used when LLM_PROVIDER=lmstudio)
 # Requires LM Studio running locally: https://lmstudio.ai
+# See "LM Studio Setup" section for recommended models
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=local-model
 
@@ -214,6 +215,21 @@ LMSTUDIO_MODEL=local-model
 ```
 
 **Note:** The `local-model` identifier uses whatever model is currently loaded in LM Studio. You can also specify a specific model name if multiple models are loaded.
+
+**Recommended Models:**
+| Model | VRAM Required | Quality | Speed |
+|-------|---------------|---------|-------|
+| Llama-3.3-70B-Instruct | ~40GB | Excellent | Slower |
+| Qwen2.5-32B-Instruct | ~20GB | Excellent | Medium |
+| Mistral-Small-24B-Instruct | ~15GB | Good | Medium |
+| Phi-4-14B | ~9GB | Good | Faster |
+| Llama-3.2-8B-Instruct | ~5GB | Acceptable | Fast |
+
+**Tips for model selection:**
+- Download models from LM Studio's built-in model browser (Search tab)
+- Look for GGUF quantized versions (Q4_K_M or Q5_K_M) for better VRAM efficiency
+- For Apple Silicon Macs, models run on unified memory (RAM = VRAM)
+- Start with a smaller model to test, then upgrade for better quality
 
 **Trade-offs vs Claude:**
 - ✅ Zero cost - unlimited analysis

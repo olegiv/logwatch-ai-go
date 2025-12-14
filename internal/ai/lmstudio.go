@@ -12,7 +12,16 @@ import (
 	"time"
 )
 
-// LMStudioClient wraps the LM Studio OpenAI-compatible REST API
+// LMStudioClient wraps the LM Studio OpenAI-compatible REST API.
+//
+// Recommended models for log analysis (download from LM Studio's model browser):
+//   - Llama-3.3-70B-Instruct: Best quality (~40GB VRAM)
+//   - Qwen2.5-32B-Instruct: Excellent reasoning (~20GB VRAM)
+//   - Mistral-Small-24B-Instruct: Good balance (~15GB VRAM)
+//   - Phi-4-14B: Fast, good quality (~9GB VRAM)
+//   - Llama-3.2-8B-Instruct: Lightweight (~5GB VRAM)
+//
+// Use GGUF quantized versions (Q4_K_M, Q5_K_M) for better VRAM efficiency.
 type LMStudioClient struct {
 	baseURL    string
 	model      string

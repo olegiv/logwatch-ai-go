@@ -260,9 +260,14 @@ type Provider interface {
 - Retry logic: 3 attempts with exponential backoff (2^n seconds)
 - Connection check: Verifies LM Studio is running and model is loaded
 - Zero cost: Local inference has no monetary cost
-- JSON format mode: Requests structured JSON output via `response_format`
+- JSON output: Relies on system prompt (LM Studio doesn't support `json_object` response_format)
 - Default model identifier: `local-model` (uses currently loaded model)
-- Supports any model loaded in LM Studio
+- Recommended models (GGUF format, download from LM Studio browser):
+  - `Llama-3.3-70B-Instruct` - Best quality (~40GB VRAM)
+  - `Qwen2.5-32B-Instruct` - Excellent reasoning (~20GB VRAM)
+  - `Mistral-Small-24B-Instruct` - Good balance (~15GB VRAM)
+  - `Phi-4-14B` - Fast, good quality (~9GB VRAM)
+  - `Llama-3.2-8B-Instruct` - Lightweight (~5GB VRAM)
 
 **Common Settings (all providers):**
 - Context: Includes last 7 days of analysis history
@@ -733,9 +738,10 @@ OLLAMA_MODEL=llama3.3:latest
 LM Studio provides a user-friendly desktop application for running local LLMs with an OpenAI-compatible API:
 
 1. Download and install LM Studio from https://lmstudio.ai
-2. Load a model in LM Studio (e.g., Llama 3.3, Mistral, Qwen)
-3. Enable "Local Server" mode in the left sidebar
-4. Server starts on `http://localhost:1234` by default
+2. Download a model from the Search tab (recommended models below)
+3. Load the model (click on it, then "Load")
+4. Enable "Local Server" mode in the left sidebar
+5. Server starts on `http://localhost:1234` by default
 
 Configure in `.env`:
 ```
@@ -743,6 +749,17 @@ LLM_PROVIDER=lmstudio
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=local-model
 ```
+
+**Recommended Models** (download from LM Studio's model browser):
+| Model | VRAM | Quality | Speed |
+|-------|------|---------|-------|
+| Llama-3.3-70B-Instruct | ~40GB | Excellent | Slower |
+| Qwen2.5-32B-Instruct | ~20GB | Excellent | Medium |
+| Mistral-Small-24B-Instruct | ~15GB | Good | Medium |
+| Phi-4-14B | ~9GB | Good | Faster |
+| Llama-3.2-8B-Instruct | ~5GB | Acceptable | Fast |
+
+**Tips:** Look for GGUF quantized versions (Q4_K_M, Q5_K_M) for better VRAM efficiency.
 
 **Trade-offs:**
 - ✅ Zero cost - unlimited analysis
