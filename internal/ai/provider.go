@@ -20,11 +20,12 @@ type ProviderType string
 const (
 	ProviderAnthropic ProviderType = "anthropic"
 	ProviderOllama    ProviderType = "ollama"
+	ProviderLMStudio  ProviderType = "lmstudio"
 )
 
 // ValidProviderTypes returns a list of valid provider types
 func ValidProviderTypes() []ProviderType {
-	return []ProviderType{ProviderAnthropic, ProviderOllama}
+	return []ProviderType{ProviderAnthropic, ProviderOllama, ProviderLMStudio}
 }
 
 // IsValidProviderType checks if the given provider type is valid
