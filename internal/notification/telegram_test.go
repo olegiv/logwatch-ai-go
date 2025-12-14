@@ -87,9 +87,9 @@ func TestEscapeMarkdown(t *testing.T) {
 			expected: "Hello\\! This is a test\\.",
 		},
 		{
-			name:     "All special chars",
-			input:    "_*[]()~`>#+-=|{}.!:",
-			expected: "\\_\\*\\[\\]\\(\\)\\~\\`\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!\\:",
+			name:     "All special chars including backslash",
+			input:    "\\_*[]()~`>#+-=|{}.!:",
+			expected: "\\\\\\_\\*\\[\\]\\(\\)\\~\\`\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!\\:",
 		},
 		{
 			name:     "No special chars",
@@ -632,6 +632,69 @@ func TestExtractRetryAfter(t *testing.T) {
 			got := extractRetryAfter(tt.err)
 			if got != tt.want {
 				t.Errorf("extractRetryAfter() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEscapeMarkdown_Backslashes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Backslash before dot - from Claude output",
+			input:    `path\.config`,
+			expected: `path\\\.config`, // \ -> \\, . -> \. = 3 backslashes before dot
+		},
+		{
+			name:     "Backslash before pipe",
+			input:    `data\|value`,
+			expected: `data\\\|value`, // \ -> \\, | -> \| = 3 backslashes before pipe
+		},
+		{
+			name:     "Plain backslash followed by letter",
+			input:    `path\file`,
+			expected: `path\\file`, // \ -> \\ = 2 backslashes
+		},
+		{
+			name:     "Windows path with colons and backslashes",
+			input:    `C:\Users\test`,
+			expected: `C\:\\Users\\test`, // : -> \:, \ -> \\
+		},
+		{
+			name:     "No backslash - dot only",
+			input:    "test.value",
+			expected: `test\.value`,
+		},
+		{
+			name:     "No backslash - pipe only",
+			input:    "data|pipe",
+			expected: `data\|pipe`,
+		},
+		{
+			name:     "SQL-like content with pipe",
+			input:    "SELECT * FROM users|archived WHERE id > 5",
+			expected: `SELECT \* FROM users\|archived WHERE id \> 5`,
+		},
+		{
+			name:     "Empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "Double backslash",
+			input:    `test\\value`,
+			expected: `test\\\\value`, // \\ -> \\\\ = 4 backslashes
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := escapeMarkdown(tt.input)
+			if result != tt.expected {
+				t.Errorf("escapeMarkdown(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}

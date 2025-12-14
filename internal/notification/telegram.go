@@ -314,7 +314,12 @@ func getLogSourceDisplayName(logSourceType string) string {
 func escapeMarkdown(text string) string {
 	// Characters that need to be escaped in MarkdownV2
 	// See: https://core.telegram.org/bots/api#markdownv2-style
+	// IMPORTANT: Backslash MUST be first to prevent double-escaping issues.
+	// If text contains `\.` and we escape `.` first, we get `\\.` which means
+	// "escaped backslash + unescaped dot". By escaping `\` first, we get `\\\.`
+	// which correctly means "escaped backslash + escaped dot".
 	specialChars := []string{
+		"\\", // Must be first!
 		"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!", ":",
 	}
 
