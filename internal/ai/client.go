@@ -125,14 +125,6 @@ func (c *Client) Analyze(ctx context.Context, systemPrompt, userPrompt string) (
 	return analysis, stats, nil
 }
 
-// AnalyzeLogwatch analyzes logwatch content using Claude.
-// Deprecated: Use Analyze() with a PromptBuilder instead. This method is kept for backward compatibility.
-func (c *Client) AnalyzeLogwatch(ctx context.Context, logwatchContent, historicalContext string) (*Analysis, *Stats, error) {
-	systemPrompt := GetSystemPrompt()
-	userPrompt := GetUserPrompt(logwatchContent, historicalContext)
-	return c.Analyze(ctx, systemPrompt, userPrompt)
-}
-
 // callAPI makes the actual API call to Claude
 func (c *Client) callAPI(ctx context.Context, systemPrompt, userPrompt string) (anthropic.MessagesResponse, error) {
 	request := anthropic.MessagesRequest{
