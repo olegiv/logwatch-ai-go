@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -30,12 +29,12 @@ type OllamaConfig struct {
 
 // ollamaGenerateRequest is the request body for Ollama's /api/generate endpoint
 type ollamaGenerateRequest struct {
-	Model   string            `json:"model"`
-	Prompt  string            `json:"prompt"`
-	System  string            `json:"system,omitempty"`
-	Stream  bool              `json:"stream"`
-	Options ollamaOptions     `json:"options,omitempty"`
-	Format  string            `json:"format,omitempty"`
+	Model   string        `json:"model"`
+	Prompt  string        `json:"prompt"`
+	System  string        `json:"system,omitempty"`
+	Stream  bool          `json:"stream"`
+	Options ollamaOptions `json:"options,omitempty"`
+	Format  string        `json:"format,omitempty"`
 }
 
 // ollamaOptions contains model parameters
@@ -126,26 +125,11 @@ func (c *OllamaClient) Analyze(ctx context.Context, systemPrompt, userPrompt str
 	startTime := time.Now()
 
 	// Create request with retry logic
-	var response *ollamaChatResponse
-	var lastErr error
-
-	for attempt := 1; attempt <= 3; attempt++ {
-		var err error
-		response, err = c.callAPI(ctx, systemPrompt, userPrompt)
-		if err == nil {
-			break
-		}
-
-		lastErr = err
-		if attempt < 3 {
-			// Exponential backoff: 2^n * 1000ms
-			backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
-			time.Sleep(backoff)
-		}
-	}
-
-	if lastErr != nil {
-		return nil, nil, fmt.Errorf("all retry attempts failed: %w", lastErr)
+	response, err := retryWithBackoff(defaultMaxRetries, func() (*ollamaChatResponse, error) {
+		return c.callAPI(ctx, systemPrompt, userPrompt)
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Extract response content

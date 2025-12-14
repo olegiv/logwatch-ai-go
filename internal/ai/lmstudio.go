@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -125,26 +124,11 @@ func (c *LMStudioClient) Analyze(ctx context.Context, systemPrompt, userPrompt s
 	startTime := time.Now()
 
 	// Create request with retry logic
-	var response *openAIChatResponse
-	var lastErr error
-
-	for attempt := 1; attempt <= 3; attempt++ {
-		var err error
-		response, err = c.callAPI(ctx, systemPrompt, userPrompt)
-		if err == nil {
-			break
-		}
-
-		lastErr = err
-		if attempt < 3 {
-			// Exponential backoff: 2^n * 1000ms
-			backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
-			time.Sleep(backoff)
-		}
-	}
-
-	if lastErr != nil {
-		return nil, nil, fmt.Errorf("all retry attempts failed: %w", lastErr)
+	response, err := retryWithBackoff(defaultMaxRetries, func() (*openAIChatResponse, error) {
+		return c.callAPI(ctx, systemPrompt, userPrompt)
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Extract response content
