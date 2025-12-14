@@ -33,24 +33,18 @@ func NewReader(maxSizeMB int, enablePreprocessing bool, maxTokens int) *Reader {
 // Read implements analyzer.LogReader.Read.
 // Reads and processes the logwatch output file.
 func (r *Reader) Read(sourcePath string) (string, error) {
-	return r.ReadLogwatchOutput(sourcePath)
-}
-
-// ReadLogwatchOutput reads and processes the logwatch output file.
-// Deprecated: Use Read() instead. This method is kept for backward compatibility.
-func (r *Reader) ReadLogwatchOutput(filePath string) (string, error) {
 	// Check if file exists
-	fileInfo, err := os.Stat(filePath)
+	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("logwatch output file not found: %s", filePath)
+			return "", fmt.Errorf("logwatch output file not found: %s", sourcePath)
 		}
 		return "", fmt.Errorf("failed to stat logwatch file: %w", err)
 	}
 
 	// Check file permissions
 	if fileInfo.Mode().Perm()&0400 == 0 {
-		return "", fmt.Errorf("logwatch file is not readable: %s", filePath)
+		return "", fmt.Errorf("logwatch file is not readable: %s", sourcePath)
 	}
 
 	// Check file size
@@ -68,7 +62,7 @@ func (r *Reader) ReadLogwatchOutput(filePath string) (string, error) {
 	}
 
 	// Read file content
-	content, err := os.ReadFile(filePath)
+	content, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read logwatch file: %w", err)
 	}
@@ -96,6 +90,12 @@ func (r *Reader) ReadLogwatchOutput(filePath string) (string, error) {
 	return contentStr, nil
 }
 
+// ReadLogwatchOutput reads and processes the logwatch output file.
+// Deprecated: Use Read() instead. This method is kept for backward compatibility.
+func (r *Reader) ReadLogwatchOutput(filePath string) (string, error) {
+	return r.Read(filePath)
+}
+
 // Validate implements analyzer.LogReader.Validate.
 // Performs basic validation on logwatch content.
 func (r *Reader) Validate(content string) error {
@@ -120,13 +120,7 @@ func (r *Reader) validateContent(content string) error {
 // GetSourceInfo implements analyzer.LogReader.GetSourceInfo.
 // Returns metadata about the logwatch file.
 func (r *Reader) GetSourceInfo(sourcePath string) (map[string]interface{}, error) {
-	return r.GetFileInfo(sourcePath)
-}
-
-// GetFileInfo returns information about the logwatch file.
-// Deprecated: Use GetSourceInfo() instead. This method is kept for backward compatibility.
-func (r *Reader) GetFileInfo(filePath string) (map[string]interface{}, error) {
-	fileInfo, err := os.Stat(filePath)
+	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		return nil, err
 	}
@@ -139,4 +133,10 @@ func (r *Reader) GetFileInfo(filePath string) (map[string]interface{}, error) {
 	}
 
 	return info, nil
+}
+
+// GetFileInfo returns information about the logwatch file.
+// Deprecated: Use GetSourceInfo() instead. This method is kept for backward compatibility.
+func (r *Reader) GetFileInfo(filePath string) (map[string]interface{}, error) {
+	return r.GetSourceInfo(filePath)
 }

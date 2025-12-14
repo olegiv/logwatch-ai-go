@@ -32,10 +32,10 @@ func TestNewReader(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_FileNotFound(t *testing.T) {
+func TestRead_FileNotFound(t *testing.T) {
 	reader := NewReader(10, false, 150000)
 
-	_, err := reader.ReadLogwatchOutput("/nonexistent/file.txt")
+	_, err := reader.Read("/nonexistent/file.txt")
 
 	if err == nil {
 		t.Fatal("Expected error for nonexistent file")
@@ -46,7 +46,7 @@ func TestReadLogwatchOutput_FileNotFound(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_ValidFile(t *testing.T) {
+func TestRead_ValidFile(t *testing.T) {
 	// Create a temporary test file
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
@@ -58,7 +58,7 @@ func TestReadLogwatchOutput_ValidFile(t *testing.T) {
 	}
 
 	reader := NewReader(10, false, 150000)
-	result, err := reader.ReadLogwatchOutput(testFile)
+	result, err := reader.Read(testFile)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -69,7 +69,7 @@ func TestReadLogwatchOutput_ValidFile(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_FileTooBig(t *testing.T) {
+func TestRead_FileTooBig(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
@@ -81,7 +81,7 @@ func TestReadLogwatchOutput_FileTooBig(t *testing.T) {
 	}
 
 	reader := NewReader(1, false, 150000) // 1MB limit
-	_, err = reader.ReadLogwatchOutput(testFile)
+	_, err = reader.Read(testFile)
 
 	if err == nil {
 		t.Fatal("Expected error for file exceeding size limit")
@@ -92,7 +92,7 @@ func TestReadLogwatchOutput_FileTooBig(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_FileTooOld(t *testing.T) {
+func TestRead_FileTooOld(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
@@ -110,7 +110,7 @@ func TestReadLogwatchOutput_FileTooOld(t *testing.T) {
 	}
 
 	reader := NewReader(10, false, 150000)
-	_, err = reader.ReadLogwatchOutput(testFile)
+	_, err = reader.Read(testFile)
 
 	if err == nil {
 		t.Fatal("Expected error for old file")
@@ -121,7 +121,7 @@ func TestReadLogwatchOutput_FileTooOld(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_EmptyFile(t *testing.T) {
+func TestRead_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
@@ -131,7 +131,7 @@ func TestReadLogwatchOutput_EmptyFile(t *testing.T) {
 	}
 
 	reader := NewReader(10, false, 150000)
-	_, err = reader.ReadLogwatchOutput(testFile)
+	_, err = reader.Read(testFile)
 
 	if err == nil {
 		t.Fatal("Expected error for empty file")
@@ -142,7 +142,7 @@ func TestReadLogwatchOutput_EmptyFile(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_FileTooSmall(t *testing.T) {
+func TestRead_FileTooSmall(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
@@ -153,7 +153,7 @@ func TestReadLogwatchOutput_FileTooSmall(t *testing.T) {
 	}
 
 	reader := NewReader(10, false, 150000)
-	_, err = reader.ReadLogwatchOutput(testFile)
+	_, err = reader.Read(testFile)
 
 	if err == nil {
 		t.Fatal("Expected error for file too small")
@@ -164,7 +164,7 @@ func TestReadLogwatchOutput_FileTooSmall(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_WithPreprocessing(t *testing.T) {
+func TestRead_WithPreprocessing(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
@@ -177,7 +177,7 @@ func TestReadLogwatchOutput_WithPreprocessing(t *testing.T) {
 
 	// Use low max tokens to trigger preprocessing
 	reader := NewReader(10, true, 1000)
-	result, err := reader.ReadLogwatchOutput(testFile)
+	result, err := reader.Read(testFile)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -193,7 +193,7 @@ func TestReadLogwatchOutput_WithPreprocessing(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_NoPreprocessing(t *testing.T) {
+func TestRead_NoPreprocessing(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
@@ -204,7 +204,7 @@ func TestReadLogwatchOutput_NoPreprocessing(t *testing.T) {
 	}
 
 	reader := NewReader(10, false, 150000)
-	result, err := reader.ReadLogwatchOutput(testFile)
+	result, err := reader.Read(testFile)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -261,7 +261,7 @@ func TestValidateContent(t *testing.T) {
 	}
 }
 
-func TestGetFileInfo(t *testing.T) {
+func TestGetSourceInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
@@ -272,7 +272,7 @@ func TestGetFileInfo(t *testing.T) {
 	}
 
 	reader := NewReader(10, false, 150000)
-	info, err := reader.GetFileInfo(testFile)
+	info, err := reader.GetSourceInfo(testFile)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -331,17 +331,17 @@ func TestGetFileInfo(t *testing.T) {
 	}
 }
 
-func TestGetFileInfo_FileNotFound(t *testing.T) {
+func TestGetSourceInfo_FileNotFound(t *testing.T) {
 	reader := NewReader(10, false, 150000)
 
-	_, err := reader.GetFileInfo("/nonexistent/file.txt")
+	_, err := reader.GetSourceInfo("/nonexistent/file.txt")
 
 	if err == nil {
 		t.Error("Expected error for nonexistent file")
 	}
 }
 
-func TestReadLogwatchOutput_NotReadableFile(t *testing.T) {
+func TestRead_NotReadableFile(t *testing.T) {
 	// Skip on Windows as file permissions work differently
 	if os.Getenv("GOOS") == "windows" {
 		t.Skip("Skipping permission test on Windows")
@@ -360,7 +360,7 @@ func TestReadLogwatchOutput_NotReadableFile(t *testing.T) {
 	defer func() { _ = os.Chmod(testFile, 0644) }()
 
 	reader := NewReader(10, false, 150000)
-	_, err = reader.ReadLogwatchOutput(testFile)
+	_, err = reader.Read(testFile)
 
 	if err == nil {
 		t.Fatal("Expected error for unreadable file")
@@ -398,7 +398,7 @@ func TestReaderStructure(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_PreprocessingThreshold(t *testing.T) {
+func TestRead_PreprocessingThreshold(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
@@ -410,7 +410,7 @@ func TestReadLogwatchOutput_PreprocessingThreshold(t *testing.T) {
 	}
 
 	reader := NewReader(10, true, 1000000) // High threshold
-	result, err := reader.ReadLogwatchOutput(testFile)
+	result, err := reader.Read(testFile)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -422,7 +422,7 @@ func TestReadLogwatchOutput_PreprocessingThreshold(t *testing.T) {
 	}
 }
 
-func TestReadLogwatchOutput_ExactSizeLimit(t *testing.T) {
+func TestRead_ExactSizeLimit(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
@@ -436,7 +436,7 @@ func TestReadLogwatchOutput_ExactSizeLimit(t *testing.T) {
 	}
 
 	reader := NewReader(maxSizeMB, false, 150000)
-	_, err = reader.ReadLogwatchOutput(testFile)
+	_, err = reader.Read(testFile)
 
 	// Should not error at exact limit
 	if err != nil && strings.Contains(err.Error(), "exceeds maximum size") {

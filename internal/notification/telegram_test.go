@@ -421,12 +421,12 @@ func TestIsRateLimitError(t *testing.T) {
 		},
 		{
 			name: "429 error",
-			err:  fmt.Errorf("telegram: 429 Too Many Requests"),
+			err:  fmt.Errorf("telegram: 429 too many requests"),
 			want: true,
 		},
 		{
 			name: "too many requests error",
-			err:  fmt.Errorf("Too Many Requests: retry after 30"),
+			err:  fmt.Errorf("too many requests: retry after 30"),
 			want: true,
 		},
 		{
