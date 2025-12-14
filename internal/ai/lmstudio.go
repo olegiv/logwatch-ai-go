@@ -30,12 +30,12 @@ type LMStudioConfig struct {
 
 // openAIChatRequest is the request body for OpenAI-compatible /v1/chat/completions endpoint
 type openAIChatRequest struct {
-	Model       string            `json:"model"`
-	Messages    []openAIMessage   `json:"messages"`
-	MaxTokens   int               `json:"max_tokens,omitempty"`
-	Temperature float64           `json:"temperature,omitempty"`
-	TopP        float64           `json:"top_p,omitempty"`
-	Stream      bool              `json:"stream"`
+	Model          string          `json:"model"`
+	Messages       []openAIMessage `json:"messages"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	Temperature    float64         `json:"temperature,omitempty"`
+	TopP           float64         `json:"top_p,omitempty"`
+	Stream         bool            `json:"stream"`
 	ResponseFormat *responseFormat `json:"response_format,omitempty"`
 }
 
