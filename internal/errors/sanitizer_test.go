@@ -260,10 +260,9 @@ func TestSanitizedErrorUnwrap(t *testing.T) {
 	originalErr := errors.New("original: sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890")
 	sanitizedErr := SanitizeError(originalErr)
 
-	// Unwrap should return the original error
-	unwrapped := errors.Unwrap(sanitizedErr)
-	if unwrapped != originalErr {
-		t.Errorf("Unwrap() = %v, want original error", unwrapped)
+	// errors.Is should find the original error in the chain
+	if !errors.Is(sanitizedErr, originalErr) {
+		t.Error("errors.Is() should find original error in sanitized error chain")
 	}
 
 	// Error message should be sanitized

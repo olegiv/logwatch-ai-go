@@ -310,7 +310,7 @@ func TestContextCancellation(t *testing.T) {
 	// This should fail quickly due to cancelled context
 	// Note: This will make an actual API call attempt, which will fail
 	// In a real test environment, we'd mock the API client
-	_, _, err = client.AnalyzeLogwatch(ctx, "test content", "")
+	_, _, err = client.Analyze(ctx, "You are a test assistant", "test content")
 
 	// We expect an error (either context cancelled or API call failed)
 	if err == nil {
@@ -334,7 +334,7 @@ func TestContextTimeout(t *testing.T) {
 	time.Sleep(1 * time.Millisecond)
 
 	// This should fail due to timeout
-	_, _, err = client.AnalyzeLogwatch(ctx, "test content", "")
+	_, _, err = client.Analyze(ctx, "You are a test assistant", "test content")
 
 	// We expect an error
 	if err == nil {

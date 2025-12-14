@@ -132,14 +132,9 @@ func (s *Storage) getSchemaVersion() int {
 
 // setSchemaVersion updates the schema version
 func (s *Storage) setSchemaVersion(version int) error {
-	// Delete existing and insert new (simpler than upsert for single row)
-	if _, err := s.db.Exec(`DELETE FROM schema_version`); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(`INSERT INTO schema_version (version) VALUES (?)`, version); err != nil {
-		return err
-	}
-	return nil
+	// Use REPLACE to upsert the single-row schema version
+	_, err := s.db.Exec(`REPLACE INTO schema_version (version) VALUES (?)`, version)
+	return err
 }
 
 // migrateSchema runs migrations from currentVersion to latest
@@ -318,26 +313,31 @@ func (s *Storage) SaveSummary(summary *Summary) error {
 func (s *Storage) GetRecentSummaries(days int, filter *SourceFilter) ([]*Summary, error) {
 	cutoffDate := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
 
-	query := `
-		SELECT id, timestamp, log_source_type, site_name, system_status, summary,
-		       critical_issues, warnings, recommendations, metrics,
-		       input_tokens, output_tokens, cost_usd
-		FROM summaries
-		WHERE timestamp >= ?
-	`
-	args := []interface{}{cutoffDate}
+	var query string
+	var args []interface{}
 
-	// Apply source filter if provided
+	// Build complete query based on filter to avoid SQL fragment concatenation
 	if filter != nil && filter.LogSourceType != "" {
-		query += ` AND log_source_type = ?`
-		args = append(args, filter.LogSourceType)
-
-		// Filter by site name (empty string matches empty site_name)
-		query += ` AND site_name = ?`
-		args = append(args, filter.SiteName)
+		query = `
+			SELECT id, timestamp, log_source_type, site_name, system_status, summary,
+			       critical_issues, warnings, recommendations, metrics,
+			       input_tokens, output_tokens, cost_usd
+			FROM summaries
+			WHERE timestamp >= ? AND log_source_type = ? AND site_name = ?
+			ORDER BY timestamp DESC
+		`
+		args = []interface{}{cutoffDate, filter.LogSourceType, filter.SiteName}
+	} else {
+		query = `
+			SELECT id, timestamp, log_source_type, site_name, system_status, summary,
+			       critical_issues, warnings, recommendations, metrics,
+			       input_tokens, output_tokens, cost_usd
+			FROM summaries
+			WHERE timestamp >= ?
+			ORDER BY timestamp DESC
+		`
+		args = []interface{}{cutoffDate}
 	}
-
-	query += ` ORDER BY timestamp DESC`
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -418,17 +418,23 @@ func (s *Storage) CleanupOldSummaries(days int) (int64, error) {
 func (s *Storage) GetStatistics(filter *SourceFilter) (map[string]interface{}, error) {
 	stats := make(map[string]interface{})
 
-	// Build WHERE clause for filtering
-	whereClause := ""
+	var countQuery, statusQuery, costQuery string
 	var args []interface{}
+
+	// Build complete queries based on filter to avoid SQL fragment concatenation
 	if filter != nil && filter.LogSourceType != "" {
-		whereClause = " WHERE log_source_type = ? AND site_name = ?"
 		args = []interface{}{filter.LogSourceType, filter.SiteName}
+		countQuery = `SELECT COUNT(*) FROM summaries WHERE log_source_type = ? AND site_name = ?`
+		statusQuery = `SELECT system_status, COUNT(*) FROM summaries WHERE log_source_type = ? AND site_name = ? GROUP BY system_status`
+		costQuery = `SELECT COALESCE(SUM(cost_usd), 0) FROM summaries WHERE log_source_type = ? AND site_name = ?`
+	} else {
+		countQuery = `SELECT COUNT(*) FROM summaries`
+		statusQuery = `SELECT system_status, COUNT(*) FROM summaries GROUP BY system_status`
+		costQuery = `SELECT COALESCE(SUM(cost_usd), 0) FROM summaries`
 	}
 
 	// Total count
 	var total int
-	countQuery := `SELECT COUNT(*) FROM summaries` + whereClause
 	err := s.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, err
@@ -436,7 +442,6 @@ func (s *Storage) GetStatistics(filter *SourceFilter) (map[string]interface{}, e
 	stats["total_summaries"] = total
 
 	// Status distribution
-	statusQuery := `SELECT system_status, COUNT(*) FROM summaries` + whereClause + ` GROUP BY system_status`
 	rows, err := s.db.Query(statusQuery, args...)
 	if err != nil {
 		return nil, err
@@ -461,7 +466,6 @@ func (s *Storage) GetStatistics(filter *SourceFilter) (map[string]interface{}, e
 
 	// Total cost
 	var totalCost float64
-	costQuery := `SELECT COALESCE(SUM(cost_usd), 0) FROM summaries` + whereClause
 	err = s.db.QueryRow(costQuery, args...).Scan(&totalCost)
 	if err != nil {
 		return nil, err

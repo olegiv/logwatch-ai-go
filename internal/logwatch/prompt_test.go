@@ -7,6 +7,26 @@ import (
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
 
+// assertContains checks that s contains all elements
+func assertContains(t *testing.T, s string, elements []string, msgPrefix string) {
+	t.Helper()
+	for _, elem := range elements {
+		if !strings.Contains(s, elem) {
+			t.Errorf("%s missing expected content: %q", msgPrefix, elem)
+		}
+	}
+}
+
+// assertNotContains checks that s does not contain any elements
+func assertNotContains(t *testing.T, s string, elements []string, msgPrefix string) {
+	t.Helper()
+	for _, elem := range elements {
+		if strings.Contains(s, elem) {
+			t.Errorf("%s contains unexpected content: %q", msgPrefix, elem)
+		}
+	}
+}
+
 // Compile-time interface check
 var _ analyzer.PromptBuilder = (*PromptBuilder)(nil)
 
@@ -48,11 +68,7 @@ func TestPromptBuilder_GetSystemPrompt(t *testing.T) {
 		"metrics",
 	}
 
-	for _, element := range requiredElements {
-		if !strings.Contains(prompt, element) {
-			t.Errorf("GetSystemPrompt() missing required element: %q", element)
-		}
-	}
+	assertContains(t, prompt, requiredElements, "GetSystemPrompt()")
 }
 
 func TestPromptBuilder_GetUserPrompt(t *testing.T) {
@@ -91,18 +107,8 @@ func TestPromptBuilder_GetUserPrompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			prompt := pb.GetUserPrompt(tt.logContent, tt.historicalContext)
-
-			for _, want := range tt.wantContains {
-				if !strings.Contains(prompt, want) {
-					t.Errorf("GetUserPrompt() missing expected content: %q", want)
-				}
-			}
-
-			for _, notWant := range tt.wantNotContains {
-				if strings.Contains(prompt, notWant) {
-					t.Errorf("GetUserPrompt() contains unexpected content: %q", notWant)
-				}
-			}
+			assertContains(t, prompt, tt.wantContains, "GetUserPrompt()")
+			assertNotContains(t, prompt, tt.wantNotContains, "GetUserPrompt()")
 		})
 	}
 }

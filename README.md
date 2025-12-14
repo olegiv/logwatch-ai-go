@@ -13,11 +13,12 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 **Supported LLM Providers:**
 - **Anthropic Claude** - Cloud-based AI (Claude Sonnet 4.5 default)
 - **Ollama** - Local LLM inference for privacy and zero-cost operation
+- **LM Studio** - Local LLM inference with user-friendly GUI
 
 ## Features
 
-- **AI-Powered Analysis**: Uses LLM to analyze log reports (Claude AI or local Ollama models)
-- **Dual LLM Provider Support**: Choose between Anthropic Claude (cloud) or Ollama (local)
+- **AI-Powered Analysis**: Uses LLM to analyze log reports (Claude AI or local models)
+- **Multiple LLM Providers**: Choose between Anthropic Claude (cloud), Ollama (local), or LM Studio (local)
 - **Multi-Source Support**: Analyze Logwatch reports or Drupal watchdog logs
 - **Smart Notifications**: Dual-channel Telegram notifications (archive + alerts)
 - **Historical Tracking**: SQLite database stores analysis history for trend detection
@@ -37,7 +38,8 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 - Logwatch installed and configured
 - **LLM Provider** (choose one):
   - Anthropic API key (for cloud-based Claude AI), OR
-  - Ollama installed locally (for free local inference)
+  - Ollama installed locally (for free local inference), OR
+  - LM Studio installed locally (for free local inference with GUI)
 - Telegram bot token and channel IDs
 
 ### Installation
@@ -70,7 +72,7 @@ Create a `.env` file with the following settings:
 
 ```bash
 # LLM Provider Selection
-# Options: "anthropic" (default) or "ollama"
+# Options: "anthropic" (default), "ollama", or "lmstudio"
 LLM_PROVIDER=anthropic
 
 # Anthropic/Claude Configuration (used when LLM_PROVIDER=anthropic)
@@ -81,6 +83,12 @@ CLAUDE_MODEL=claude-sonnet-4-5-20250929
 # Requires Ollama running locally: https://ollama.ai
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.3:latest
+
+# LM Studio Configuration (used when LLM_PROVIDER=lmstudio)
+# Requires LM Studio running locally: https://lmstudio.ai
+# See "LM Studio Setup" section for recommended models
+LMSTUDIO_BASE_URL=http://localhost:1234
+LMSTUDIO_MODEL=local-model
 
 # AI Settings (applies to all providers)
 AI_TIMEOUT_SECONDS=120
@@ -183,6 +191,55 @@ OLLAMA_MODEL=llama3.3:latest
 - ⚠️ Slower than cloud (depends on hardware)
 - ⚠️ Quality varies by model (larger models = better)
 - ⚠️ Requires powerful hardware for best results
+
+### LM Studio Setup (Optional)
+
+LM Studio provides a user-friendly desktop application for running local LLMs:
+
+1. **Download and install LM Studio** from https://lmstudio.ai
+
+2. **Load a model** in LM Studio:
+   - Open LM Studio
+   - Browse and download a model (e.g., Llama 3.3, Mistral, Qwen)
+   - Click "Load" to load the model into memory
+
+3. **Enable Local Server**:
+   - Click on "Local Server" in the left sidebar
+   - Click "Start Server" (default port: 1234)
+
+4. **Configure in `.env`**:
+```bash
+LLM_PROVIDER=lmstudio
+LMSTUDIO_BASE_URL=http://localhost:1234
+LMSTUDIO_MODEL=local-model
+```
+
+**Note:** The `local-model` identifier uses whatever model is currently loaded in LM Studio. You can also specify a specific model name if multiple models are loaded.
+
+**Recommended Models:**
+| Model | VRAM Required | Quality | Speed |
+|-------|---------------|---------|-------|
+| Llama-3.3-70B-Instruct | ~40GB | Excellent | Slower |
+| Qwen2.5-32B-Instruct | ~20GB | Excellent | Medium |
+| Mistral-Small-24B-Instruct | ~15GB | Good | Medium |
+| Phi-4-14B | ~9GB | Good | Faster |
+| Llama-3.2-8B-Instruct | ~5GB | Acceptable | Fast |
+
+**Tips for model selection:**
+- Download models from LM Studio's built-in model browser (Search tab)
+- Look for GGUF quantized versions (Q4_K_M or Q5_K_M) for better VRAM efficiency
+- For Apple Silicon Macs, models run on unified memory (RAM = VRAM)
+- Start with a smaller model to test, then upgrade for better quality
+
+**Trade-offs vs Claude:**
+- ✅ Zero cost - unlimited analysis
+- ✅ Data privacy - logs never leave your machine
+- ✅ User-friendly GUI for model management
+- ✅ Easy model switching without CLI commands
+- ✅ OpenAI-compatible API
+- ⚠️ Slower than cloud (depends on hardware)
+- ⚠️ Quality varies by model
+- ⚠️ Requires powerful hardware for large models
 
 ### Cron Setup
 
@@ -467,11 +524,11 @@ logwatch-ai-go/
 - **Monthly (daily)**: ~$0.47/month
 - **Yearly**: ~$5.64/year
 
-### Ollama (Local)
+### Ollama / LM Studio (Local)
 
 **Cost: $0.00** - Local inference has no monetary cost.
 
-Trade-off: Requires capable hardware (see [Ollama Setup](#ollama-setup-optional) for requirements).
+Trade-off: Requires capable hardware (see [Ollama Setup](#ollama-setup-optional) or [LM Studio Setup](#lm-studio-setup-optional) for requirements).
 
 ## Telegram Notification Format
 
@@ -607,6 +664,23 @@ go test -v ./internal/logwatch
 - Consider a smaller model for faster inference
 - Increase timeout: `AI_TIMEOUT_SECONDS=300`
 - Check system resources: `htop` or Activity Monitor
+
+**LM Studio: "connection refused" or "LM Studio is not running"**
+- Ensure LM Studio is open and the Local Server is started
+- Check the server is running on the correct port (default: 1234)
+- Verify the base URL in `.env`: `LMSTUDIO_BASE_URL=http://localhost:1234`
+- Test connection: `curl http://localhost:1234/v1/models`
+
+**LM Studio: "no models loaded"**
+- Load a model in LM Studio before starting the analyzer
+- Click on a model in the Models tab and click "Load"
+- Verify model is loaded (shows in the top bar)
+
+**LM Studio: Slow response or timeout**
+- Large models require significant RAM and may be slow
+- Consider loading a smaller/quantized model
+- Increase timeout: `AI_TIMEOUT_SECONDS=300`
+- Check GPU acceleration is enabled in LM Studio settings
 
 See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more solutions.
 

@@ -20,19 +20,10 @@ type ProviderType string
 const (
 	ProviderAnthropic ProviderType = "anthropic"
 	ProviderOllama    ProviderType = "ollama"
+	ProviderLMStudio  ProviderType = "lmstudio"
 )
 
 // ValidProviderTypes returns a list of valid provider types
 func ValidProviderTypes() []ProviderType {
-	return []ProviderType{ProviderAnthropic, ProviderOllama}
-}
-
-// IsValidProviderType checks if the given provider type is valid
-func IsValidProviderType(pt string) bool {
-	for _, valid := range ValidProviderTypes() {
-		if string(valid) == pt {
-			return true
-		}
-	}
-	return false
+	return []ProviderType{ProviderAnthropic, ProviderOllama, ProviderLMStudio}
 }

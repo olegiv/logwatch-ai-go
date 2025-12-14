@@ -432,7 +432,7 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
             # Drush outputs object {wid: entry, ...} - convert to array and sort by wid (higher = newer)
             # Convert severity string to number, filter by severity and yesterday's date
             # Convert drush date format "DD/Mon HH:MM" to Unix timestamp
-            CONVERTED=$(echo "$OUTPUT" | jq --argjson minSev "$MIN_SEVERITY" --arg year "$CURRENT_YEAR" --arg yesterday "$YESTERDAY_DATE" '
+            if ! CONVERTED=$(echo "$OUTPUT" | jq --argjson minSev "$MIN_SEVERITY" --arg year "$CURRENT_YEAR" --arg yesterday "$YESTERDAY_DATE" '
                 # Month name to number mapping
                 def month_to_num:
                     if . == "Jan" then "01"
@@ -487,9 +487,7 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
                 [.[] | select(.severity <= $minSev)] |
                 [.[] | select(.date | startswith($yesterday))] |
                 sort_by(-.wid)
-            ' 2>/dev/null)
-
-            if [ $? -ne 0 ] || [ -z "$CONVERTED" ]; then
+            ' 2>/dev/null) || [ -z "$CONVERTED" ]; then
                 log_error "Failed to convert drush output format"
                 exit 1
             fi
@@ -545,8 +543,7 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
 
     exit 0
 else
-    EXIT_CODE=$?
-    log_error "drush watchdog:show failed with exit code $EXIT_CODE"
+    log_error "drush watchdog:show failed"
     log_error "Output: $OUTPUT"
 
     # Check for common issues

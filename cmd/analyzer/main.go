@@ -353,6 +353,29 @@ func createLLMClient(ctx context.Context, cfg *config.Config, log *logging.Secur
 
 		return client, nil
 
+	case "lmstudio":
+		client, err := ai.NewLMStudioClient(ai.LMStudioConfig{
+			BaseURL:        cfg.LMStudioBaseURL,
+			Model:          cfg.LMStudioModel,
+			TimeoutSeconds: cfg.AITimeoutSeconds,
+			MaxTokens:      cfg.AIMaxTokens,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create LM Studio client: %w", err)
+		}
+
+		// Check connection and model availability
+		log.Info().
+			Str("base_url", cfg.LMStudioBaseURL).
+			Str("model", cfg.LMStudioModel).
+			Msg("Checking LM Studio connection...")
+
+		if err := client.CheckConnection(ctx); err != nil {
+			return nil, fmt.Errorf("LM Studio connection check failed: %w", err)
+		}
+
+		return client, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported LLM provider: %s", cfg.LLMProvider)
 	}

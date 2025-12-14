@@ -7,6 +7,37 @@ import (
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
 
+// assertContains checks that s contains all elements
+func assertContains(t *testing.T, s string, elements []string, msgPrefix string) {
+	t.Helper()
+	for _, elem := range elements {
+		if !strings.Contains(s, elem) {
+			t.Errorf("%s missing expected content: %q", msgPrefix, elem)
+		}
+	}
+}
+
+// assertNotContains checks that s does not contain any elements
+func assertNotContains(t *testing.T, s string, elements []string, msgPrefix string) {
+	t.Helper()
+	for _, elem := range elements {
+		if strings.Contains(s, elem) {
+			t.Errorf("%s contains unexpected content: %q", msgPrefix, elem)
+		}
+	}
+}
+
+// assertContainsIgnoreCase checks that s contains all elements (case-insensitive)
+func assertContainsIgnoreCase(t *testing.T, s string, elements []string, msgPrefix string) {
+	t.Helper()
+	sLower := strings.ToLower(s)
+	for _, elem := range elements {
+		if !strings.Contains(sLower, strings.ToLower(elem)) {
+			t.Errorf("%s missing expected content: %q", msgPrefix, elem)
+		}
+	}
+}
+
 // Compile-time interface check
 var _ analyzer.PromptBuilder = (*PromptBuilder)(nil)
 
@@ -56,23 +87,14 @@ func TestPromptBuilder_GetSystemPrompt(t *testing.T) {
 		"phpErrors",
 	}
 
-	for _, element := range requiredElements {
-		if !strings.Contains(prompt, element) {
-			t.Errorf("GetSystemPrompt() missing required element: %q", element)
-		}
-	}
+	assertContains(t, prompt, requiredElements, "GetSystemPrompt()")
 
-	// Check for Drupal-specific patterns
+	// Check for Drupal-specific patterns (case-insensitive)
 	drupalPatterns := []string{
 		"php", "access denied", "page not found", "cron",
 		"PDOException", "module", "theme",
 	}
-
-	for _, pattern := range drupalPatterns {
-		if !strings.Contains(strings.ToLower(prompt), strings.ToLower(pattern)) {
-			t.Errorf("GetSystemPrompt() missing Drupal pattern: %q", pattern)
-		}
-	}
+	assertContainsIgnoreCase(t, prompt, drupalPatterns, "GetSystemPrompt()")
 }
 
 func TestPromptBuilder_GetUserPrompt(t *testing.T) {
@@ -118,18 +140,8 @@ func TestPromptBuilder_GetUserPrompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			prompt := pb.GetUserPrompt(tt.logContent, tt.historicalContext)
-
-			for _, want := range tt.wantContains {
-				if !strings.Contains(prompt, want) {
-					t.Errorf("GetUserPrompt() missing expected content: %q", want)
-				}
-			}
-
-			for _, notWant := range tt.wantNotContains {
-				if strings.Contains(prompt, notWant) {
-					t.Errorf("GetUserPrompt() contains unexpected content: %q", notWant)
-				}
-			}
+			assertContains(t, prompt, tt.wantContains, "GetUserPrompt()")
+			assertNotContains(t, prompt, tt.wantNotContains, "GetUserPrompt()")
 		})
 	}
 }
@@ -160,12 +172,7 @@ func TestPromptBuilder_SystemPrompt_StatusValues(t *testing.T) {
 	statusValues := []string{
 		"Excellent", "Good", "Satisfactory", "Bad", "Awful",
 	}
-
-	for _, status := range statusValues {
-		if !strings.Contains(prompt, status) {
-			t.Errorf("GetSystemPrompt() missing status value: %q", status)
-		}
-	}
+	assertContains(t, prompt, statusValues, "GetSystemPrompt()")
 }
 
 func TestPromptBuilder_SystemPrompt_JSONFormat(t *testing.T) {
@@ -181,19 +188,14 @@ func TestPromptBuilder_SystemPrompt_JSONFormat(t *testing.T) {
 		`"recommendations"`,
 		`"metrics"`,
 	}
-
-	for _, element := range jsonElements {
-		if !strings.Contains(prompt, element) {
-			t.Errorf("GetSystemPrompt() missing JSON element: %s", element)
-		}
-	}
+	assertContains(t, prompt, jsonElements, "GetSystemPrompt()")
 }
 
 func TestPromptBuilder_SystemPrompt_SecurityFocus(t *testing.T) {
 	pb := NewPromptBuilder()
 	prompt := pb.GetSystemPrompt()
 
-	// Verify security-related content
+	// Verify security-related content (case-insensitive)
 	securityTerms := []string{
 		"security",
 		"login",
@@ -203,10 +205,5 @@ func TestPromptBuilder_SystemPrompt_SecurityFocus(t *testing.T) {
 		"SQL injection",
 		"XSS",
 	}
-
-	for _, term := range securityTerms {
-		if !strings.Contains(strings.ToLower(prompt), strings.ToLower(term)) {
-			t.Errorf("GetSystemPrompt() missing security term: %q", term)
-		}
-	}
+	assertContainsIgnoreCase(t, prompt, securityTerms, "GetSystemPrompt()")
 }

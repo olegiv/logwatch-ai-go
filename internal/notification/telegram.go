@@ -227,8 +227,8 @@ func isRateLimitError(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "429") || strings.Contains(errStr, "Too Many Requests")
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "429") || strings.Contains(errStr, "too many requests")
 }
 
 // extractRetryAfter extracts the retry_after value from a rate limit error

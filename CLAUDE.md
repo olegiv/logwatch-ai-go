@@ -13,10 +13,11 @@ Logwatch AI Analyzer is an intelligent system log analyzer that uses LLM (Large 
 **Supported LLM Providers:**
 - **Anthropic Claude** - Cloud-based AI (Claude Sonnet 4.5 default)
 - **Ollama** - Local LLM inference (llama3.3:latest recommended for high-RAM systems)
+- **LM Studio** - Local LLM inference with OpenAI-compatible API
 
 **Key Technologies:**
 - Go 1.25+ with pure Go SQLite (modernc.org/sqlite)
-- Anthropic Claude API or Ollama local inference
+- Anthropic Claude API, Ollama, or LM Studio local inference
 - Telegram Bot API
 - SQLite for analysis history
 
@@ -76,7 +77,7 @@ The project follows `golang-standards/project-layout`:
 ```
 cmd/analyzer/           - Main application entry point (main.go)
 internal/              - Private application packages (not importable)
-  ├── ai/             - LLM clients (Anthropic, Ollama), prompts, response parsing
+  ├── ai/             - LLM clients (Anthropic, Ollama, LM Studio), prompts, response parsing
   ├── analyzer/       - Multi-source abstraction (interfaces, registry)
   ├── config/         - Configuration loading (viper + .env)
   ├── drupal/         - Drupal watchdog reader, preprocessor, prompts
@@ -254,7 +255,21 @@ type Provider interface {
   - `qwen2.5:72b` - Excellent for technical analysis
   - `deepseek-coder-v2:33b` - Faster, good quality
 
-**Common Settings (both providers):**
+*LM Studio (internal/ai/lmstudio.go):*
+- OpenAI-compatible API: Uses `/v1/chat/completions` endpoint
+- Retry logic: 3 attempts with exponential backoff (2^n seconds)
+- Connection check: Verifies LM Studio is running and model is loaded
+- Zero cost: Local inference has no monetary cost
+- JSON output: Relies on system prompt (LM Studio doesn't support `json_object` response_format)
+- Default model identifier: `local-model` (uses currently loaded model)
+- Recommended models (GGUF format, download from LM Studio browser):
+  - `Llama-3.3-70B-Instruct` - Best quality (~40GB VRAM)
+  - `Qwen2.5-32B-Instruct` - Excellent reasoning (~20GB VRAM)
+  - `Mistral-Small-24B-Instruct` - Good balance (~15GB VRAM)
+  - `Phi-4-14B` - Fast, good quality (~9GB VRAM)
+  - `Llama-3.2-8B-Instruct` - Lightweight (~5GB VRAM)
+
+**Common Settings (all providers):**
 - Context: Includes last 7 days of analysis history
 - Configurable timeout: `AI_TIMEOUT_SECONDS` (default: 120, range: 30-600)
 - Configurable max tokens: `AI_MAX_TOKENS` (default: 8000, range: 1000-16000)
@@ -273,7 +288,7 @@ type Provider interface {
 ### Configuration Validation Rules
 
 **LLM Provider Settings:**
-- `LLM_PROVIDER`: `anthropic` (default) or `ollama`
+- `LLM_PROVIDER`: `anthropic` (default), `ollama`, or `lmstudio`
 - When `LLM_PROVIDER=anthropic`:
   - `ANTHROPIC_API_KEY` is required and must start with `sk-ant-`
   - `CLAUDE_MODEL` is required (default: `claude-sonnet-4-5-20250929`)
@@ -281,6 +296,10 @@ type Provider interface {
   - `OLLAMA_BASE_URL` is required (default: `http://localhost:11434`)
   - `OLLAMA_MODEL` is required (default: `llama3.3:latest`)
   - Ollama must be running and the model must be available (run `ollama pull <model>` to download)
+- When `LLM_PROVIDER=lmstudio`:
+  - `LMSTUDIO_BASE_URL` is required (default: `http://localhost:1234`)
+  - `LMSTUDIO_MODEL` is optional (default: `local-model`, uses currently loaded model)
+  - LM Studio must be running with Local Server enabled and a model loaded
 
 **Telegram Settings:**
 - `TELEGRAM_BOT_TOKEN` must match format `number:token`
@@ -710,6 +729,44 @@ OLLAMA_MODEL=llama3.3:latest
 - ✅ Zero cost - unlimited analysis
 - ✅ Data privacy - logs never leave your machine
 - ✅ No rate limits
+- ⚠️ Slower than cloud (depends on hardware)
+- ⚠️ Quality varies by model
+- ⚠️ Requires powerful hardware for large models
+
+### Using LM Studio (Local) - Zero Cost
+
+LM Studio provides a user-friendly desktop application for running local LLMs with an OpenAI-compatible API:
+
+1. Download and install LM Studio from https://lmstudio.ai
+2. Download a model from the Search tab (recommended models below)
+3. Load the model (click on it, then "Load")
+4. Enable "Local Server" mode in the left sidebar
+5. Server starts on `http://localhost:1234` by default
+
+Configure in `.env`:
+```
+LLM_PROVIDER=lmstudio
+LMSTUDIO_BASE_URL=http://localhost:1234
+LMSTUDIO_MODEL=local-model
+```
+
+**Recommended Models** (download from LM Studio's model browser):
+| Model | VRAM | Quality | Speed |
+|-------|------|---------|-------|
+| Llama-3.3-70B-Instruct | ~40GB | Excellent | Slower |
+| Qwen2.5-32B-Instruct | ~20GB | Excellent | Medium |
+| Mistral-Small-24B-Instruct | ~15GB | Good | Medium |
+| Phi-4-14B | ~9GB | Good | Faster |
+| Llama-3.2-8B-Instruct | ~5GB | Acceptable | Fast |
+
+**Tips:** Look for GGUF quantized versions (Q4_K_M, Q5_K_M) for better VRAM efficiency.
+
+**Trade-offs:**
+- ✅ Zero cost - unlimited analysis
+- ✅ Data privacy - logs never leave your machine
+- ✅ User-friendly GUI for model management
+- ✅ Easy model switching without CLI
+- ✅ OpenAI-compatible API (works with many tools)
 - ⚠️ Slower than cloud (depends on hardware)
 - ⚠️ Quality varies by model
 - ⚠️ Requires powerful hardware for large models

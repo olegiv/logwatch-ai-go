@@ -7,15 +7,15 @@ import (
 // mockReader implements LogReader for testing
 type mockReader struct{}
 
-func (m *mockReader) Read(sourcePath string) (string, error) {
+func (m *mockReader) Read(_ string) (string, error) {
 	return "test content", nil
 }
 
-func (m *mockReader) Validate(content string) error {
+func (m *mockReader) Validate(_ string) error {
 	return nil
 }
 
-func (m *mockReader) GetSourceInfo(sourcePath string) (map[string]interface{}, error) {
+func (m *mockReader) GetSourceInfo(_ string) (map[string]interface{}, error) {
 	return map[string]interface{}{"size_bytes": int64(100)}, nil
 }
 
@@ -43,7 +43,7 @@ func (m *mockPromptBuilder) GetSystemPrompt() string {
 	return "test system prompt"
 }
 
-func (m *mockPromptBuilder) GetUserPrompt(logContent, historicalContext string) string {
+func (m *mockPromptBuilder) GetUserPrompt(logContent, _ string) string {
 	return "test user prompt: " + logContent
 }
 

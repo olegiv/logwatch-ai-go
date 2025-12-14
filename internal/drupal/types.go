@@ -170,19 +170,3 @@ func (r *WatchdogReport) Stats() map[string]interface{} {
 
 	return stats
 }
-
-// CommonDrupalTypes lists common Drupal watchdog log types.
-var CommonDrupalTypes = []string{
-	"php",            // PHP errors and notices
-	"access",         // Access control events
-	"access denied",  // Permission denied events
-	"cron",           // Cron job events
-	"system",         // System events
-	"user",           // User-related events
-	"page not found", // 404 errors
-	"content",        // Content-related events
-	"actions",        // Action events
-	"file",           // File system events
-	"mail",           // Email events
-	"security",       // Security events
-}

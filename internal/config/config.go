@@ -76,6 +76,10 @@ type Config struct {
 	OllamaBaseURL string // e.g., "http://localhost:11434"
 	OllamaModel   string // e.g., "llama3.3:latest"
 
+	// LM Studio Settings (used when LLMProvider = "lmstudio")
+	LMStudioBaseURL string // e.g., "http://localhost:1234"
+	LMStudioModel   string // e.g., "local-model" or specific model name
+
 	// Telegram
 	TelegramBotToken       string
 	TelegramArchiveChannel int64
@@ -146,6 +150,8 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 		ClaudeModel:     viper.GetString("CLAUDE_MODEL"),
 		OllamaBaseURL:   viper.GetString("OLLAMA_BASE_URL"),
 		OllamaModel:     viper.GetString("OLLAMA_MODEL"),
+		LMStudioBaseURL: viper.GetString("LMSTUDIO_BASE_URL"),
+		LMStudioModel:   viper.GetString("LMSTUDIO_MODEL"),
 
 		// Telegram settings
 		TelegramBotToken:       viper.GetString("TELEGRAM_BOT_TOKEN"),
@@ -281,6 +287,8 @@ func setDefaults() {
 	viper.SetDefault("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
 	viper.SetDefault("OLLAMA_BASE_URL", "http://localhost:11434")
 	viper.SetDefault("OLLAMA_MODEL", "llama3.3:latest")
+	viper.SetDefault("LMSTUDIO_BASE_URL", "http://localhost:1234")
+	viper.SetDefault("LMSTUDIO_MODEL", "local-model")
 
 	// Log source defaults
 	viper.SetDefault("LOG_SOURCE_TYPE", "logwatch")
@@ -394,10 +402,11 @@ func (c *Config) validateLLMProvider() error {
 	validProviders := map[string]bool{
 		"anthropic": true,
 		"ollama":    true,
+		"lmstudio":  true,
 	}
 
 	if !validProviders[c.LLMProvider] {
-		return fmt.Errorf("LLM_PROVIDER must be 'anthropic' or 'ollama' (got: %s)", c.LLMProvider)
+		return fmt.Errorf("LLM_PROVIDER must be 'anthropic', 'ollama', or 'lmstudio' (got: %s)", c.LLMProvider)
 	}
 
 	switch c.LLMProvider {
@@ -426,6 +435,17 @@ func (c *Config) validateLLMProvider() error {
 		if !strings.HasPrefix(c.OllamaBaseURL, "http://") && !strings.HasPrefix(c.OllamaBaseURL, "https://") {
 			return fmt.Errorf("OLLAMA_BASE_URL must start with 'http://' or 'https://'")
 		}
+
+	case "lmstudio":
+		// Validate LM Studio settings
+		if c.LMStudioBaseURL == "" {
+			return fmt.Errorf("LMSTUDIO_BASE_URL is required when LLM_PROVIDER=lmstudio")
+		}
+		// Validate URL format (basic check)
+		if !strings.HasPrefix(c.LMStudioBaseURL, "http://") && !strings.HasPrefix(c.LMStudioBaseURL, "https://") {
+			return fmt.Errorf("LMSTUDIO_BASE_URL must start with 'http://' or 'https://'")
+		}
+		// Model is optional for LM Studio (defaults to "local-model")
 	}
 
 	return nil
@@ -495,10 +515,19 @@ func (c *Config) IsAnthropic() bool {
 	return c.LLMProvider == "anthropic"
 }
 
+// IsLMStudio returns true if the LLM provider is LM Studio
+func (c *Config) IsLMStudio() bool {
+	return c.LLMProvider == "lmstudio"
+}
+
 // GetLLMModel returns the model name for the current LLM provider
 func (c *Config) GetLLMModel() string {
-	if c.IsOllama() {
+	switch c.LLMProvider {
+	case "ollama":
 		return c.OllamaModel
+	case "lmstudio":
+		return c.LMStudioModel
+	default:
+		return c.ClaudeModel
 	}
-	return c.ClaudeModel
 }
