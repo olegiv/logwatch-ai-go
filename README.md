@@ -406,8 +406,8 @@ Options:
   -drupal-site string        Drupal site ID from drupal-sites.json
   -drupal-sites-config string  Path to drupal-sites.json configuration file
   -list-drupal-sites         List available Drupal sites and exit
-  -help                      Show usage information
-  -version                   Show version information
+  -h, -help                  Show usage information
+  -v, -version               Show version information
 ```
 
 **Examples:**

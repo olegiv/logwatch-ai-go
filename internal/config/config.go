@@ -33,7 +33,9 @@ func ParseCLI() *CLIOptions {
 	flag.StringVar(&opts.DrupalSitesConfig, "drupal-sites-config", "", "Path to drupal-sites.json configuration file")
 	flag.BoolVar(&opts.ListDrupalSites, "list-drupal-sites", false, "List available Drupal sites from drupal-sites.json and exit")
 	flag.BoolVar(&opts.ShowHelp, "help", false, "Show usage information")
+	flag.BoolVar(&opts.ShowHelp, "h", false, "Show usage information (shorthand)")
 	flag.BoolVar(&opts.ShowVersion, "version", false, "Show version information")
+	flag.BoolVar(&opts.ShowVersion, "v", false, "Show version information (shorthand)")
 
 	// Custom usage message
 	flag.Usage = func() {

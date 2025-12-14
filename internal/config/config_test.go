@@ -972,3 +972,65 @@ func TestConfigStructure_WithDrupalFields(t *testing.T) {
 		t.Errorf("DrupalSiteName not set correctly")
 	}
 }
+
+func TestCLIOptionsStructure(t *testing.T) {
+	// Test that CLIOptions structure holds all fields correctly
+	opts := &CLIOptions{
+		SourceType:        "drupal_watchdog",
+		SourcePath:        "/tmp/watchdog.json",
+		DrupalSite:        "production",
+		DrupalSitesConfig: "/etc/drupal-sites.json",
+		ListDrupalSites:   true,
+		ShowHelp:          true,
+		ShowVersion:       true,
+	}
+
+	if opts.SourceType != "drupal_watchdog" {
+		t.Errorf("SourceType not set correctly")
+	}
+	if opts.SourcePath != "/tmp/watchdog.json" {
+		t.Errorf("SourcePath not set correctly")
+	}
+	if opts.DrupalSite != "production" {
+		t.Errorf("DrupalSite not set correctly")
+	}
+	if opts.DrupalSitesConfig != "/etc/drupal-sites.json" {
+		t.Errorf("DrupalSitesConfig not set correctly")
+	}
+	if !opts.ListDrupalSites {
+		t.Errorf("ListDrupalSites not set correctly")
+	}
+	if !opts.ShowHelp {
+		t.Errorf("ShowHelp not set correctly")
+	}
+	if !opts.ShowVersion {
+		t.Errorf("ShowVersion not set correctly")
+	}
+}
+
+func TestCLIOptionsDefaults(t *testing.T) {
+	// Test that a zero-value CLIOptions has the expected defaults
+	opts := &CLIOptions{}
+
+	if opts.SourceType != "" {
+		t.Errorf("Expected empty SourceType by default, got %q", opts.SourceType)
+	}
+	if opts.SourcePath != "" {
+		t.Errorf("Expected empty SourcePath by default, got %q", opts.SourcePath)
+	}
+	if opts.DrupalSite != "" {
+		t.Errorf("Expected empty DrupalSite by default, got %q", opts.DrupalSite)
+	}
+	if opts.DrupalSitesConfig != "" {
+		t.Errorf("Expected empty DrupalSitesConfig by default, got %q", opts.DrupalSitesConfig)
+	}
+	if opts.ListDrupalSites {
+		t.Errorf("Expected ListDrupalSites to be false by default")
+	}
+	if opts.ShowHelp {
+		t.Errorf("Expected ShowHelp to be false by default")
+	}
+	if opts.ShowVersion {
+		t.Errorf("Expected ShowVersion to be false by default")
+	}
+}
