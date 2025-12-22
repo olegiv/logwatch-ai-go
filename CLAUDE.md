@@ -887,6 +887,47 @@ Agents are available in `.claude/agents/` and provide deep expertise in specific
 - "Why did today's analysis cost more than usual?"
 - "How can I reduce costs without losing analysis quality?"
 
+#### code-quality-auditor (Code Quality Specialist)
+**When to use:** Static analysis, finding code issues, enforcing best practices
+- Run Go static analysis tools (go vet, staticcheck, errcheck)
+- Detect semantic issues (constant comparisons, empty slice literals)
+- Find package name collisions with variables
+- Identify duplicate code patterns
+- Check for unhandled errors
+
+**Examples:**
+- "Run a code quality scan"
+- "Check for unhandled errors in the handler package"
+- "Find package name collisions"
+- "Fix all code quality warnings"
+
+#### security-auditor (Security Specialist)
+**When to use:** Security audits, vulnerability scanning, pre-release checks
+- Analyze code for OWASP Top 10 vulnerabilities
+- Scan dependencies for known CVEs (govulncheck)
+- Check configurations for security issues
+- Detect hardcoded secrets and credentials
+- Review authentication and API security
+
+**Examples:**
+- "Perform a security audit before release"
+- "Check dependencies for vulnerabilities"
+- "Scan for hardcoded secrets"
+- "Review API endpoint security"
+
+#### project-architect (Project Setup Specialist)
+**When to use:** Setting up Claude Code tools, analyzing project architecture
+- Analyze project tech stack and workflows
+- Generate tailored Claude Code agents and commands
+- Create project-specific development tools
+- Update tooling after major tech stack changes
+
+**Examples:**
+- "Analyze this project and create Claude Code tools"
+- "What's the architecture of this project?"
+- "Generate new agents for our workflow"
+- "Update Claude Code setup after migration"
+
 ### Slash Commands
 
 Quick commands are available for common workflows. Use them with `/command` syntax:
@@ -898,6 +939,7 @@ Quick commands are available for common workflows. Use them with `/command` synt
 - **/build-prod** - Build optimized production binary for current platform
 - **/build-all** - Build for all platforms (Linux AMD64, macOS ARM64)
 - **/lint** - Run code formatting (gofmt) and static analysis (go vet)
+- **/code-quality** - Run comprehensive code quality scan (vet, staticcheck, errcheck)
 - **/clean** - Remove build artifacts and coverage files
 
 #### Deployment & Operations
@@ -910,6 +952,9 @@ Quick commands are available for common workflows. Use them with `/command` synt
 
 #### Security
 - **/security-audit** - Perform comprehensive security audit of codebase, dependencies, and configurations
+
+#### Project Setup
+- **/setup-project-tools** - Analyze project and generate tailored Claude Code agents and commands
 
 ### How to Use Agents and Commands
 
@@ -944,10 +989,11 @@ Quick commands are available for common workflows. Use them with `/command` synt
 | Query database | db-manager | /db-stats command |
 | Test APIs | api-tester | Manual testing |
 | Analyze costs | cost-optimizer | /cost-report command |
-| Code quality | go-dev | /lint command |
+| Code quality | code-quality-auditor | /code-quality command |
 | Debug issues | go-dev | Check logs manually |
 | Optimize performance | cost-optimizer + go-dev | Manual analysis |
-| Security audit | /security-audit command | Manual review |
+| Security audit | security-auditor | /security-audit command |
+| Setup Claude Code tools | project-architect | /setup-project-tools command |
 
 ### Best Practices
 
@@ -1015,4 +1061,28 @@ Quick commands are available for common workflows. Use them with `/command` synt
 # 4. Configuration security issues
 # 5. Deployment security best practices
 # Results stored in .audit/ directory (gitignored)
+```
+
+**Scenario 6: Code Quality Before Commit**
+```
+/code-quality
+
+# Comprehensive code quality scan:
+# 1. Go toolchain version check
+# 2. Static analysis (go vet, staticcheck, errcheck)
+# 3. Semantic analysis (constant comparisons, empty slices)
+# 4. Package name collision detection
+# Quick way to catch issues before committing
+```
+
+**Scenario 7: Setting Up Claude Code for New Project**
+```
+@project-architect Analyze this project and create Claude Code tools
+
+# Agent will:
+# 1. Detect tech stack (Go, dependencies, build tools)
+# 2. Identify common workflows (test, build, deploy)
+# 3. Generate tailored agents in .claude/agents/
+# 4. Generate slash commands in .claude/commands/
+# 5. Update documentation with new tools
 ```
