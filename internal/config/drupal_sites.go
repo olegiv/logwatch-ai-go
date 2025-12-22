@@ -27,7 +27,7 @@ type DrupalSitesConfig struct {
 
 // Validate checks the configuration for errors
 func (c *DrupalSitesConfig) Validate() error {
-	if c.Sites == nil || len(c.Sites) == 0 {
+	if len(c.Sites) == 0 {
 		return fmt.Errorf("no sites defined in configuration")
 	}
 

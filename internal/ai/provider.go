@@ -22,8 +22,3 @@ const (
 	ProviderOllama    ProviderType = "ollama"
 	ProviderLMStudio  ProviderType = "lmstudio"
 )
-
-// ValidProviderTypes returns a list of valid provider types
-func ValidProviderTypes() []ProviderType {
-	return []ProviderType{ProviderAnthropic, ProviderOllama, ProviderLMStudio}
-}

@@ -206,26 +206,10 @@ func TestLMStudioClient_Analyze(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 
-		// Parse request to verify it's well-formed
-		var req openAIChatRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Errorf("failed to decode request: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
+		// Parse and verify request structure
+		req := verifyOpenAIChatRequest(t, r, w)
+		if req == nil {
 			return
-		}
-
-		// Verify request structure
-		if req.Model == "" {
-			t.Error("model is empty")
-		}
-		if len(req.Messages) != 2 {
-			t.Errorf("expected 2 messages, got %d", len(req.Messages))
-		}
-		if req.Messages[0].Role != "system" {
-			t.Errorf("first message should be system, got %s", req.Messages[0].Role)
-		}
-		if req.Messages[1].Role != "user" {
-			t.Errorf("second message should be user, got %s", req.Messages[1].Role)
 		}
 
 		// Return a valid analysis response in OpenAI format
@@ -286,30 +270,8 @@ func TestLMStudioClient_Analyze(t *testing.T) {
 		t.Fatalf("Analyze() error = %v", err)
 	}
 
-	// Verify analysis
-	if analysis.SystemStatus != "Good" {
-		t.Errorf("SystemStatus = %v, want Good", analysis.SystemStatus)
-	}
-	if len(analysis.Warnings) != 1 {
-		t.Errorf("len(Warnings) = %v, want 1", len(analysis.Warnings))
-	}
-	if len(analysis.Recommendations) != 1 {
-		t.Errorf("len(Recommendations) = %v, want 1", len(analysis.Recommendations))
-	}
-
-	// Verify stats
-	if stats.InputTokens != 1500 {
-		t.Errorf("InputTokens = %v, want 1500", stats.InputTokens)
-	}
-	if stats.OutputTokens != 250 {
-		t.Errorf("OutputTokens = %v, want 250", stats.OutputTokens)
-	}
-	if stats.CostUSD != 0 {
-		t.Errorf("CostUSD = %v, want 0 (local inference)", stats.CostUSD)
-	}
-	if stats.Provider != "LMStudio" {
-		t.Errorf("Provider = %v, want LMStudio", stats.Provider)
-	}
+	verifyAnalysisResult(t, analysis)
+	verifyLocalProviderStats(t, stats, "LMStudio")
 }
 
 func TestLMStudioClient_Analyze_Error(t *testing.T) {

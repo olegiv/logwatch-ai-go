@@ -348,7 +348,7 @@ func createLLMClient(ctx context.Context, cfg *config.Config, log *logging.Secur
 			Msg("Checking Ollama connection...")
 
 		if err := client.CheckConnection(ctx); err != nil {
-			return nil, fmt.Errorf("Ollama connection check failed: %w", err)
+			return nil, fmt.Errorf("ollama connection check failed: %w", err)
 		}
 
 		return client, nil
