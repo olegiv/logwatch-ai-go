@@ -13,13 +13,40 @@ This document covers deployment best practices for Logwatch AI Analyzer.
 Development (macOS) → Integration (Debian 12) → QA (Debian 12) → Pre-Production (Debian 12) → Production
 ```
 
+## LLM Provider Selection
+
+Choose the appropriate LLM provider for your deployment:
+
+| Provider | Use Case | Requirements |
+|----------|----------|--------------|
+| **Anthropic Claude** | Production (best quality) | API key, internet access |
+| **Ollama** | Privacy-sensitive, cost-free | 8-45GB RAM depending on model |
+| **LM Studio** | Development, testing | Desktop app, 8-45GB RAM |
+
+### Anthropic Claude (Recommended for Production)
+- Best analysis quality
+- Prompt caching reduces costs (~$0.47/month)
+- Requires `ANTHROPIC_API_KEY`
+
+### Ollama (Recommended for Air-Gapped/Privacy)
+- Zero cost, unlimited analysis
+- Logs never leave the server
+- Requires Ollama installed and model pulled
+- Slower than cloud (depends on hardware)
+
+### LM Studio (Recommended for Development)
+- User-friendly GUI
+- Easy model switching
+- Not recommended for headless servers
+
 ## Pre-Deployment Checklist
 
-1. **Build for target platform**: Use `make build-linux-amd64` for Debian/Ubuntu
-2. **Test in staging**: Deploy to pre-production environment first
-3. **Verify credentials**: Test with actual API keys in isolated environment
-4. **Check cron configuration**: Ensure logwatch runs before analyzer
-5. **Monitor logs**: Watch `/opt/logwatch-ai/logs/` for first few runs
+1. **Choose LLM provider**: Select based on requirements above
+2. **Build for target platform**: Use `make build-linux-amd64` for Debian/Ubuntu
+3. **Test in staging**: Deploy to pre-production environment first
+4. **Verify credentials**: Test with actual API keys in isolated environment
+5. **Check cron configuration**: Ensure logwatch runs before analyzer
+6. **Monitor logs**: Watch `/opt/logwatch-ai/logs/` for first few runs
 
 ## Deployment Steps
 
@@ -92,3 +119,51 @@ GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -trimpath -o bin/logwatch-anal
 All production builds use optimizations:
 - `-ldflags="-s -w"` - Strip symbols and debug information
 - `-trimpath` - Remove file system paths from binary
+
+## Drupal Watchdog Deployment
+
+For Drupal log analysis, additional setup is required:
+
+1. **Install jq**: `apt-get install jq` (required for multi-site config)
+2. **Create drupal-sites.json** in `/opt/logwatch-ai/` or `./configs/`
+3. **Set up watchdog export cron**:
+   ```bash
+   0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh --site production
+   ```
+4. **Set up analyzer cron**:
+   ```bash
+   15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -drupal-site production >> logs/cron.log 2>&1
+   ```
+
+See `configs/drupal-sites.json.example` for configuration format.
+
+## Ollama Server Deployment
+
+For local LLM inference on production servers:
+
+1. **Install Ollama**:
+   ```bash
+   curl -fsSL https://ollama.ai/install.sh | sh
+   ```
+
+2. **Pull model**:
+   ```bash
+   ollama pull llama3.3:latest
+   ```
+
+3. **Enable as systemd service**:
+   ```bash
+   sudo systemctl enable ollama
+   sudo systemctl start ollama
+   ```
+
+4. **Configure `.env`**:
+   ```
+   LLM_PROVIDER=ollama
+   OLLAMA_BASE_URL=http://localhost:11434
+   OLLAMA_MODEL=llama3.3:latest
+   ```
+
+**Hardware Requirements:**
+- llama3.3:latest: ~45GB RAM
+- llama3.2:8b: ~5GB RAM (acceptable quality)

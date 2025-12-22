@@ -51,6 +51,9 @@ cd logwatch-ai-go
 
 # If already cloned without --recurse-submodules:
 git submodule update --init --recursive
+
+# Update submodule to latest version:
+git submodule update --remote --merge
 ```
 
 2. **Build the application**
