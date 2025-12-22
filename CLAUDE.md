@@ -27,6 +27,24 @@ Logwatch AI Analyzer is an intelligent system log analyzer that uses LLM (Large 
 - ✅ **Real API Testing** - Validated with live Claude AI and Telegram Bot APIs
 - ✅ **End-to-End Validation** - Full workflow tested with actual logwatch data
 
+**Shared Claude Code Tools:**
+
+This project uses shared Claude Code support tools as a git submodule at `.claude/shared/`. These provide reusable agents, commands, and utilities across projects.
+
+```bash
+# Clone with submodules (for new clones)
+git clone --recurse-submodules <repo-url>
+
+# Initialize submodule (if cloned without --recurse-submodules)
+git submodule update --init --recursive
+
+# Update submodule to latest version
+git submodule update --remote .claude/shared
+
+# Check submodule status
+git submodule status
+```
+
 ## Build Commands
 
 ### Development

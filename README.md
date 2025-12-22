@@ -46,8 +46,11 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/olegiv/logwatch-ai-go.git
+git clone --recurse-submodules https://github.com/olegiv/logwatch-ai-go.git
 cd logwatch-ai-go
+
+# If already cloned without --recurse-submodules:
+git submodule update --init --recursive
 ```
 
 2. **Build the application**
