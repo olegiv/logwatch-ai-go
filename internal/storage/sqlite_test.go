@@ -338,7 +338,7 @@ func TestCleanupOldSummaries(t *testing.T) {
 	}
 
 	if len(recent) != 1 {
-		t.Errorf("Expected 1 summary remaining, got %d", len(recent))
+		t.Fatalf("Expected 1 summary remaining, got %d", len(recent))
 	}
 
 	if recent[0].Summary != "Recent" {
@@ -776,7 +776,7 @@ func TestSaveAndRetrieveWithSourceFilter(t *testing.T) {
 		t.Fatalf("Failed to get logwatch summaries: %v", err)
 	}
 	if len(logwatchSummaries) != 1 {
-		t.Errorf("Expected 1 logwatch summary, got %d", len(logwatchSummaries))
+		t.Fatalf("Expected 1 logwatch summary, got %d", len(logwatchSummaries))
 	}
 	if logwatchSummaries[0].Summary != "Logwatch summary" {
 		t.Errorf("Wrong summary returned for logwatch filter")
@@ -789,7 +789,7 @@ func TestSaveAndRetrieveWithSourceFilter(t *testing.T) {
 		t.Fatalf("Failed to get production summaries: %v", err)
 	}
 	if len(prodSummaries) != 1 {
-		t.Errorf("Expected 1 production summary, got %d", len(prodSummaries))
+		t.Fatalf("Expected 1 production summary, got %d", len(prodSummaries))
 	}
 	if prodSummaries[0].Summary != "Drupal production summary" {
 		t.Errorf("Wrong summary returned for production filter")
@@ -802,7 +802,7 @@ func TestSaveAndRetrieveWithSourceFilter(t *testing.T) {
 		t.Fatalf("Failed to get staging summaries: %v", err)
 	}
 	if len(stagingSummaries) != 1 {
-		t.Errorf("Expected 1 staging summary, got %d", len(stagingSummaries))
+		t.Fatalf("Expected 1 staging summary, got %d", len(stagingSummaries))
 	}
 	if stagingSummaries[0].Summary != "Drupal staging summary" {
 		t.Errorf("Wrong summary returned for staging filter")
@@ -1049,7 +1049,7 @@ func TestSaveWithDefaultLogSourceType(t *testing.T) {
 	}
 
 	if len(summaries) != 1 {
-		t.Errorf("Expected 1 summary with default logwatch type, got %d", len(summaries))
+		t.Fatalf("Expected 1 summary with default logwatch type, got %d", len(summaries))
 	}
 
 	if summaries[0].LogSourceType != "logwatch" {

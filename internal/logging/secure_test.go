@@ -253,3 +253,167 @@ func TestSecureLoggerLevels(t *testing.T) {
 		})
 	}
 }
+
+// TestSecureEventMsgfWithMultipleTypes tests Msgf with various argument types.
+func TestSecureEventMsgfWithMultipleTypes(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		args   []interface{}
+	}{
+		{
+			name:   "mixed types without credentials",
+			format: "Count: %d, Rate: %.2f, Name: %s",
+			args:   []interface{}{42, 0.95, "test"},
+		},
+		{
+			name:   "string with credential",
+			format: "API Key: %s",
+			args:   []interface{}{"sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890"},
+		},
+		{
+			name:   "error with credential",
+			format: "Error: %v",
+			args:   []interface{}{errors.New("failed with sk-ant-api03-secret123456789")},
+		},
+		{
+			name:   "multiple credentials",
+			format: "Key: %s, Token: %s",
+			args:   []interface{}{"sk-ant-api03-secret123456789", "1234567890:ABCdefGHI_jklMNOpqrSTUvwxYZ-12345678"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			zl := zerolog.New(&buf)
+			event := &SecureEvent{event: zl.Info()}
+
+			event.Msgf(tt.format, tt.args...)
+			output := buf.String()
+
+			// Verify no credential patterns appear
+			if strings.Contains(output, "sk-ant-api03") {
+				t.Errorf("output contains unsanitized API key: %s", output)
+			}
+			if strings.Contains(output, "ABCdefGHI_jkl") {
+				t.Errorf("output contains unsanitized token: %s", output)
+			}
+		})
+	}
+}
+
+// TestSecureEventIntFields tests integer field methods.
+func TestSecureEventIntFields(t *testing.T) {
+	var buf bytes.Buffer
+	zl := zerolog.New(&buf)
+	event := &SecureEvent{event: zl.Info()}
+
+	event.Int("count", 42).Msg("test")
+	output := buf.String()
+
+	if !strings.Contains(output, `"count":42`) {
+		t.Errorf("output should contain int field: %s", output)
+	}
+}
+
+// TestSecureEventInt64Fields tests int64 field methods.
+func TestSecureEventInt64Fields(t *testing.T) {
+	var buf bytes.Buffer
+	zl := zerolog.New(&buf)
+	event := &SecureEvent{event: zl.Info()}
+
+	event.Int64("tokens", 1234567890123).Msg("test")
+	output := buf.String()
+
+	if !strings.Contains(output, `"tokens":1234567890123`) {
+		t.Errorf("output should contain int64 field: %s", output)
+	}
+}
+
+// TestSecureEventFloat64Fields tests float64 field methods.
+func TestSecureEventFloat64Fields(t *testing.T) {
+	var buf bytes.Buffer
+	zl := zerolog.New(&buf)
+	event := &SecureEvent{event: zl.Info()}
+
+	event.Float64("cost", 0.0086).Msg("test")
+	output := buf.String()
+
+	if !strings.Contains(output, "cost") {
+		t.Errorf("output should contain float64 field: %s", output)
+	}
+}
+
+// TestSecureEventBoolFields tests bool field methods.
+func TestSecureEventBoolFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    bool
+		expected string
+	}{
+		{"true value", true, `"enabled":true`},
+		{"false value", false, `"enabled":false`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			zl := zerolog.New(&buf)
+			event := &SecureEvent{event: zl.Info()}
+
+			event.Bool("enabled", tt.value).Msg("test")
+			output := buf.String()
+
+			if !strings.Contains(output, tt.expected) {
+				t.Errorf("output should contain bool field: %s", output)
+			}
+		})
+	}
+}
+
+// TestSecureEventInterfaceNonString tests Interface with non-string types.
+func TestSecureEventInterfaceNonString(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value interface{}
+	}{
+		{"int value", "count", 42},
+		{"float value", "rate", 0.95},
+		{"bool value", "active", true},
+		{"slice value", "items", []int{1, 2, 3}},
+		{"map value", "config", map[string]int{"a": 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			zl := zerolog.New(&buf)
+			event := &SecureEvent{event: zl.Info()}
+
+			event.Interface(tt.key, tt.value).Msg("test")
+			output := buf.String()
+
+			// Should contain the key
+			if !strings.Contains(output, tt.key) {
+				t.Errorf("output should contain key %s: %s", tt.key, output)
+			}
+		})
+	}
+}
+
+// TestSecureEventEmptyStrings tests handling of empty strings.
+func TestSecureEventEmptyStrings(t *testing.T) {
+	var buf bytes.Buffer
+	zl := zerolog.New(&buf)
+	event := &SecureEvent{event: zl.Info()}
+
+	event.Str("empty", "").Msg("")
+	output := buf.String()
+
+	// Should still produce valid JSON output
+	if !strings.Contains(output, `"empty":""`) {
+		t.Errorf("output should contain empty string field: %s", output)
+	}
+}

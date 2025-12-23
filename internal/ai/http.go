@@ -28,6 +28,9 @@ func doJSONPost[T any](ctx context.Context, client *http.Client, url string, req
 	if err != nil {
 		return nil, fmt.Errorf("API call failed: %w", err)
 	}
+	if resp == nil {
+		return nil, fmt.Errorf("API call returned nil response")
+	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)

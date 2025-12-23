@@ -203,6 +203,9 @@ func (c *OllamaClient) CheckConnection(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ollama is not running at %s: %w", c.baseURL, err)
 	}
+	if resp == nil {
+		return fmt.Errorf("ollama returned nil response")
+	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {

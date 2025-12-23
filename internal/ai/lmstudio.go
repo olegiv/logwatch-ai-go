@@ -222,6 +222,9 @@ func (c *LMStudioClient) CheckConnection(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("LM Studio is not running at %s: %w", c.baseURL, err)
 	}
+	if resp == nil {
+		return fmt.Errorf("LM Studio returned nil response")
+	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {

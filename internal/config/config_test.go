@@ -1034,3 +1034,310 @@ func TestCLIOptionsDefaults(t *testing.T) {
 		t.Errorf("Expected ShowVersion to be false by default")
 	}
 }
+
+func TestValidateOllamaProvider(t *testing.T) {
+	baseConfig := func() *Config {
+		return &Config{
+			LLMProvider:            "ollama",
+			OllamaBaseURL:          "http://localhost:11434",
+			OllamaModel:            "llama3.3:latest",
+			TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+			TelegramArchiveChannel: -1001234567890,
+			LogSourceType:          "logwatch",
+			LogwatchOutputPath:     "/tmp/logwatch.txt",
+			MaxLogSizeMB:           10,
+			LogLevel:               "info",
+			AITimeoutSeconds:       120,
+			AIMaxTokens:            8000,
+		}
+	}
+
+	tests := []struct {
+		name          string
+		setup         func(*Config)
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name:        "Valid Ollama config",
+			setup:       func(c *Config) {},
+			expectError: false,
+		},
+		{
+			name: "Missing Ollama model",
+			setup: func(c *Config) {
+				c.OllamaModel = ""
+			},
+			expectError:   true,
+			errorContains: "OLLAMA_MODEL is required",
+		},
+		{
+			name: "Missing Ollama base URL",
+			setup: func(c *Config) {
+				c.OllamaBaseURL = ""
+			},
+			expectError:   true,
+			errorContains: "OLLAMA_BASE_URL is required",
+		},
+		{
+			name: "Invalid Ollama base URL - no protocol",
+			setup: func(c *Config) {
+				c.OllamaBaseURL = "localhost:11434"
+			},
+			expectError:   true,
+			errorContains: "must start with 'http://' or 'https://'",
+		},
+		{
+			name: "Valid Ollama with HTTPS",
+			setup: func(c *Config) {
+				c.OllamaBaseURL = "https://ollama.example.com"
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig()
+			tt.setup(cfg)
+
+			err := cfg.Validate()
+			checkError(t, err, tt.expectError, tt.errorContains)
+		})
+	}
+}
+
+func TestValidateLMStudioProvider(t *testing.T) {
+	baseConfig := func() *Config {
+		return &Config{
+			LLMProvider:            "lmstudio",
+			LMStudioBaseURL:        "http://localhost:1234",
+			LMStudioModel:          "local-model",
+			TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+			TelegramArchiveChannel: -1001234567890,
+			LogSourceType:          "logwatch",
+			LogwatchOutputPath:     "/tmp/logwatch.txt",
+			MaxLogSizeMB:           10,
+			LogLevel:               "info",
+			AITimeoutSeconds:       120,
+			AIMaxTokens:            8000,
+		}
+	}
+
+	tests := []struct {
+		name          string
+		setup         func(*Config)
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name:        "Valid LM Studio config",
+			setup:       func(c *Config) {},
+			expectError: false,
+		},
+		{
+			name: "Missing LM Studio base URL",
+			setup: func(c *Config) {
+				c.LMStudioBaseURL = ""
+			},
+			expectError:   true,
+			errorContains: "LMSTUDIO_BASE_URL is required",
+		},
+		{
+			name: "Invalid LM Studio base URL - no protocol",
+			setup: func(c *Config) {
+				c.LMStudioBaseURL = "localhost:1234"
+			},
+			expectError:   true,
+			errorContains: "must start with 'http://' or 'https://'",
+		},
+		{
+			name: "LM Studio model optional - empty is valid",
+			setup: func(c *Config) {
+				c.LMStudioModel = ""
+			},
+			expectError: false,
+		},
+		{
+			name: "Valid LM Studio with HTTPS",
+			setup: func(c *Config) {
+				c.LMStudioBaseURL = "https://lmstudio.example.com"
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig()
+			tt.setup(cfg)
+
+			err := cfg.Validate()
+			checkError(t, err, tt.expectError, tt.errorContains)
+		})
+	}
+}
+
+func TestInvalidLLMProvider(t *testing.T) {
+	cfg := &Config{
+		LLMProvider:            "invalid_provider",
+		TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramArchiveChannel: -1001234567890,
+		LogSourceType:          "logwatch",
+		LogwatchOutputPath:     "/tmp/logwatch.txt",
+		MaxLogSizeMB:           10,
+		LogLevel:               "info",
+		AITimeoutSeconds:       120,
+		AIMaxTokens:            8000,
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Expected error for invalid LLM provider")
+	}
+	if !strings.Contains(err.Error(), "LLM_PROVIDER must be") {
+		t.Errorf("Expected LLM provider error, got: %v", err)
+	}
+}
+
+func TestIsOllama(t *testing.T) {
+	tests := []struct {
+		name        string
+		llmProvider string
+		expected    bool
+	}{
+		{"Ollama provider", "ollama", true},
+		{"Anthropic provider", "anthropic", false},
+		{"LMStudio provider", "lmstudio", false},
+		{"Empty provider", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{LLMProvider: tt.llmProvider}
+			if got := cfg.IsOllama(); got != tt.expected {
+				t.Errorf("IsOllama() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsAnthropic(t *testing.T) {
+	tests := []struct {
+		name        string
+		llmProvider string
+		expected    bool
+	}{
+		{"Anthropic provider", "anthropic", true},
+		{"Ollama provider", "ollama", false},
+		{"LMStudio provider", "lmstudio", false},
+		{"Empty provider", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{LLMProvider: tt.llmProvider}
+			if got := cfg.IsAnthropic(); got != tt.expected {
+				t.Errorf("IsAnthropic() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsLMStudio(t *testing.T) {
+	tests := []struct {
+		name        string
+		llmProvider string
+		expected    bool
+	}{
+		{"LMStudio provider", "lmstudio", true},
+		{"Anthropic provider", "anthropic", false},
+		{"Ollama provider", "ollama", false},
+		{"Empty provider", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{LLMProvider: tt.llmProvider}
+			if got := cfg.IsLMStudio(); got != tt.expected {
+				t.Errorf("IsLMStudio() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetLLMModel(t *testing.T) {
+	tests := []struct {
+		name          string
+		config        *Config
+		expectedModel string
+	}{
+		{
+			name: "Anthropic provider returns Claude model",
+			config: &Config{
+				LLMProvider: "anthropic",
+				ClaudeModel: "claude-sonnet-4-5-20250929",
+				OllamaModel: "llama3.3:latest",
+			},
+			expectedModel: "claude-sonnet-4-5-20250929",
+		},
+		{
+			name: "Ollama provider returns Ollama model",
+			config: &Config{
+				LLMProvider: "ollama",
+				ClaudeModel: "claude-sonnet-4-5-20250929",
+				OllamaModel: "llama3.3:latest",
+			},
+			expectedModel: "llama3.3:latest",
+		},
+		{
+			name: "LMStudio provider returns LMStudio model",
+			config: &Config{
+				LLMProvider:   "lmstudio",
+				ClaudeModel:   "claude-sonnet-4-5-20250929",
+				LMStudioModel: "local-model",
+			},
+			expectedModel: "local-model",
+		},
+		{
+			name: "Unknown provider defaults to Claude model",
+			config: &Config{
+				LLMProvider: "unknown",
+				ClaudeModel: "claude-sonnet-4-5-20250929",
+			},
+			expectedModel: "claude-sonnet-4-5-20250929",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.config.GetLLMModel(); got != tt.expectedModel {
+				t.Errorf("GetLLMModel() = %v, want %v", got, tt.expectedModel)
+			}
+		})
+	}
+}
+
+func TestValidateAnthropicMissingModel(t *testing.T) {
+	cfg := &Config{
+		LLMProvider:            "anthropic",
+		AnthropicAPIKey:        "sk-ant-test-key-1234567890",
+		ClaudeModel:            "", // Missing model
+		TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramArchiveChannel: -1001234567890,
+		LogSourceType:          "logwatch",
+		LogwatchOutputPath:     "/tmp/logwatch.txt",
+		MaxLogSizeMB:           10,
+		LogLevel:               "info",
+		AITimeoutSeconds:       120,
+		AIMaxTokens:            8000,
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Expected error for missing Claude model")
+	}
+	if !strings.Contains(err.Error(), "CLAUDE_MODEL is required") {
+		t.Errorf("Expected CLAUDE_MODEL error, got: %v", err)
+	}
+}

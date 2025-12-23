@@ -13,12 +13,3 @@ type Provider interface {
 	// GetProviderName returns the name of the provider (e.g., "Anthropic", "Ollama")
 	GetProviderName() string
 }
-
-// ProviderType represents the type of LLM provider
-type ProviderType string
-
-const (
-	ProviderAnthropic ProviderType = "anthropic"
-	ProviderOllama    ProviderType = "ollama"
-	ProviderLMStudio  ProviderType = "lmstudio"
-)

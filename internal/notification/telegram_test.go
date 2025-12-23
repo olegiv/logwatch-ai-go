@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 )
@@ -697,5 +698,268 @@ func TestEscapeMarkdown_Backslashes(t *testing.T) {
 				t.Errorf("escapeMarkdown(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestWaitForRateLimit(t *testing.T) {
+	tests := []struct {
+		name            string
+		lastMessageTime time.Time
+		expectWait      bool
+	}{
+		{
+			name:            "Zero time - no wait",
+			lastMessageTime: time.Time{},
+			expectWait:      false,
+		},
+		{
+			name:            "Recent message - should wait",
+			lastMessageTime: time.Now(),
+			expectWait:      true,
+		},
+		{
+			name:            "Old message - no wait",
+			lastMessageTime: time.Now().Add(-2 * time.Second),
+			expectWait:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &TelegramClient{
+				hostname:        "test-host",
+				lastMessageTime: tt.lastMessageTime,
+			}
+
+			start := time.Now()
+			client.waitForRateLimit()
+			elapsed := time.Since(start)
+
+			if tt.expectWait {
+				// Should have waited some time (at least a few hundred ms)
+				if elapsed < 100*time.Millisecond {
+					// Only fail if lastMessageTime is very recent
+					if time.Since(tt.lastMessageTime) < 500*time.Millisecond {
+						t.Errorf("Expected to wait for rate limit, but returned in %v", elapsed)
+					}
+				}
+			} else {
+				// Should return quickly
+				if elapsed > 100*time.Millisecond {
+					t.Errorf("Expected no wait, but waited %v", elapsed)
+				}
+			}
+		})
+	}
+}
+
+func TestTelegramClient_ChannelFields(t *testing.T) {
+	// Test that channel and hostname fields are accessible
+	// Note: We can't test GetBotInfo fully without a real bot connection
+	// because it accesses bot.Self.UserName which requires a real bot
+	client := &TelegramClient{
+		archiveChannel: -1001234567890,
+		alertsChannel:  -1009876543210,
+		hostname:       "test-server",
+	}
+
+	if client.archiveChannel != -1001234567890 {
+		t.Errorf("Expected archive_channel -1001234567890, got %v", client.archiveChannel)
+	}
+	if client.alertsChannel != -1009876543210 {
+		t.Errorf("Expected alerts_channel -1009876543210, got %v", client.alertsChannel)
+	}
+	if client.hostname != "test-server" {
+		t.Errorf("Expected hostname test-server, got %v", client.hostname)
+	}
+}
+
+func TestFormatMessage_Provider(t *testing.T) {
+	client := &TelegramClient{
+		hostname: "test-server",
+	}
+
+	analysis := &ai.Analysis{
+		SystemStatus:    "Good",
+		Summary:         "Test summary",
+		CriticalIssues:  []string{},
+		Warnings:        []string{},
+		Recommendations: []string{},
+		Metrics:         map[string]interface{}{},
+	}
+
+	tests := []struct {
+		name           string
+		provider       string
+		model          string
+		expectContains string
+	}{
+		{
+			name:           "Anthropic provider",
+			provider:       "Anthropic",
+			model:          "claude-sonnet-4-5-20250929",
+			expectContains: "Anthropic",
+		},
+		{
+			name:           "Ollama provider",
+			provider:       "Ollama",
+			model:          "llama3.3:latest",
+			expectContains: "Ollama",
+		},
+		{
+			name:           "LM Studio provider",
+			provider:       "LM Studio",
+			model:          "local-model",
+			expectContains: "LM Studio",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stats := &ai.Stats{
+				Model:           tt.model,
+				Provider:        tt.provider,
+				InputTokens:     1000,
+				OutputTokens:    500,
+				CostUSD:         0.01,
+				DurationSeconds: 5.0,
+			}
+
+			message := client.formatMessage(analysis, stats, "logwatch", "")
+
+			if !strings.Contains(message, escapeMarkdown(tt.provider)) {
+				t.Errorf("Message should contain provider '%s'", tt.provider)
+			}
+		})
+	}
+}
+
+func TestSplitMessage_EdgeCases(t *testing.T) {
+	client := &TelegramClient{
+		hostname: "test-server",
+	}
+
+	tests := []struct {
+		name          string
+		message       string
+		minParts      int
+		maxPartLength int
+	}{
+		{
+			name:          "Message exactly at limit",
+			message:       strings.Repeat("a", maxMessageLength),
+			minParts:      1,
+			maxPartLength: maxMessageLength,
+		},
+		{
+			name:          "Message one char over limit",
+			message:       strings.Repeat("a", maxMessageLength+1),
+			minParts:      2,
+			maxPartLength: maxMessageLength,
+		},
+		{
+			name:          "Message with newlines near limit",
+			message:       strings.Repeat("short\n", maxMessageLength/6),
+			minParts:      1,
+			maxPartLength: maxMessageLength,
+		},
+		{
+			name:          "Very long single line",
+			message:       strings.Repeat("x", maxMessageLength*2+100),
+			minParts:      3,
+			maxPartLength: maxMessageLength,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parts := client.splitMessage(tt.message)
+
+			if len(parts) < tt.minParts {
+				t.Errorf("Expected at least %d parts, got %d", tt.minParts, len(parts))
+			}
+
+			for i, part := range parts {
+				if len(part) > tt.maxPartLength {
+					t.Errorf("Part %d exceeds max length: %d > %d", i, len(part), tt.maxPartLength)
+				}
+			}
+		})
+	}
+}
+
+func TestFormatMessage_NoEntriesReport(t *testing.T) {
+	tests := []struct {
+		name           string
+		logSourceType  string
+		siteName       string
+		expectContains []string
+	}{
+		{
+			name:          "Logwatch without site name",
+			logSourceType: "logwatch",
+			siteName:      "",
+			expectContains: []string{
+				"Logwatch Report",
+				"No Entries Found",
+				"test-server",
+			},
+		},
+		{
+			name:          "Drupal with site name",
+			logSourceType: "drupal_watchdog",
+			siteName:      "Production",
+			expectContains: []string{
+				"Drupal Watchdog Report",
+				"Production",
+				"No Entries Found",
+			},
+		},
+	}
+
+	// Note: We can't actually call SendNoEntriesReport without a real bot,
+	// but we can test the message formatting logic by examining the internal functions
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test getLogSourceDisplayName which is used in the report
+			displayName := getLogSourceDisplayName(tt.logSourceType)
+			expectedDisplay := ""
+			if tt.logSourceType == "logwatch" {
+				expectedDisplay = "Logwatch"
+			} else if tt.logSourceType == "drupal_watchdog" {
+				expectedDisplay = "Drupal Watchdog"
+			}
+			if displayName != expectedDisplay {
+				t.Errorf("Expected display name %q, got %q", expectedDisplay, displayName)
+			}
+		})
+	}
+}
+
+func TestConstants(t *testing.T) {
+	// Verify constants have sensible values
+	if maxMessageLength <= 0 {
+		t.Error("maxMessageLength should be positive")
+	}
+	if maxMessageLength > 10000 {
+		t.Error("maxMessageLength seems too large for Telegram")
+	}
+
+	if minMessageInterval <= 0 {
+		t.Error("minMessageInterval should be positive")
+	}
+	if minMessageInterval > 5*time.Second {
+		t.Error("minMessageInterval seems too long")
+	}
+
+	if maxRetries <= 0 {
+		t.Error("maxRetries should be positive")
+	}
+	if maxRetries > 10 {
+		t.Error("maxRetries seems too high")
+	}
+
+	if baseRetryDelay <= 0 {
+		t.Error("baseRetryDelay should be positive")
 	}
 }
