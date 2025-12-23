@@ -75,11 +75,25 @@ func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Sta
 	return nil
 }
 
+// writeSection writes a section with a header and numbered items to the message builder.
+// If showCount is true, the count is appended to the header.
+func writeSection(msg *strings.Builder, emoji, title string, items []string, showCount bool) {
+	if len(items) == 0 {
+		return
+	}
+	if showCount {
+		msg.WriteString(fmt.Sprintf("%s *%s* \\(%d\\)\n", emoji, title, len(items)))
+	} else {
+		msg.WriteString(fmt.Sprintf("%s *%s*\n", emoji, title))
+	}
+	for i, item := range items {
+		msg.WriteString(fmt.Sprintf("%d\\. %s\n", i+1, escapeMarkdown(item)))
+	}
+	msg.WriteString("\n")
+}
+
 // formatMessage formats the analysis into a Telegram message
 func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats, logSourceType, siteName string) string {
-
-	const formattedListTemplate = "%d\\. %s\n"
-
 	var msg strings.Builder
 
 	// Header with log source type and optional site name
@@ -114,32 +128,10 @@ func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats, l
 	msg.WriteString(escapeMarkdown(analysis.Summary))
 	msg.WriteString("\n\n")
 
-	// Critical Issues
-	if len(analysis.CriticalIssues) > 0 {
-		msg.WriteString(fmt.Sprintf("🔴 *Critical Issues* \\(%d\\)\n", len(analysis.CriticalIssues)))
-		for i, issue := range analysis.CriticalIssues {
-			msg.WriteString(fmt.Sprintf(formattedListTemplate, i+1, escapeMarkdown(issue)))
-		}
-		msg.WriteString("\n")
-	}
-
-	// Warnings
-	if len(analysis.Warnings) > 0 {
-		msg.WriteString(fmt.Sprintf("⚡ *Warnings* \\(%d\\)\n", len(analysis.Warnings)))
-		for i, warning := range analysis.Warnings {
-			msg.WriteString(fmt.Sprintf(formattedListTemplate, i+1, escapeMarkdown(warning)))
-		}
-		msg.WriteString("\n")
-	}
-
-	// Recommendations
-	if len(analysis.Recommendations) > 0 {
-		msg.WriteString("💡 *Recommendations*\n")
-		for i, rec := range analysis.Recommendations {
-			msg.WriteString(fmt.Sprintf(formattedListTemplate, i+1, escapeMarkdown(rec)))
-		}
-		msg.WriteString("\n")
-	}
+	// Critical Issues, Warnings, Recommendations
+	writeSection(&msg, "🔴", "Critical Issues", analysis.CriticalIssues, true)
+	writeSection(&msg, "⚡", "Warnings", analysis.Warnings, true)
+	writeSection(&msg, "💡", "Recommendations", analysis.Recommendations, false)
 
 	// Key Metrics
 	if len(analysis.Metrics) > 0 {

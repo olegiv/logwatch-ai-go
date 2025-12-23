@@ -6,60 +6,68 @@ import (
 	"testing"
 )
 
-// verifyOpenAIChatRequest validates an OpenAI-style chat completion request.
-// It decodes the request body and verifies the structure is well-formed.
-func verifyOpenAIChatRequest(t *testing.T, r *http.Request, w http.ResponseWriter) *openAIChatRequest {
+// chatMessage represents a message with a Role field for validation.
+type chatMessage interface {
+	GetRole() string
+}
+
+// Implement GetRole for both message types
+func (m openAIMessage) GetRole() string  { return m.Role }
+func (m ollamaMessage) GetRole() string  { return m.Role }
+
+// chatRequest is a constraint for chat request types that can be validated.
+type chatRequest interface {
+	openAIChatRequest | ollamaChatRequest
+}
+
+// verifyChatRequest is a generic helper that decodes and validates chat requests.
+func verifyChatRequest[T chatRequest](t *testing.T, r *http.Request, w http.ResponseWriter) *T {
 	t.Helper()
 
-	var req openAIChatRequest
+	var req T
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		t.Errorf("failed to decode request: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return nil
 	}
 
-	if req.Model == "" {
-		t.Error("model is empty")
-	}
-	if len(req.Messages) != 2 {
-		t.Errorf("expected 2 messages, got %d", len(req.Messages))
-	}
-	if req.Messages[0].Role != "system" {
-		t.Errorf("first message should be system, got %s", req.Messages[0].Role)
-	}
-	if req.Messages[1].Role != "user" {
-		t.Errorf("second message should be user, got %s", req.Messages[1].Role)
+	// Use type switch to access fields since Go generics don't support field access
+	switch v := any(&req).(type) {
+	case *openAIChatRequest:
+		verifyRequestFields(t, v.Model, v.Messages[0].Role, v.Messages[1].Role, len(v.Messages))
+	case *ollamaChatRequest:
+		verifyRequestFields(t, v.Model, v.Messages[0].Role, v.Messages[1].Role, len(v.Messages))
 	}
 
 	return &req
 }
 
-// verifyOllamaChatRequest validates an Ollama chat request.
-// It decodes the request body and verifies the structure is well-formed.
-func verifyOllamaChatRequest(t *testing.T, r *http.Request, w http.ResponseWriter) *ollamaChatRequest {
+// verifyRequestFields validates common chat request fields.
+func verifyRequestFields(t *testing.T, model, firstRole, secondRole string, msgCount int) {
 	t.Helper()
 
-	var req ollamaChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		t.Errorf("failed to decode request: %v", err)
-		w.WriteHeader(http.StatusBadRequest)
-		return nil
-	}
-
-	if req.Model == "" {
+	if model == "" {
 		t.Error("model is empty")
 	}
-	if len(req.Messages) != 2 {
-		t.Errorf("expected 2 messages, got %d", len(req.Messages))
+	if msgCount != 2 {
+		t.Errorf("expected 2 messages, got %d", msgCount)
 	}
-	if req.Messages[0].Role != "system" {
-		t.Errorf("first message should be system, got %s", req.Messages[0].Role)
+	if firstRole != "system" {
+		t.Errorf("first message should be system, got %s", firstRole)
 	}
-	if req.Messages[1].Role != "user" {
-		t.Errorf("second message should be user, got %s", req.Messages[1].Role)
+	if secondRole != "user" {
+		t.Errorf("second message should be user, got %s", secondRole)
 	}
+}
 
-	return &req
+// verifyOpenAIChatRequest validates an OpenAI-style chat completion request.
+func verifyOpenAIChatRequest(t *testing.T, r *http.Request, w http.ResponseWriter) *openAIChatRequest {
+	return verifyChatRequest[openAIChatRequest](t, r, w)
+}
+
+// verifyOllamaChatRequest validates an Ollama chat request.
+func verifyOllamaChatRequest(t *testing.T, r *http.Request, w http.ResponseWriter) *ollamaChatRequest {
+	return verifyChatRequest[ollamaChatRequest](t, r, w)
 }
 
 // verifyAnalysisResult checks that an analysis result has the expected values

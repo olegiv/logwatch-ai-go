@@ -3,6 +3,24 @@
 // (logwatch, drupal_watchdog, etc.) through a unified interface.
 package analyzer
 
+import "strings"
+
+// EstimateTokens estimates the number of tokens in the content.
+// Uses the algorithm: max(chars/4, words/0.75)
+// This is a shared utility function used by all Preprocessor implementations.
+func EstimateTokens(content string) int {
+	chars := len(content)
+	words := len(strings.Fields(content))
+
+	charsEstimate := chars / 4
+	wordsEstimate := int(float64(words) / 0.75)
+
+	if charsEstimate > wordsEstimate {
+		return charsEstimate
+	}
+	return wordsEstimate
+}
+
 // LogReader reads and validates log content from a source.
 // Implementations handle format-specific parsing and validation.
 type LogReader interface {

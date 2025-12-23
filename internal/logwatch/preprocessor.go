@@ -33,18 +33,9 @@ func NewPreprocessor(maxTokens int) *Preprocessor {
 }
 
 // EstimateTokens estimates the number of tokens in the content.
-// Uses the same algorithm as Node.js version: max(chars/4, words/0.75)
+// Delegates to the shared analyzer.EstimateTokens function.
 func (p *Preprocessor) EstimateTokens(content string) int {
-	chars := len(content)
-	words := len(strings.Fields(content))
-
-	charsEstimate := chars / 4
-	wordsEstimate := int(float64(words) / 0.75)
-
-	if charsEstimate > wordsEstimate {
-		return charsEstimate
-	}
-	return wordsEstimate
+	return analyzer.EstimateTokens(content)
 }
 
 // ShouldProcess determines if preprocessing is needed based on token count.
