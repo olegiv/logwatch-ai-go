@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-01-26
+
+### Changed
+- **BREAKING**: License changed from MIT to GPL-3.0-or-later
+  - All source files now include SPDX license headers
+  - `-version` output now displays GPL copyright notice
+  - Users must comply with GPL terms for redistribution
+
+### Added
+- SPDX short form license headers to all Go source files
+- GPL copyright notice in `-version` output
+- License header documentation in CLAUDE.md
+
+### Dependencies
+- Update go-logger v0.2.0 → v0.2.1
+- Update modernc.org/sqlite v1.41.0 → v1.44.3
+- Update Go 1.25.5 → 1.25.6
+- Various indirect dependency updates
+
 ## [0.5.1] - 2025-12-14
 
 ### Added
@@ -320,7 +339,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.3.0...v0.4.0
