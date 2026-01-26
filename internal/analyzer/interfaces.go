@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Oleg Ivanchenko
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package analyzer provides common interfaces for log analysis.
 // This abstraction layer enables support for multiple log source types
 // (logwatch, drupal_watchdog, etc.) through a unified interface.

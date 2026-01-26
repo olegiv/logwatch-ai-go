@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Oleg Ivanchenko
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package main
 
 import (
@@ -48,6 +51,10 @@ func run() int {
 	// Handle -version flag
 	if cli.ShowVersion {
 		fmt.Printf("logwatch-analyzer %s (commit: %s, built: %s)\n", version, gitCommit, buildTime)
+		fmt.Println("Copyright (C) 2025-2026 Oleg Ivanchenko")
+		fmt.Println("License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>")
+		fmt.Println("This is free software: you are free to change and redistribute it.")
+		fmt.Println("There is NO WARRANTY, to the extent permitted by law.")
 		return exitSuccess
 	}
 

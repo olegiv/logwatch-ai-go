@@ -700,10 +700,6 @@ Contributions are welcome! Please:
 4. Add tests if applicable
 5. Submit a pull request
 
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
 ## Acknowledgments
 
 - Original [logwatch-ai](https://github.com/olegiv/logwatch-ai) Node.js implementation
@@ -715,3 +711,9 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - **Issues**: [GitHub Issues](https://github.com/olegiv/logwatch-ai-go/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/olegiv/logwatch-ai-go/discussions)
 - **Original Project**: [logwatch-ai](https://github.com/olegiv/logwatch-ai)
+
+## License
+
+Copyright (C) 2025-2026 Oleg Ivanchenko
+
+GNU General Public License v3.0 - see [LICENSE](LICENSE) file for details.

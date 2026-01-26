@@ -136,6 +136,14 @@ Auto-migrates from v1 to v2. Cleanup: 90 days retention.
 - Constants for exit codes, timeouts, retry counts
 - Defer cleanup: `defer store.Close()`, `defer telegramClient.Close()`
 
+**License Headers:** All `.go` source files must include the SPDX short form header:
+```go
+// Copyright (c) 2025-2026 Oleg Ivanchenko
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+package <name>
+```
+
 ## Adding a New Log Source
 
 1. Create package in `internal/<source>/`

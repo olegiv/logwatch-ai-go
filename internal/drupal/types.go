@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Oleg Ivanchenko
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package drupal provides log analysis for Drupal watchdog logs.
 // It implements the analyzer interfaces to enable Drupal watchdog
 // analysis alongside other log sources like logwatch.
