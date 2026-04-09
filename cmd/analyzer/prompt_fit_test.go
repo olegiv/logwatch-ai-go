@@ -241,7 +241,7 @@ func TestPreparePromptForAnalysisAnthropicNeedsMultipleRecompressions(t *testing
 	}
 }
 
-func TestPreparePromptForAnalysisAnthropicCountFailure(t *testing.T) {
+func TestPreparePromptForAnalysisAnthropicCountFailureFallsBackToHeuristic(t *testing.T) {
 	cfg := &config.Config{
 		EnablePreprocessing: true,
 		AIMaxTokens:         100,
@@ -253,7 +253,7 @@ func TestPreparePromptForAnalysisAnthropicCountFailure(t *testing.T) {
 				"context_limit": 4200,
 			},
 		},
-		countFunc: func(systemPrompt, userPrompt string) (int, error) {
+		countFunc: func(_, _ string) (int, error) {
 			return 0, fmt.Errorf("count failed")
 		},
 	}
@@ -262,7 +262,7 @@ func TestPreparePromptForAnalysisAnthropicCountFailure(t *testing.T) {
 		PromptBuilder: &testPromptBuilder{},
 	}
 
-	_, err := preparePromptForAnalysis(
+	result, err := preparePromptForAnalysis(
 		context.Background(),
 		cfg,
 		provider,
@@ -272,12 +272,60 @@ func TestPreparePromptForAnalysisAnthropicCountFailure(t *testing.T) {
 		"",
 		nil,
 	)
-	if err == nil {
-		t.Fatal("preparePromptForAnalysis() expected error, got nil")
+	if err != nil {
+		t.Fatalf("expected fallback to heuristic, got error: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "failed to count Anthropic prompt tokens") {
-		t.Fatalf("expected count failure error, got %v", err)
+	if result == nil || result.LogContent == "" {
+		t.Fatal("expected non-empty result from heuristic fallback")
+	}
+}
+
+func TestPreparePromptForAnalysisAnthropicCountFailureDuringFitting(t *testing.T) {
+	cfg := &config.Config{
+		EnablePreprocessing: true,
+		AIMaxTokens:         100,
+	}
+	callCount := 0
+	provider := &mockPromptTokenCounter{
+		mockProvider: &mockProvider{
+			providerName: "Anthropic",
+			modelInfo: map[string]interface{}{
+				"context_limit": 4200,
+			},
+		},
+		countFunc: func(systemPrompt, userPrompt string) (int, error) {
+			callCount++
+			if callCount == 1 {
+				// Base prompt count succeeds
+				return len(systemPrompt) + len(userPrompt), nil
+			}
+			// In-loop count fails
+			return 0, fmt.Errorf("transient 429")
+		},
+	}
+	preprocessor := &scalingBudgetPreprocessor{multiplier: 1.75}
+	logSource := &analyzer.LogSource{
+		Preprocessor:  preprocessor,
+		PromptBuilder: &testPromptBuilder{},
+	}
+
+	result, err := preparePromptForAnalysis(
+		context.Background(),
+		cfg,
+		provider,
+		logSource,
+		"system",
+		strings.Repeat("x", 3500),
+		"",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected graceful fallback, got error: %v", err)
+	}
+
+	if result == nil || result.LogContent == "" {
+		t.Fatal("expected non-empty result from in-loop fallback")
 	}
 }
 

@@ -18,7 +18,7 @@ const (
 	anthropicPromptSafetyMarginTokens = 2000
 	maxAnthropicPromptFitAttempts     = 4
 	promptFitAdjustmentFactor         = 0.95
-	minPromptFitLogBudget             = 1000
+	minPromptFitLogBudget             = 1
 )
 
 type promptPreparationResult struct {
@@ -82,7 +82,11 @@ func prepareAnthropicPromptForAnalysis(
 	baseUserPrompt := logSource.PromptBuilder.GetUserPrompt("", historicalContext)
 	exactBasePromptTokens, err := counter.CountPromptTokens(ctx, systemPrompt, baseUserPrompt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to count Anthropic prompt tokens: %w", err)
+		if log != nil {
+			log.Warn().Err(err).Msg("Anthropic token counting failed, falling back to heuristic sizing")
+		}
+
+		return prepareHeuristicPromptForAnalysis(cfg, llmClient, logSource, systemPrompt, rawLogContent, historicalContext, log)
 	}
 
 	targetLogTokensExact := targetInputTokens - exactBasePromptTokens
@@ -119,7 +123,14 @@ func prepareAnthropicPromptForAnalysis(
 		userPrompt = logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext)
 		exactPromptTokens, err = counter.CountPromptTokens(ctx, systemPrompt, userPrompt)
 		if err != nil {
-			return nil, fmt.Errorf("failed to count Anthropic prompt tokens: %w", err)
+			if log != nil {
+				log.Warn().Err(err).Msg("Anthropic token counting failed during fitting, using heuristic result")
+			}
+			// Return what we have so far — preprocessing already ran this iteration
+			return &promptPreparationResult{
+				LogContent: logContent,
+				UserPrompt: userPrompt,
+			}, nil
 		}
 
 		if log != nil {
