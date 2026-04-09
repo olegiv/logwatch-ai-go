@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-09
+
+### Added
+
+#### Exact Prompt Fitting for Anthropic
+- Iterative prompt sizing using Anthropic's token counting API
+  for precise context window utilization (`cmd/analyzer/prompt_fit.go`)
+- `PromptTokenCounter` interface for providers that support exact
+  token counting (`internal/ai/provider.go`)
+- `BudgetPreprocessor` interface for dynamic token budget-aware
+  preprocessing (`internal/analyzer/interfaces.go`)
+- Token budget calculation with configurable safety margins
+  (`internal/analyzer/budget.go`)
+- Progressive compression profiles for logwatch preprocessing
+  (100/50/20% → 85/35/10% → 70/20/5% → 50/10/2%)
+- Aggressive compression and hard truncation as final fallbacks
+
+#### Preprocessing Improvements
+- Budget-aware `ProcessWithBudget` for logwatch and drupal
+  preprocessors with section-level priority classification
+- HIGH/MEDIUM/LOW priority classification for log sections
+  (ssh, security, auth → HIGH; network, disk → MEDIUM)
+- Deduplication of similar log lines within sections
+
+### Changed
+- Prompt preparation now uses exact Anthropic token counts with
+  up to 4 iterative recompression attempts before falling back
+  to heuristic sizing
+- Non-Anthropic providers continue using heuristic budget
+  calculation
+- Reader preprocessing disabled at source level; preprocessing
+  now handled centrally by `preparePromptForAnalysis`
+
+### Fixed
+- Graceful fallback to heuristic sizing when Anthropic token
+  counting API fails (transient 429/5xx no longer abort the run)
+- Removed artificial 1000-token floor from prompt fit budget to
+  allow small feasible budgets for high-overhead prompts
+- Added retry logic with exponential backoff to
+  `CountPromptTokens`, matching `Analyze` retry behavior
+
+### Dependencies
+- Update Go 1.25.6 → 1.26.0
+- Update go-anthropic/v2 v2.17.0 → v2.18.0
+- Update go-logger v0.2.1 → v0.2.2
+- Update zerolog v1.34.0 → v1.35.0
+- Update sqlite v1.46.1 → v1.48.2
+- Update go-toml/v2 v2.2.4 → v2.3.0
+- Update x/sys v0.41.0 → v0.43.0
+- Update x/text v0.34.0 → v0.36.0
+
 ## [0.6.0] - 2026-01-26
 
 ### Changed
@@ -339,7 +390,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.4.0...v0.5.0
