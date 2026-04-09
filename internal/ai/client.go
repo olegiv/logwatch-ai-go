@@ -16,9 +16,10 @@ import (
 
 // Client wraps the Anthropic API client
 type Client struct {
-	client    *anthropic.Client
-	model     string
-	maxTokens int // L-02 fix: configurable max tokens
+	client         *anthropic.Client
+	countingClient *anthropic.Client
+	model          string
+	maxTokens      int // L-02 fix: configurable max tokens
 }
 
 // Stats holds statistics about the API call
@@ -67,11 +68,17 @@ func NewClient(apiKey, model, proxyURL string, timeoutSeconds, maxTokens int) (*
 		apiKey,
 		anthropic.WithHTTPClient(httpClient),
 	)
+	countingClient := anthropic.NewClient(
+		apiKey,
+		anthropic.WithHTTPClient(httpClient),
+		anthropic.WithBetaVersion(anthropic.BetaTokenCounting20241101),
+	)
 
 	return &Client{
-		client:    client,
-		model:     model,
-		maxTokens: maxTokens,
+		client:         client,
+		countingClient: countingClient,
+		model:          model,
+		maxTokens:      maxTokens,
 	}, nil
 }
 
@@ -114,7 +121,41 @@ func (c *Client) Analyze(ctx context.Context, systemPrompt, userPrompt string) (
 
 // callAPI makes the actual API call to Claude
 func (c *Client) callAPI(ctx context.Context, systemPrompt, userPrompt string) (anthropic.MessagesResponse, error) {
-	request := anthropic.MessagesRequest{
+	request := c.buildMessagesRequest(systemPrompt, userPrompt)
+	request.MaxTokens = c.maxTokens // L-02 fix: use configurable value
+
+	response, err := c.client.CreateMessages(ctx, request)
+	if err != nil {
+		// Sanitize error to prevent credentials from appearing in error messages (M-01 fix)
+		return anthropic.MessagesResponse{}, internalerrors.Wrapf(err, "API call failed")
+	}
+
+	return response, nil
+}
+
+// CountPromptTokens counts prompt tokens exactly using Anthropic's token counting API.
+func (c *Client) CountPromptTokens(ctx context.Context, systemPrompt, userPrompt string) (int, error) {
+	if c.countingClient == nil {
+		return 0, fmt.Errorf("token counting client is not configured")
+	}
+
+	request := c.buildMessagesRequest(systemPrompt, userPrompt)
+	response, err := retryWithBackoff(defaultMaxRetries, func() (anthropic.CountTokensResponse, error) {
+		resp, retryErr := c.countingClient.CountTokens(ctx, request)
+		if retryErr != nil {
+			return resp, internalerrors.Wrapf(retryErr, "API call failed")
+		}
+		return resp, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return response.InputTokens, nil
+}
+
+func (c *Client) buildMessagesRequest(systemPrompt, userPrompt string) anthropic.MessagesRequest {
+	return anthropic.MessagesRequest{
 		Model: anthropic.Model(c.model),
 		Messages: []anthropic.Message{
 			{
@@ -124,17 +165,8 @@ func (c *Client) callAPI(ctx context.Context, systemPrompt, userPrompt string) (
 				},
 			},
 		},
-		System:    systemPrompt,
-		MaxTokens: c.maxTokens, // L-02 fix: use configurable value
+		System: systemPrompt,
 	}
-
-	response, err := c.client.CreateMessages(ctx, request)
-	if err != nil {
-		// Sanitize error to prevent credentials from appearing in error messages (M-01 fix)
-		return anthropic.MessagesResponse{}, internalerrors.Wrapf(err, "API call failed")
-	}
-
-	return response, nil
 }
 
 // calculateStats calculates cost and token statistics
@@ -185,3 +217,4 @@ func (c *Client) GetProviderName() string {
 
 // Ensure Client implements Provider interface
 var _ Provider = (*Client)(nil)
+var _ PromptTokenCounter = (*Client)(nil)

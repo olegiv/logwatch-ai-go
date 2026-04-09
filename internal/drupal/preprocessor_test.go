@@ -7,8 +7,9 @@ import (
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
 
-// Compile-time interface check
+// Compile-time interface checks
 var _ analyzer.Preprocessor = (*Preprocessor)(nil)
+var _ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
 
 func TestNewPreprocessor(t *testing.T) {
 	p := NewPreprocessor(150000)
@@ -294,4 +295,30 @@ Failed to connect`
 	if !strings.Contains(result, "error") || !strings.Contains(result, "critical") || !strings.Contains(result, "Failed") {
 		t.Error("aggressiveCompress() should keep lines with critical keywords")
 	}
+}
+
+func TestProcessWithBudget(t *testing.T) {
+	p := NewPreprocessor(5000)
+
+	t.Run("delegates to processWithMaxTokens", func(t *testing.T) {
+		content := "## Error Section\nerror: something failed\nwarning: disk full\ninfo: routine check"
+		result, err := p.ProcessWithBudget(content, 5000)
+		if err != nil {
+			t.Fatalf("ProcessWithBudget() error = %v", err)
+		}
+		if result == "" {
+			t.Fatal("ProcessWithBudget() returned empty content")
+		}
+	})
+
+	t.Run("zero budget falls back to configured max", func(t *testing.T) {
+		content := "short"
+		result, err := p.ProcessWithBudget(content, 0)
+		if err != nil {
+			t.Fatalf("ProcessWithBudget() error = %v", err)
+		}
+		if !strings.Contains(result, "short") {
+			t.Fatalf("expected result to contain original content, got %q", result)
+		}
+	})
 }

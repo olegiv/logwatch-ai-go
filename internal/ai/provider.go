@@ -16,3 +16,9 @@ type Provider interface {
 	// GetProviderName returns the name of the provider (e.g., "Anthropic", "Ollama")
 	GetProviderName() string
 }
+
+// PromptTokenCounter is an optional capability for providers that can count
+// prompt tokens exactly before sending an analysis request.
+type PromptTokenCounter interface {
+	CountPromptTokens(ctx context.Context, systemPrompt, userPrompt string) (int, error)
+}

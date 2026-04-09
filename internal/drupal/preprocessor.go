@@ -14,6 +14,7 @@ import (
 
 // Compile-time interface check
 var _ analyzer.Preprocessor = (*Preprocessor)(nil)
+var _ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
 
 // Preprocessor handles Drupal watchdog content preprocessing for large logs.
 // Implements analyzer.Preprocessor interface.
@@ -46,9 +47,21 @@ func (p *Preprocessor) ShouldProcess(content string, maxTokens int) bool {
 // - Sampling info/notice entries
 // - Grouping similar messages
 func (p *Preprocessor) Process(content string) (string, error) {
+	return p.processWithMaxTokens(content, p.maxTokens)
+}
+
+// ProcessWithBudget preprocesses the content using a dynamic token budget.
+func (p *Preprocessor) ProcessWithBudget(content string, maxTokens int) (string, error) {
+	return p.processWithMaxTokens(content, maxTokens)
+}
+
+func (p *Preprocessor) processWithMaxTokens(content string, maxTokens int) (string, error) {
 	// Return empty content as-is
 	if content == "" {
 		return "", nil
+	}
+	if maxTokens <= 0 {
+		maxTokens = p.maxTokens
 	}
 
 	// Parse sections from the formatted content
@@ -73,8 +86,8 @@ func (p *Preprocessor) Process(content string) (string, error) {
 	processed := result.String()
 
 	// If still too large, apply more aggressive compression
-	if p.EstimateTokens(processed) > p.maxTokens {
-		processed = p.aggressiveCompress(processed)
+	if p.EstimateTokens(processed) > maxTokens {
+		processed = p.aggressiveCompressWithLimit(processed, maxTokens)
 	}
 
 	return processed, nil
@@ -300,7 +313,7 @@ func (p *Preprocessor) normalizeLine(line string) string {
 }
 
 // aggressiveCompress applies more aggressive compression when content is still too large.
-func (p *Preprocessor) aggressiveCompress(content string) string {
+func (p *Preprocessor) aggressiveCompressWithLimit(content string, maxTokens int) string {
 	lines := strings.Split(content, "\n")
 
 	// Keep only essential lines
@@ -328,11 +341,20 @@ func (p *Preprocessor) aggressiveCompress(content string) string {
 	}
 
 	// If still too many lines, limit to first N
-	maxLines := p.maxTokens / 10 // Rough estimate
+	maxLines := maxTokens / 10 // Rough estimate
+	if maxLines <= 0 {
+		maxLines = 1
+	}
 	if len(essential) > maxLines {
 		essential = essential[:maxLines]
 		essential = append(essential, fmt.Sprintf("\n[... truncated to %d lines due to size limits ...]", maxLines))
 	}
 
 	return strings.Join(essential, "\n")
+}
+
+// aggressiveCompress preserves the previous fixed-budget behavior for tests and callers
+// that rely on the preprocessor's configured maxTokens.
+func (p *Preprocessor) aggressiveCompress(content string) string {
+	return p.aggressiveCompressWithLimit(content, p.maxTokens)
 }
