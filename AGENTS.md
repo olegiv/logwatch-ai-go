@@ -1,13 +1,13 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code when working with this repository.
+This file provides guidance to Codex when working with this repository.
 
 ## Project Overview
 
 Logwatch AI Analyzer is an intelligent system log analyzer that uses LLM to analyze log reports and send actionable insights via Telegram. Go port optimized for single-binary deployment.
 
 **Log Sources:** Logwatch (Linux), Drupal Watchdog (PHP/Drupal)
-**LLM Providers:** Anthropic Claude, Ollama, LM Studio
+**LLM Providers:** Anthropic Codex, Ollama, LM Studio
 **Key Tech:** Go 1.25+, pure Go SQLite (modernc.org/sqlite), Telegram Bot API
 
 **Status:** Production ready - deployed to Integration, QA, and Pre-Production on Debian 12.
@@ -31,10 +31,10 @@ make install              # Install to /opt/logwatch-ai (requires sudo)
 ## Package Structure
 
 ```
-cmd/analyzer/       - Main entry point, prompt fitting (prompt_fit.go)
+cmd/analyzer/       - Main entry point
 internal/
-  ├── ai/          - LLM clients (Anthropic, Ollama, LM Studio), prompts, parsing, token counting
-  ├── analyzer/    - Multi-source interfaces, token budget calculation (budget.go)
+  ├── ai/          - LLM clients (Anthropic, Ollama, LM Studio), prompts, parsing
+  ├── analyzer/    - Multi-source interfaces (LogReader, Preprocessor, PromptBuilder)
   ├── config/      - Configuration loading (viper + .env)
   ├── drupal/      - Drupal watchdog reader, preprocessor, prompts
   ├── errors/      - Error sanitization (credential redaction)
@@ -64,11 +64,6 @@ type Preprocessor interface {
     ShouldProcess(content string, maxTokens int) bool
 }
 
-// Optional: dynamic token budget support (internal/analyzer/interfaces.go)
-type BudgetPreprocessor interface {
-    ProcessWithBudget(content string, maxTokens int) (string, error)
-}
-
 type PromptBuilder interface {
     GetSystemPrompt() string
     GetUserPrompt(logContent, historicalContext string) string
@@ -95,18 +90,13 @@ type PromptBuilder interface {
 - CLI: `-drupal-site <id>`, `-drupal-sites-config <path>`, `-list-drupal-sites`
 - Search locations: `./`, `./configs/`, `/opt/logwatch-ai/`, `~/.config/logwatch-ai/`
 
-## Preprocessing & Prompt Fitting
+## Preprocessing
 
-When logs exceed the available token budget:
+When logs exceed `MAX_PREPROCESSING_TOKENS` (default: 150,000):
 1. Split by `###` headers
 2. Classify priority: HIGH (ssh, security, auth, error), MEDIUM (network, disk, warning), LOW (rest)
 3. Deduplicate similar lines
-4. Progressive compression profiles (100/50/20% → 85/35/10% → 70/20/5% → 50/10/2%)
-5. Aggressive compression (essential lines only) and hard truncation as final fallbacks
-
-**Prompt fitting** (`cmd/analyzer/prompt_fit.go`):
-- **Anthropic**: Uses exact token counting API (`CountPromptTokens`) with iterative recompression (up to 4 attempts)
-- **Other providers**: Heuristic budget calculation based on estimated token counts (`internal/analyzer/budget.go`)
+4. Compress: 100% HIGH, 50% MEDIUM, 20% LOW
 
 Token estimation: `max(chars/4, words/0.75)`
 
@@ -171,7 +161,7 @@ package <name>
 
 **"Preprocessing removes too much"**: Increase `MAX_PREPROCESSING_TOKENS`, modify priority keywords in `preprocessor.go`.
 
-**"Claude API timeouts"**: Default 120s, increase preprocessing for large logs.
+**"Codex API timeouts"**: Default 120s, increase preprocessing for large logs.
 
 **Drupal "Invalid JSON"**: Validate with `jq . /path/to/watchdog.json`, check UTF-8 encoding.
 
@@ -182,9 +172,9 @@ package <name>
 - **Cron Setup**: See `docs/CRON_SETUP.md`
 - **Troubleshooting**: See `docs/TROUBLESHOOTING.md`
 
-## Claude Code Extensions
+## Codex Extensions
 
-Specialized agents and slash commands are defined in `.claude/agents/` and `.claude/commands/`. Key commands:
+Specialized agents and slash commands are defined in `.Codex/agents/` and `.Codex/commands/`. Key commands:
 
 - `/test` - Run all tests
 - `/build` - Development build

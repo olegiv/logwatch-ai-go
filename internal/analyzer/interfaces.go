@@ -55,6 +55,12 @@ type Preprocessor interface {
 	ShouldProcess(content string, maxTokens int) bool
 }
 
+// BudgetPreprocessor extends Preprocessor with support for dynamic token budgets.
+// Implementations should return content that fits within maxTokens whenever possible.
+type BudgetPreprocessor interface {
+	ProcessWithBudget(content string, maxTokens int) (string, error)
+}
+
 // PromptBuilder constructs prompts for Claude AI analysis.
 // Each log type has its own prompt builder with specialized instructions.
 type PromptBuilder interface {

@@ -244,7 +244,22 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 
 	// Build prompts using the log source's prompt builder
 	systemPrompt := logSource.PromptBuilder.GetSystemPrompt()
-	userPrompt := logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext)
+
+	promptResult, err := preparePromptForAnalysis(
+		ctx,
+		cfg,
+		llmClient,
+		logSource,
+		systemPrompt,
+		logContent,
+		historicalContext,
+		log,
+	)
+	if err != nil {
+		return err
+	}
+	logContent = promptResult.LogContent
+	userPrompt := promptResult.UserPrompt
 
 	// Analyze with LLM
 	log.Info().
@@ -396,7 +411,7 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 			Type: analyzer.LogSourceLogwatch,
 			Reader: logwatch.NewReader(
 				cfg.MaxLogSizeMB,
-				cfg.EnablePreprocessing,
+				false,
 				cfg.MaxPreprocessingTokens,
 			),
 			Preprocessor:  logwatch.NewPreprocessor(cfg.MaxPreprocessingTokens),
@@ -412,7 +427,7 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 			Type: analyzer.LogSourceDrupalWatchdog,
 			Reader: drupal.NewReader(
 				cfg.MaxLogSizeMB,
-				cfg.EnablePreprocessing,
+				false,
 				cfg.MaxPreprocessingTokens,
 				drupal.InputFormat(cfg.DrupalWatchdogFormat),
 			),

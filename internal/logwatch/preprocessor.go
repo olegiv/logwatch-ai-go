@@ -14,6 +14,7 @@ import (
 
 // Compile-time interface check
 var _ analyzer.Preprocessor = (*Preprocessor)(nil)
+var _ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
 
 // Preprocessor handles logwatch content preprocessing for large files.
 // Implements analyzer.Preprocessor interface.
@@ -49,6 +50,25 @@ func (p *Preprocessor) ShouldProcess(content string, maxTokens int) bool {
 
 // Process preprocesses the content to reduce its size while preserving critical information
 func (p *Preprocessor) Process(content string) (string, error) {
+	return p.processWithMaxTokens(content, p.maxTokens)
+}
+
+// ProcessWithBudget preprocesses the content using a dynamic token budget.
+func (p *Preprocessor) ProcessWithBudget(content string, maxTokens int) (string, error) {
+	return p.processWithMaxTokens(content, maxTokens)
+}
+
+func (p *Preprocessor) processWithMaxTokens(content string, maxTokens int) (string, error) {
+	if content == "" {
+		return "", nil
+	}
+	if maxTokens <= 0 {
+		maxTokens = p.maxTokens
+	}
+	if p.EstimateTokens(content) <= maxTokens {
+		return content, nil
+	}
+
 	// Parse sections
 	sections := p.parseSections(content)
 	if len(sections) == 0 {
@@ -63,26 +83,37 @@ func (p *Preprocessor) Process(content string) (string, error) {
 		sections[i].Content = p.deduplicateContent(sections[i].Content)
 	}
 
-	// Calculate target sizes based on priority
-	totalTokens := 0
-	for _, section := range sections {
-		totalTokens += p.EstimateTokens(section.Content)
+	// Deduplicated content often removes enough repetition on its own.
+	deduplicated := p.renderSections(sections, compressionProfile{
+		high:   1.0,
+		medium: 1.0,
+		low:    1.0,
+	})
+	if p.EstimateTokens(deduplicated) <= maxTokens {
+		return deduplicated, nil
 	}
 
-	if totalTokens <= p.maxTokens {
-		return content, nil // No compression needed
+	// Apply progressively more aggressive section compression until we fit.
+	profiles := []compressionProfile{
+		{high: 1.0, medium: 0.5, low: 0.2},
+		{high: 0.85, medium: 0.35, low: 0.1},
+		{high: 0.7, medium: 0.2, low: 0.05},
+		{high: 0.5, medium: 0.1, low: 0.02},
 	}
 
-	// Compress sections based on priority
-	var result strings.Builder
-	for _, section := range sections {
-		compressedContent := p.compressByPriority(section)
-		result.WriteString(fmt.Sprintf("\n################### %s ###################\n", section.Name))
-		result.WriteString(compressedContent)
-		result.WriteString("\n")
+	for _, profile := range profiles {
+		candidate := p.renderSections(sections, profile)
+		if p.EstimateTokens(candidate) <= maxTokens {
+			return candidate, nil
+		}
 	}
 
-	return result.String(), nil
+	aggressive := p.aggressiveCompress(sections)
+	if p.EstimateTokens(aggressive) <= maxTokens {
+		return aggressive, nil
+	}
+
+	return p.trimToTokenBudget(aggressive, maxTokens), nil
 }
 
 // parseSections parses logwatch output into sections
@@ -243,8 +274,6 @@ func (p *Preprocessor) normalizeLine(line string) string {
 
 // compressByPriority compresses section content based on its priority
 func (p *Preprocessor) compressByPriority(section *Section) string {
-	lines := strings.Split(section.Content, "\n")
-
 	var keepRatio float64
 	switch section.Priority {
 	case 1: // HIGH - keep all
@@ -257,8 +286,44 @@ func (p *Preprocessor) compressByPriority(section *Section) string {
 		keepRatio = 0.5
 	}
 
+	return p.compressContent(section.Content, keepRatio)
+}
+
+type compressionProfile struct {
+	high   float64
+	medium float64
+	low    float64
+}
+
+func (p *Preprocessor) renderSections(sections []*Section, profile compressionProfile) string {
+	var result strings.Builder
+	for _, section := range sections {
+		compressedContent := p.compressContent(section.Content, p.keepRatioForPriority(section.Priority, profile))
+		result.WriteString(fmt.Sprintf("\n################### %s ###################\n", section.Name))
+		result.WriteString(compressedContent)
+		result.WriteString("\n")
+	}
+	return result.String()
+}
+
+func (p *Preprocessor) keepRatioForPriority(priority int, profile compressionProfile) float64 {
+	switch priority {
+	case 1:
+		return profile.high
+	case 2:
+		return profile.medium
+	case 3:
+		return profile.low
+	default:
+		return profile.medium
+	}
+}
+
+func (p *Preprocessor) compressContent(content string, keepRatio float64) string {
+	lines := strings.Split(content, "\n")
+
 	if keepRatio >= 1.0 {
-		return section.Content
+		return content
 	}
 
 	// Calculate how many lines to keep
@@ -278,4 +343,139 @@ func (p *Preprocessor) compressByPriority(section *Section) string {
 	}
 
 	return result.String()
+}
+
+func (p *Preprocessor) aggressiveCompress(sections []*Section) string {
+	var result strings.Builder
+
+	for _, section := range sections {
+		result.WriteString(fmt.Sprintf("\n################### %s ###################\n", section.Name))
+		result.WriteString(p.extractEssentialLines(section))
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+func (p *Preprocessor) extractEssentialLines(section *Section) string {
+	lines := strings.Split(section.Content, "\n")
+	if len(lines) <= 6 {
+		return section.Content
+	}
+
+	var essential []string
+	seen := make(map[string]bool)
+
+	appendLine := func(line string) {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			return
+		}
+
+		key := p.normalizeLine(line)
+		if key == "" {
+			key = line
+		}
+		if seen[key] {
+			return
+		}
+
+		seen[key] = true
+		essential = append(essential, line)
+	}
+
+	for i := 0; i < len(lines) && i < 2; i++ {
+		appendLine(lines[i])
+	}
+
+	for _, line := range lines {
+		if p.isEssentialLine(line) {
+			appendLine(line)
+		}
+	}
+
+	startLast := len(lines) - 2
+	if startLast < 0 {
+		startLast = 0
+	}
+	for i := startLast; i < len(lines); i++ {
+		appendLine(lines[i])
+	}
+
+	if len(essential) == 0 {
+		for i := 0; i < len(lines) && i < 3; i++ {
+			appendLine(lines[i])
+		}
+	}
+
+	omitted := len(lines) - len(essential)
+	if omitted > 0 {
+		essential = append(essential, fmt.Sprintf("[... %d more lines omitted for brevity ...]", omitted))
+	}
+
+	return strings.Join(essential, "\n")
+}
+
+func (p *Preprocessor) isEssentialLine(line string) bool {
+	lineLower := strings.ToLower(line)
+	if strings.TrimSpace(lineLower) == "" {
+		return false
+	}
+
+	keywords := []string{
+		"error", "fail", "failed", "critical", "panic", "denied", "unauthorized",
+		"security", "sudo", "root", "ssh", "warning", "disk", "memory", "cpu",
+		"load", "network", "service", "daemon", "kernel", "oom", "%",
+	}
+
+	for _, keyword := range keywords {
+		if strings.Contains(lineLower, keyword) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (p *Preprocessor) trimToTokenBudget(content string, maxTokens int) string {
+	if maxTokens <= 0 || p.EstimateTokens(content) <= maxTokens {
+		return content
+	}
+
+	lines := strings.Split(content, "\n")
+	truncationNotice := "[... truncated to fit token budget ...]"
+
+	low := 0
+	high := len(lines)
+
+	for low < high {
+		mid := (low + high + 1) / 2
+		candidate := strings.Join(lines[:mid], "\n")
+		if mid < len(lines) {
+			candidate += "\n" + truncationNotice
+		}
+
+		if p.EstimateTokens(candidate) <= maxTokens {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+
+	if low == 0 {
+		if p.EstimateTokens(truncationNotice) <= maxTokens {
+			return truncationNotice
+		}
+		return ""
+	}
+
+	result := strings.Join(lines[:low], "\n")
+	if low < len(lines) {
+		candidate := result + "\n" + truncationNotice
+		if p.EstimateTokens(candidate) <= maxTokens {
+			return candidate
+		}
+	}
+
+	return result
 }

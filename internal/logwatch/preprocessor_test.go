@@ -1,6 +1,10 @@
+// Copyright (c) 2025-2026 Oleg Ivanchenko
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package logwatch
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -601,5 +605,198 @@ func TestProcessWithMultipleSectionTypes(t *testing.T) {
 	// Result should be shorter than original due to compression
 	if len(result) >= len(content) {
 		t.Log("Note: Result should typically be shorter than original when compression occurs")
+	}
+}
+
+func TestProcessWithBudget_EmptyContent(t *testing.T) {
+	preprocessor := NewPreprocessor(5000)
+	result, err := preprocessor.ProcessWithBudget("", 500)
+	if err != nil {
+		t.Fatalf("ProcessWithBudget() error = %v", err)
+	}
+	if result != "" {
+		t.Fatalf("expected empty result, got %q", result)
+	}
+}
+
+func TestProcessWithBudget_FallbackMaxTokens(t *testing.T) {
+	preprocessor := NewPreprocessor(5000)
+	content := "small content"
+	result, err := preprocessor.ProcessWithBudget(content, 0)
+	if err != nil {
+		t.Fatalf("ProcessWithBudget() error = %v", err)
+	}
+	if result != content {
+		t.Fatalf("expected content unchanged with zero budget fallback, got %q", result)
+	}
+}
+
+func TestProcessWithBudget_AggressiveCompress(t *testing.T) {
+	preprocessor := NewPreprocessor(5000)
+
+	// Build content large enough to require aggressive compression.
+	// Many unique lines so dedup and standard profiles can't shrink enough.
+	var sb strings.Builder
+	sb.WriteString("################### SSH Security ###################\n")
+	for i := 0; i < 200; i++ {
+		sb.WriteString(fmt.Sprintf("Failed login attempt %d from 10.0.0.%d error denied\n", i, i%256))
+	}
+	sb.WriteString("\n################### Network ###################\n")
+	for i := 0; i < 200; i++ {
+		sb.WriteString(fmt.Sprintf("Network warning on interface eth%d, packet loss %d%%\n", i, i%100))
+	}
+	sb.WriteString("\n################### General ###################\n")
+	for i := 0; i < 300; i++ {
+		sb.WriteString(fmt.Sprintf("Service check %d completed at node-%d\n", i, i%50))
+	}
+
+	content := sb.String()
+	budget := 100
+	result, err := preprocessor.ProcessWithBudget(content, budget)
+	if err != nil {
+		t.Fatalf("ProcessWithBudget() error = %v", err)
+	}
+	if result == "" {
+		t.Fatal("ProcessWithBudget() returned empty content")
+	}
+	if tokens := preprocessor.EstimateTokens(result); tokens > budget {
+		t.Fatalf("ProcessWithBudget() produced %d tokens, want <= %d", tokens, budget)
+	}
+}
+
+func TestIsEssentialLine(t *testing.T) {
+	preprocessor := NewPreprocessor(5000)
+	tests := []struct {
+		line string
+		want bool
+	}{
+		{"Failed login from 192.168.1.1", true},
+		{"error: disk full", true},
+		{"kernel panic detected", true},
+		{"SSH connection established", true},
+		{"cpu usage 95%", true},
+		{"routine check completed", false},
+		{"", false},
+		{"   ", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.line, func(t *testing.T) {
+			if got := preprocessor.isEssentialLine(tt.line); got != tt.want {
+				t.Errorf("isEssentialLine(%q) = %v, want %v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractEssentialLines_ShortSection(t *testing.T) {
+	preprocessor := NewPreprocessor(5000)
+	section := &Section{
+		Name:     "Test",
+		Content:  "line1\nline2\nline3",
+		Priority: 1,
+	}
+	result := preprocessor.extractEssentialLines(section)
+	if result != section.Content {
+		t.Fatalf("expected short sections returned unchanged, got %q", result)
+	}
+}
+
+func TestExtractEssentialLines_LongSection(t *testing.T) {
+	preprocessor := NewPreprocessor(5000)
+
+	var lines []string
+	lines = append(lines, "first line")
+	lines = append(lines, "second line")
+	for i := 0; i < 20; i++ {
+		lines = append(lines, fmt.Sprintf("routine line %d", i))
+	}
+	lines = append(lines, "error detected on disk sda")
+	lines = append(lines, "more routine stuff")
+	lines = append(lines, "last line")
+
+	section := &Section{
+		Name:     "Disk",
+		Content:  strings.Join(lines, "\n"),
+		Priority: 2,
+	}
+	result := preprocessor.extractEssentialLines(section)
+	if !strings.Contains(result, "first line") {
+		t.Error("expected first lines preserved")
+	}
+	if !strings.Contains(result, "error detected on disk sda") {
+		t.Error("expected essential line preserved")
+	}
+	if !strings.Contains(result, "last line") {
+		t.Error("expected last lines preserved")
+	}
+	if !strings.Contains(result, "omitted for brevity") {
+		t.Error("expected omission notice")
+	}
+}
+
+func TestTrimToTokenBudget(t *testing.T) {
+	preprocessor := NewPreprocessor(5000)
+
+	t.Run("content already fits", func(t *testing.T) {
+		content := "short"
+		result := preprocessor.trimToTokenBudget(content, 1000)
+		if result != content {
+			t.Fatalf("expected unchanged content, got %q", result)
+		}
+	})
+
+	t.Run("zero budget", func(t *testing.T) {
+		result := preprocessor.trimToTokenBudget("some content", 0)
+		if result != "some content" {
+			t.Fatalf("expected unchanged content with zero budget, got %q", result)
+		}
+	})
+
+	t.Run("trims large content", func(t *testing.T) {
+		var lines []string
+		for i := 0; i < 500; i++ {
+			lines = append(lines, fmt.Sprintf("log entry number %d with some additional text here", i))
+		}
+		content := strings.Join(lines, "\n")
+		budget := 200
+		result := preprocessor.trimToTokenBudget(content, budget)
+
+		if tokens := preprocessor.EstimateTokens(result); tokens > budget {
+			t.Fatalf("trimToTokenBudget() produced %d tokens, want <= %d", tokens, budget)
+		}
+		if !strings.Contains(result, "truncated to fit token budget") {
+			t.Error("expected truncation notice")
+		}
+	})
+}
+
+func TestProcessWithBudget_EnforcesTokenLimit(t *testing.T) {
+	preprocessor := NewPreprocessor(5000)
+
+	content := `################### SSH Security ###################
+` + strings.Repeat("Failed login from 192.168.1.100\n", 150) + `
+
+################### Network ###################
+` + strings.Repeat("Network warning detected on interface eth0\n", 150) + `
+
+################### General ###################
+` + strings.Repeat("Routine service check completed successfully\n", 300)
+
+	budget := 250
+	result, err := preprocessor.ProcessWithBudget(content, budget)
+	if err != nil {
+		t.Fatalf("ProcessWithBudget() error = %v", err)
+	}
+
+	if result == "" {
+		t.Fatal("ProcessWithBudget() returned empty content")
+	}
+
+	if tokens := preprocessor.EstimateTokens(result); tokens > budget {
+		t.Fatalf("ProcessWithBudget() produced %d tokens, want <= %d", tokens, budget)
+	}
+
+	if !strings.Contains(result, "SSH Security") {
+		t.Error("expected compressed output to preserve section headers")
 	}
 }

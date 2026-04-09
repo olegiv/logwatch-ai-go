@@ -1,9 +1,18 @@
+// Copyright (c) 2025-2026 Oleg Ivanchenko
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package ai
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/liushuangls/go-anthropic/v2"
 )
 
 func TestNewClient(t *testing.T) {
@@ -93,8 +102,104 @@ func TestNewClient(t *testing.T) {
 			if client.client == nil {
 				t.Error("Expected Anthropic client to be initialized")
 			}
+
+			if client.countingClient == nil {
+				t.Error("Expected Anthropic counting client to be initialized")
+			}
 		})
 	}
+}
+
+func TestCountPromptTokens(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/messages/count_tokens" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+
+			if got := r.Header.Get("Anthropic-Beta"); !strings.Contains(got, string(anthropic.BetaTokenCounting20241101)) {
+				t.Fatalf("missing token counting beta header: %q", got)
+			}
+
+			var req anthropic.MessagesRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("failed to decode request: %v", err)
+			}
+
+			if req.MaxTokens != 0 {
+				t.Fatalf("CountPromptTokens should not send max_tokens, got %d", req.MaxTokens)
+			}
+
+			res := anthropic.CountTokensResponse{InputTokens: 321}
+			if err := json.NewEncoder(w).Encode(res); err != nil {
+				t.Fatalf("failed to encode response: %v", err)
+			}
+		}))
+		defer server.Close()
+
+		client := &Client{
+			client: anthropic.NewClient(
+				"sk-ant-test-key",
+				anthropic.WithBaseURL(server.URL+"/v1"),
+				anthropic.WithHTTPClient(server.Client()),
+			),
+			countingClient: anthropic.NewClient(
+				"sk-ant-test-key",
+				anthropic.WithBaseURL(server.URL+"/v1"),
+				anthropic.WithHTTPClient(server.Client()),
+				anthropic.WithBetaVersion(anthropic.BetaTokenCounting20241101),
+			),
+			model:     "claude-sonnet-4.5",
+			maxTokens: 8000,
+		}
+
+		tokens, err := client.CountPromptTokens(context.Background(), "system", "user")
+		if err != nil {
+			t.Fatalf("CountPromptTokens() error = %v", err)
+		}
+
+		if tokens != 321 {
+			t.Fatalf("CountPromptTokens() = %d, want 321", tokens)
+		}
+	})
+
+	t.Run("failure sanitizes credentials", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"type": "error",
+				"error": map[string]string{
+					"type":    "invalid_request_error",
+					"message": "bad token sk-ant-secretsecretsecret1234567890",
+				},
+			})
+		}))
+		defer server.Close()
+
+		client := &Client{
+			countingClient: anthropic.NewClient(
+				"sk-ant-test-key",
+				anthropic.WithBaseURL(server.URL+"/v1"),
+				anthropic.WithHTTPClient(server.Client()),
+				anthropic.WithBetaVersion(anthropic.BetaTokenCounting20241101),
+			),
+			model:     "claude-sonnet-4.5",
+			maxTokens: 8000,
+		}
+
+		_, err := client.CountPromptTokens(context.Background(), "system", "user")
+		if err == nil {
+			t.Fatal("CountPromptTokens() expected error, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "API call failed") {
+			t.Fatalf("expected wrapped error, got %v", err)
+		}
+
+		if strings.Contains(err.Error(), "sk-ant-secretsecretsecret1234567890") {
+			t.Fatalf("error should be sanitized, got %v", err)
+		}
+	})
 }
 
 func TestCalculateStats(t *testing.T) {
