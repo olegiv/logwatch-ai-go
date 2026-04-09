@@ -411,7 +411,7 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 			Type: analyzer.LogSourceLogwatch,
 			Reader: logwatch.NewReader(
 				cfg.MaxLogSizeMB,
-				false,
+				false, // Reader preprocessing disabled — handled by preparePromptForAnalysis
 				cfg.MaxPreprocessingTokens,
 			),
 			Preprocessor:  logwatch.NewPreprocessor(cfg.MaxPreprocessingTokens),
@@ -427,7 +427,7 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 			Type: analyzer.LogSourceDrupalWatchdog,
 			Reader: drupal.NewReader(
 				cfg.MaxLogSizeMB,
-				false,
+				false, // Reader preprocessing disabled — handled by preparePromptForAnalysis
 				cfg.MaxPreprocessingTokens,
 				drupal.InputFormat(cfg.DrupalWatchdogFormat),
 			),

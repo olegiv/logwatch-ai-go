@@ -140,9 +140,15 @@ func (c *Client) CountPromptTokens(ctx context.Context, systemPrompt, userPrompt
 	}
 
 	request := c.buildMessagesRequest(systemPrompt, userPrompt)
-	response, err := c.countingClient.CountTokens(ctx, request)
+	response, err := retryWithBackoff(defaultMaxRetries, func() (anthropic.CountTokensResponse, error) {
+		resp, retryErr := c.countingClient.CountTokens(ctx, request)
+		if retryErr != nil {
+			return resp, internalerrors.Wrapf(retryErr, "API call failed")
+		}
+		return resp, nil
+	})
 	if err != nil {
-		return 0, internalerrors.Wrapf(err, "API call failed")
+		return 0, err
 	}
 
 	return response.InputTokens, nil
