@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -222,7 +221,7 @@ func (c *OllamaClient) CheckConnection(ctx context.Context) error {
 		} `json:"models"`
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readResponseBodyLimited(resp.Body, maxAPIResponseBodyBytes)
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
 	}

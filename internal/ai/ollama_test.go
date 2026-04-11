@@ -1,10 +1,12 @@
 package ai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -184,6 +186,35 @@ func TestOllamaClient_CheckConnection(t *testing.T) {
 				t.Errorf("CheckConnection() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestOllamaClient_CheckConnection_ResponseTooLarge(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("a"), int(maxAPIResponseBodyBytes)+1))
+	}))
+	defer server.Close()
+
+	client, err := NewOllamaClient(OllamaConfig{
+		BaseURL: server.URL,
+		Model:   "llama3.3:latest",
+	})
+	if err != nil {
+		t.Fatalf("NewOllamaClient() error = %v", err)
+	}
+
+	err = client.CheckConnection(context.Background())
+	if err == nil {
+		t.Fatal("CheckConnection() expected error for oversized response, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "response body exceeds") {
+		t.Fatalf("CheckConnection() error = %v, expected size limit error", err)
 	}
 }
 
