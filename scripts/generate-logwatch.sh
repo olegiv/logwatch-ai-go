@@ -21,7 +21,7 @@
 #   Add the line above with correct path
 #
 
-set -e  # Exit on error
+set -e -o pipefail  # Exit on error and preserve command failures in pipelines
 
 # Default configuration
 OUTPUT_PATH="${1:-/tmp/logwatch-output.txt}"
