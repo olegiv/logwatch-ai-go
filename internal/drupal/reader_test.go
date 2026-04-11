@@ -162,6 +162,23 @@ func TestReader_parseJSON(t *testing.T) {
 	}
 }
 
+func TestReader_parseJSON_NDJSONLongLineReturnsError(t *testing.T) {
+	r := NewReader(10, false, 150000, FormatJSON)
+
+	longLine := `{"wid": 2, "type": "php", "message": "` + strings.Repeat("A", maxNDJSONLineBytes+1) + `", "severity": 3, "timestamp": 1699900801}`
+	content := `{"wid": 1, "type": "php", "message": "Error 1", "severity": 3, "timestamp": 1699900800}
+` + longLine + `
+{"wid": 3, "type": "access", "message": "Access denied", "severity": 4, "timestamp": 1699900802}`
+
+	entries, err := r.parseJSON(content)
+	if err == nil {
+		t.Fatal("parseJSON() expected error for oversized NDJSON line, got nil")
+	}
+	if entries != nil {
+		t.Fatalf("parseJSON() returned entries on scanner error, got %d entries", len(entries))
+	}
+}
+
 func TestReader_parseDrush(t *testing.T) {
 	r := NewReader(10, false, 150000, FormatDrush)
 
