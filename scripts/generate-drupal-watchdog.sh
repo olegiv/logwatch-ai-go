@@ -350,6 +350,15 @@ if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+# Calculate yesterday's time boundaries (00:00:00 to 23:59:59)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    TODAY_START=$(date -j -f "%Y-%m-%d %H:%M:%S" "$(date +%Y-%m-%d) 00:00:00" +%s)
+else
+    TODAY_START=$(date -d "today 00:00:00" +%s)
+fi
+YESTERDAY_START=$((TODAY_START - 86400))
+YESTERDAY_END=$((TODAY_START - 1))
+
 log "Starting Drupal watchdog export"
 log "Configuration:"
 log "  Site: $DRUPAL_SITE"
@@ -360,7 +369,7 @@ log "  Format: $FORMAT"
 log "  Count: $COUNT (max entries to fetch)"
 log "  Limit: $LIMIT (max entries in output)"
 log "  Min severity: $MIN_SEVERITY (0=emergency to 7=debug)"
-log "  Date filter: yesterday only"
+log "  Time filter: yesterday only"
 [ -n "$LOG_TYPE" ] && log "  Type filter: $LOG_TYPE"
 
 # Check if Drupal root exists
@@ -419,40 +428,13 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
                 exit 1
             fi
 
-            # Get current year and yesterday's date for filtering
-            CURRENT_YEAR=$(date +%Y)
-            # Yesterday's date in drush format "DD/Mon" (e.g., "12/Dec")
-            if [[ "$OSTYPE" == "darwin"* ]]; then
-                YESTERDAY_DATE=$(date -v-1d +"%d/%b")
-            else
-                YESTERDAY_DATE=$(date -d "yesterday" +"%d/%b")
-            fi
-            log "  Filtering for date: $YESTERDAY_DATE"
-
             # Drush outputs object {wid: entry, ...} - convert to array and sort by wid (higher = newer)
-            # Convert severity string to number, filter by severity and yesterday's date
-            # Convert drush date format "DD/Mon HH:MM" to Unix timestamp
-            if ! CONVERTED=$(echo "$OUTPUT" | jq --argjson minSev "$MIN_SEVERITY" --arg year "$CURRENT_YEAR" --arg yesterday "$YESTERDAY_DATE" '
-                # Month name to number mapping
-                def month_to_num:
-                    if . == "Jan" then "01"
-                    elif . == "Feb" then "02"
-                    elif . == "Mar" then "03"
-                    elif . == "Apr" then "04"
-                    elif . == "May" then "05"
-                    elif . == "Jun" then "06"
-                    elif . == "Jul" then "07"
-                    elif . == "Aug" then "08"
-                    elif . == "Sep" then "09"
-                    elif . == "Oct" then "10"
-                    elif . == "Nov" then "11"
-                    elif . == "Dec" then "12"
-                    else "01" end;
-
+            # Convert severity string to number and filter by severity and yesterday's time range
+            if ! CONVERTED=$(echo "$OUTPUT" | jq --argjson minSev "$MIN_SEVERITY" \
+                --argjson yesterdayStart "$YESTERDAY_START" \
+                --argjson yesterdayEnd "$YESTERDAY_END" '
                 [to_entries | .[].value] |
                 map(
-                    # Parse date "DD/Mon HH:MM" -> extract components
-                    (.date | capture("^(?<day>[0-9]+)/(?<mon>[A-Za-z]+) (?<hour>[0-9]+):(?<min>[0-9]+)")) as $dt |
                     {
                         wid: (.wid | tonumber),
                         uid: ((.uid // "0") | tonumber),
@@ -473,19 +455,12 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
                         severity_label: .severity,
                         location: .location,
                         hostname: .hostname,
-                        # Create ISO date string and convert to Unix timestamp
-                        timestamp: (
-                            if $dt then
-                                ($year + "-" + ($dt.mon | month_to_num) + "-" + (if ($dt.day | length) == 1 then "0" + $dt.day else $dt.day end) + "T" + $dt.hour + ":" + $dt.min + ":00Z") | fromdateiso8601
-                            else
-                                now | floor
-                            end
-                        ),
+                        timestamp: (.timestamp | tonumber),
                         date: .date
                     }
                 ) |
                 [.[] | select(.severity <= $minSev)] |
-                [.[] | select(.date | startswith($yesterday))] |
+                [.[] | select(.timestamp >= $yesterdayStart and .timestamp <= $yesterdayEnd)] |
                 sort_by(-.wid)
             ' 2>/dev/null) || [ -z "$CONVERTED" ]; then
                 log_error "Failed to convert drush output format"
