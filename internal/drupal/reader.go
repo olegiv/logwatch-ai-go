@@ -25,6 +25,11 @@ const NoEntriesContent = "=== NO WATCHDOG ENTRIES ===\n\nNo Drupal watchdog entr
 // timeFormatDateTime is the standard date-time format for watchdog entries.
 const timeFormatDateTime = "2006-01-02 15:04:05"
 
+// maxNDJSONLineBytes is the maximum allowed size for a single NDJSON line.
+// It is set to 10MB to support very large watchdog messages while preventing
+// unbounded memory usage during parsing.
+const maxNDJSONLineBytes = 10 * 1024 * 1024
+
 // IsNoEntriesContent checks if the content indicates no watchdog entries were found.
 func IsNoEntriesContent(content string) bool {
 	return strings.HasPrefix(content, "=== NO WATCHDOG ENTRIES ===")
@@ -191,6 +196,7 @@ func (r *Reader) parseJSON(content string) ([]WatchdogEntry, error) {
 	// Try parsing as newline-delimited JSON (NDJSON)
 	entries = nil
 	scanner := bufio.NewScanner(strings.NewReader(content))
+	scanner.Buffer(make([]byte, 1024), maxNDJSONLineBytes)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || line == "[" || line == "]" {
@@ -204,6 +210,9 @@ func (r *Reader) parseJSON(content string) ([]WatchdogEntry, error) {
 			continue // Skip invalid lines
 		}
 		entries = append(entries, entry)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to parse NDJSON: %w", err)
 	}
 
 	if len(entries) > 0 {
