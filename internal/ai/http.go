@@ -12,6 +12,8 @@ import (
 	"net/http"
 )
 
+const maxAPIResponseBodyBytes = 10 * 1024 * 1024 // 10 MiB
+
 // doJSONPost performs a JSON POST request and unmarshals the response.
 // This is a shared helper for HTTP-based LLM clients (Ollama, LM Studio).
 func doJSONPost[T any](ctx context.Context, client *http.Client, url string, request any) (*T, error) {
@@ -36,7 +38,7 @@ func doJSONPost[T any](ctx context.Context, client *http.Client, url string, req
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readResponseBodyLimited(resp.Body, maxAPIResponseBodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -51,4 +53,22 @@ func doJSONPost[T any](ctx context.Context, client *http.Client, url string, req
 	}
 
 	return &response, nil
+}
+
+func readResponseBodyLimited(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("invalid response size limit: %d", limit)
+	}
+
+	limited := io.LimitReader(body, limit+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response body exceeds %d bytes", limit)
+	}
+
+	return data, nil
 }
