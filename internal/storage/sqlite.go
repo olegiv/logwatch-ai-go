@@ -126,7 +126,7 @@ func (s *Storage) initSchema() error {
 // getSchemaVersion returns the current schema version (0 if not set)
 func (s *Storage) getSchemaVersion() int {
 	var version int
-	err := s.db.QueryRow(`SELECT version FROM schema_version LIMIT 1`).Scan(&version)
+	err := s.db.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version)
 	if err != nil {
 		return 0 // No version set, needs full migration
 	}
@@ -135,9 +135,20 @@ func (s *Storage) getSchemaVersion() int {
 
 // setSchemaVersion updates the schema version
 func (s *Storage) setSchemaVersion(version int) error {
-	// Use REPLACE to upsert the single-row schema version
-	_, err := s.db.Exec(`REPLACE INTO schema_version (version) VALUES (?)`, version)
-	return err
+	// Keep schema_version as a single-row table to avoid stale versions.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`DELETE FROM schema_version`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_version (version) VALUES (?)`, version); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // migrateSchema runs migrations from currentVersion to latest

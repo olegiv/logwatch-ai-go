@@ -651,6 +651,57 @@ func TestInitSchema(t *testing.T) {
 	}
 }
 
+func TestGetSchemaVersionReturnsLatestWhenMultipleRowsExist(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	storage, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	if _, err := storage.db.Exec(`INSERT INTO schema_version (version) VALUES (1)`); err != nil {
+		t.Fatalf("Failed to insert older schema version: %v", err)
+	}
+
+	version := storage.getSchemaVersion()
+	if version != currentSchemaVersion {
+		t.Fatalf("Expected latest schema version %d, got %d", currentSchemaVersion, version)
+	}
+}
+
+func TestSetSchemaVersionReplacesExistingRows(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	storage, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	if _, err := storage.db.Exec(`INSERT INTO schema_version (version) VALUES (1)`); err != nil {
+		t.Fatalf("Failed to insert stale schema version: %v", err)
+	}
+
+	if err := storage.setSchemaVersion(currentSchemaVersion); err != nil {
+		t.Fatalf("Failed to set schema version: %v", err)
+	}
+
+	var rowCount int
+	if err := storage.db.QueryRow(`SELECT COUNT(*) FROM schema_version`).Scan(&rowCount); err != nil {
+		t.Fatalf("Failed to count schema_version rows: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("Expected a single schema_version row, got %d", rowCount)
+	}
+
+	if version := storage.getSchemaVersion(); version != currentSchemaVersion {
+		t.Fatalf("Expected schema version %d, got %d", currentSchemaVersion, version)
+	}
+}
+
 func TestDatabaseConnectionPoolSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
