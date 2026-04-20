@@ -354,16 +354,18 @@ if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
 fi
 
 # Validate LOG_TYPE and SEVERITY shapes before forwarding to drush.
-# Drush watchdog type names and severity labels are always simple identifiers,
-# so a restrictive charset both catches typos and blocks crafted args that
-# could otherwise reach drush.
-if [ -n "$LOG_TYPE" ] && ! [[ "$LOG_TYPE" =~ ^[A-Za-z0-9_.-]+$ ]]; then
-    log_error "Invalid --type '$LOG_TYPE'. Allowed: letters, digits, '_', '.', '-'"
+# Real Drupal watchdog type names can contain spaces (e.g. "page not found",
+# "access denied"), and --severity accepts a comma-separated list (e.g.
+# "error,warning"), so both allow those characters. The leading-character
+# anchor blocks values that begin with '-', preventing a crafted argument
+# from being interpreted as an additional drush flag.
+if [ -n "$LOG_TYPE" ] && ! [[ "$LOG_TYPE" =~ ^[A-Za-z0-9_][A-Za-z0-9\ ._-]*$ ]]; then
+    log_error "Invalid --type '$LOG_TYPE'. Allowed: letters, digits, space, '_', '.', '-' (no leading '-')"
     exit 1
 fi
 
-if [ -n "$SEVERITY" ] && ! [[ "$SEVERITY" =~ ^[A-Za-z0-9_-]+$ ]]; then
-    log_error "Invalid --severity '$SEVERITY'. Allowed: letters, digits, '_', '-'"
+if [ -n "$SEVERITY" ] && ! [[ "$SEVERITY" =~ ^[A-Za-z0-9_][A-Za-z0-9,_-]*$ ]]; then
+    log_error "Invalid --severity '$SEVERITY'. Allowed: letters, digits, ',', '_', '-' (no leading '-')"
     exit 1
 fi
 
