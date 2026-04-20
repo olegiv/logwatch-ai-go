@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-20
+
+### Added
+
+#### Finding Exclusions (opt-in)
+- New `internal/exclusions/` package that loads operator-authored
+  `exclusions.json` and removes matching findings from an analysis
+  before it reaches SQLite or Telegram
+- `-exclusions-config <path>` CLI flag with auto-discovery across
+  `./`, `./configs/`, `/opt/logwatch-ai/`, and `~/.config/logwatch-ai/`
+  (same search order as `drupal-sites.json`)
+- `global` patterns apply to every run; per-Drupal-site patterns stack
+  on top when `-drupal-site` matches
+- Uniform application across `criticalIssues`, `warnings`, and
+  `recommendations`
+- Plain case-insensitive substring match (no regex, no ReDoS surface);
+  1 MiB config file cap; pattern text deliberately not logged
+- Strict schema: `version` must be exactly `"1.0"` (future bumps force
+  a conscious migration)
+- `configs/exclusions.json.example` template, `docs/EXCLUSIONS.md`
+  full spec, `scripts/install.sh` installs the example
+
+### Changed
+
+#### Developer tooling
+- Pin `.golangci.yml` (v2 config) enabling `modernize`, full
+  `staticcheck` QF\* suite, `revive`, `gocritic`, `errorlint`,
+  `unconvert`, `unparam`, `usetesting`, `dupl`, `gocyclo`, and
+  `unusedwrite` via `govet`
+- Drive lint baseline from 217 findings to 0 across auto-fix and
+  hand-edit passes: `interface{}` → `any`, `omitempty` → `omitzero`
+  on nested struct fields, `os.Setenv`/`os.Chdir` → `t.Setenv`/
+  `t.Chdir` in tests, 15 new `// Package foo ...` doc comments,
+  `WriteString(fmt.Sprintf(...))` → `fmt.Fprintf(...)`
+
+### Fixed
+- Cap HTTP response bodies from LLM providers to prevent memory
+  exhaustion (LM Studio / generic clients and Ollama `/api/tags`)
+- NDJSON watchdog parser no longer truncates oversized lines
+- Logwatch pipeline failures are detected instead of masked by the
+  downstream `while read` loop
+- Drupal watchdog filtering now uses epoch timestamps, fixing
+  day-boundary skew across timezones
+- Schema version table kept single-row so stale rows no longer cause
+  migration mis-reads
+- Preprocessing error wrappers in `cmd/analyzer/prompt_fit.go` now go
+  through `internalerrors.Wrapf` so any credential in a wrapped error
+  is scrubbed before logging
+- Shell-script hardening in `scripts/`:
+  - `generate-logwatch.sh`: allowlist `RANGE` to
+    `yesterday|today|all|help` before forwarding to logwatch
+  - `generate-drupal-watchdog.sh`: pass `site_id` and `field` via
+    `jq --arg` instead of shell-interpolating into the filter string
+  - `generate-drupal-watchdog.sh`: validate `LOG_TYPE` and `SEVERITY`
+    against an identifier charset (allowing spaces for type names like
+    `page not found` and commas for `-s error,warning`) while rejecting
+    leading `-` that could reach drush as an extra flag
+- `.gitignore` now excludes `exclusions.json` (keeping the shipped
+  template and testdata fixtures tracked)
+
+### Security
+- `govulncheck ./...` reports zero vulnerabilities on the release
+  commit
+- Full security audit run; all five actionable findings fixed, two
+  deferred with documented rationale (operator `.env` credential
+  rotation, accepted TOCTOU on exclusions-config load)
+
+### Dependencies
+- Update `modernc.org/sqlite` v1.48.2 → v1.49.1
+- Update `modernc.org/libc` v1.71.0 → v1.72.0 (transitive)
+
 ## [0.7.0] - 2026-04-09
 
 ### Added
