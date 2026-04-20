@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+#### Anthropic model default and cost tracking
+- Default `CLAUDE_MODEL` is now `claude-haiku-4-5-20251001` (previously
+  `claude-sonnet-4-5-20250929`). Haiku 4.5 matches Sonnet-tier quality for
+  this workload at roughly one-third the cost.
+- New `internal/ai/pricing.go` with a per-model pricing table and
+  longest-prefix lookup (`ResolvePricing`). Supported families: Haiku 4.5,
+  Sonnet 4.5, Sonnet 4.6, Opus 4.6, Opus 4.7. Dated snapshot IDs resolve
+  to their family entry automatically.
+- Unknown models now log a warning on startup and fall back to Sonnet-tier
+  pricing (previously cost was hardcoded to Sonnet 4.5 rates, silently
+  mis-reporting `cost_usd` for any other model).
+- Historical DB rows are not backfilled; they retain the cost that was
+  reported at the time of the original run.
+
+### Fixed
+- `cost_usd` is now correct when `CLAUDE_MODEL` is set to Haiku 4.5,
+  Opus 4.x, or Sonnet 4.6. The previous hardcoded Sonnet 4.5 formula
+  would over-report Haiku cost ~3× and under-report Opus cost ~5×.
+
 ## [0.8.0] - 2026-04-20
 
 ### Added

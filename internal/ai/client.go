@@ -6,6 +6,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,6 +22,7 @@ type Client struct {
 	countingClient *anthropic.Client
 	model          string
 	maxTokens      int // L-02 fix: configurable max tokens
+	pricing        ModelPricing
 }
 
 // Stats holds statistics about the API call
@@ -75,11 +77,18 @@ func NewClient(apiKey, model, proxyURL string, timeoutSeconds, maxTokens int) (*
 		anthropic.WithBetaVersion(anthropic.BetaTokenCounting20241101),
 	)
 
+	pricing, known := ResolvePricing(model)
+	if !known {
+		log.Printf("ai: unknown model %q — cost will be estimated using fallback pricing (%.2f/%.2f per MTok input/output); update modelPricingTable in internal/ai/pricing.go",
+			model, pricing.Input, pricing.Output)
+	}
+
 	return &Client{
 		client:         client,
 		countingClient: countingClient,
 		model:          model,
 		maxTokens:      maxTokens,
+		pricing:        pricing,
 	}, nil
 }
 
@@ -170,24 +179,13 @@ func (c *Client) buildMessagesRequest(systemPrompt, userPrompt string) anthropic
 	}
 }
 
-// calculateStats calculates cost and token statistics
+// calculateStats calculates cost and token statistics using the model-aware
+// pricing resolved at client construction time (see ResolvePricing).
 func (c *Client) calculateStats(response anthropic.MessagesResponse, durationSeconds float64) *Stats {
 	inputTokens := response.Usage.InputTokens
 	outputTokens := response.Usage.OutputTokens
-
-	// Cache tokens (may be 0 if not using cache)
 	cacheCreationTokens := response.Usage.CacheCreationInputTokens
 	cacheReadTokens := response.Usage.CacheReadInputTokens
-
-	// Calculate costs (Claude Sonnet 4.5 pricing)
-	// Input: $3/MTok, Output: $15/MTok
-	// Cache write: $3.75/MTok, Cache read: $0.30/MTok
-	inputCost := float64(inputTokens) / 1000000 * 3.0
-	outputCost := float64(outputTokens) / 1000000 * 15.0
-	cacheWriteCost := float64(cacheCreationTokens) / 1000000 * 3.75
-	cacheReadCost := float64(cacheReadTokens) / 1000000 * 0.30
-
-	totalCost := inputCost + outputCost + cacheWriteCost + cacheReadCost
 
 	return &Stats{
 		Provider:            "Anthropic",
@@ -196,7 +194,7 @@ func (c *Client) calculateStats(response anthropic.MessagesResponse, durationSec
 		OutputTokens:        outputTokens,
 		CacheCreationTokens: cacheCreationTokens,
 		CacheReadTokens:     cacheReadTokens,
-		CostUSD:             totalCost,
+		CostUSD:             c.pricing.Cost(inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens),
 		DurationSeconds:     durationSeconds,
 	}
 }

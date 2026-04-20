@@ -29,7 +29,7 @@ You are an API integration testing specialist for the logwatch-ai-go project. Th
 
 **Configuration:**
 - API Key: `ANTHROPIC_API_KEY` (must start with `sk-ant-`)
-- Model: `CLAUDE_MODEL` (default: claude-sonnet-4-5-20250929)
+- Model: `CLAUDE_MODEL` (default: claude-haiku-4-5-20251001; also supports claude-sonnet-4-6, claude-opus-4-7)
 - Timeout: `AI_TIMEOUT_SECONDS` (default: 120, range: 30-600)
 - Max Tokens: `AI_MAX_TOKENS` (default: 8000, range: 1000-16000)
 - Proxy: `HTTPS_PROXY` (optional)
@@ -37,7 +37,7 @@ You are an API integration testing specialist for the logwatch-ai-go project. Th
 **Key Features:**
 - Prompt caching (system prompt marked as ephemeral)
 - Retry logic: 3 attempts with exponential backoff (2^n seconds)
-- Cost calculation: Input ($3/MTok) + Output ($15/MTok) for Sonnet 4.5
+- Cost calculation: model-dependent per `internal/ai/pricing.go` (Haiku 4.5: $1/$5, Sonnet 4.6: $3/$15, Opus 4.7: $5/$25 per MTok)
 - Historical context: Last 7 days included in user prompt
 
 **Go Client:** `github.com/liushuangls/go-anthropic/v2`
@@ -104,7 +104,7 @@ curl https://api.anthropic.com/v1/messages \
   -H "anthropic-version: 2023-06-01" \
   -H "content-type: application/json" \
   -d '{
-    "model": "claude-sonnet-4-5-20250929",
+    "model": "claude-haiku-4-5-20251001",
     "max_tokens": 1024,
     "messages": [
       {"role": "user", "content": "Hello, Claude!"}
@@ -139,7 +139,7 @@ curl https://api.anthropic.com/v1/messages \
   -H "anthropic-version: 2023-06-01" \
   -H "content-type: application/json" \
   -d '{
-    "model": "claude-sonnet-4-5-20250929",
+    "model": "claude-haiku-4-5-20251001",
     "max_tokens": 100,
     "messages": [{"role": "user", "content": "test"}]
   }'
@@ -280,7 +280,7 @@ LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt make run
 # 2. Configure .env with test credentials
 cat > .env << EOF
 ANTHROPIC_API_KEY=sk-ant-xxxxx
-CLAUDE_MODEL=claude-sonnet-4-5-20250929
+CLAUDE_MODEL=claude-haiku-4-5-20251001
 TELEGRAM_BOT_TOKEN=123456789:ABC-DEF...
 TELEGRAM_CHANNEL_ARCHIVE_ID=-1001234567890
 TELEGRAM_CHANNEL_ALERTS_ID=-1009876543210
@@ -439,7 +439,7 @@ curl https://api.anthropic.com/v1/messages \
   -H "anthropic-version: 2023-06-01" \
   -H "content-type: application/json" \
   -d '{
-    "model": "claude-sonnet-4-5-20250929",
+    "model": "claude-haiku-4-5-20251001",
     "max_tokens": 100,
     "messages": [{"role": "user", "content": "test"}]
   }'

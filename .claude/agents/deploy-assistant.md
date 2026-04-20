@@ -108,7 +108,7 @@ sudo cp configs/.env.example /opt/logwatch-ai/.env
 ```bash
 # AI Provider Configuration
 ANTHROPIC_API_KEY=sk-ant-xxxxx                    # REQUIRED: Get from console.anthropic.com
-CLAUDE_MODEL=claude-sonnet-4-5-20250929           # Default: Sonnet 4.5
+CLAUDE_MODEL=claude-haiku-4-5-20251001            # Default: Haiku 4.5 (also: claude-sonnet-4-6, claude-opus-4-7)
 AI_TIMEOUT_SECONDS=120                             # Range: 30-600
 AI_MAX_TOKENS=8000                                 # Range: 1000-16000
 

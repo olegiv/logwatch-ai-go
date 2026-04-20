@@ -64,7 +64,7 @@ CREATE TABLE summaries (
 - **metrics**: JSON object, e.g., `{"cpu_usage": "high", "disk_space": "85%"}`
 - **input_tokens**: Tokens sent to Claude (includes prompt + context)
 - **output_tokens**: Tokens received from Claude
-- **cost_usd**: Calculated as: `(input_tokens/1M * $3) + (output_tokens/1M * $15)` for Sonnet 4.5
+- **cost_usd**: Calculated per-model via `ModelPricing.Cost()` in `internal/ai/pricing.go`; Haiku 4.5 (default) is $1/$5 per MTok input/output, Sonnet 4.6 is $3/$15
 
 ## Common Queries
 

@@ -34,7 +34,7 @@ func TestValidate(t *testing.T) {
 			name: "Valid config",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -53,7 +53,7 @@ func TestValidate(t *testing.T) {
 			name: "Missing Anthropic API Key",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
 				LogSourceType:          "logwatch",
@@ -68,7 +68,7 @@ func TestValidate(t *testing.T) {
 			name: "Invalid Anthropic API Key format",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "invalid-key",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -84,7 +84,7 @@ func TestValidate(t *testing.T) {
 			name: "Missing Telegram Bot Token",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramArchiveChannel: -1001234567890,
 				LogSourceType:          "logwatch",
@@ -99,7 +99,7 @@ func TestValidate(t *testing.T) {
 			name: "Invalid Telegram Bot Token format",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "invalid-token",
 				TelegramArchiveChannel: -1001234567890,
@@ -115,7 +115,7 @@ func TestValidate(t *testing.T) {
 			name: "Missing Telegram Archive Channel",
 			config: &Config{
 				LLMProvider:        "anthropic",
-				ClaudeModel:        "claude-sonnet-4-5-20250929",
+				ClaudeModel:        "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:    "sk-ant-test-key-1234567890",
 				TelegramBotToken:   "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				LogSourceType:      "logwatch",
@@ -130,7 +130,7 @@ func TestValidate(t *testing.T) {
 			name: "Invalid Telegram Archive Channel ID",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -99,
@@ -146,7 +146,7 @@ func TestValidate(t *testing.T) {
 			name: "Invalid Telegram Alerts Channel ID",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -163,7 +163,7 @@ func TestValidate(t *testing.T) {
 			name: "Missing logwatch output path",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -178,7 +178,7 @@ func TestValidate(t *testing.T) {
 			name: "MaxLogSizeMB too small",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -194,7 +194,7 @@ func TestValidate(t *testing.T) {
 			name: "MaxLogSizeMB too large",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -210,7 +210,7 @@ func TestValidate(t *testing.T) {
 			name: "Invalid log level",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -226,7 +226,7 @@ func TestValidate(t *testing.T) {
 			name: "Valid log level - debug",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -243,7 +243,7 @@ func TestValidate(t *testing.T) {
 			name: "Valid log level - warn",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -260,7 +260,7 @@ func TestValidate(t *testing.T) {
 			name: "Valid log level - error",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -277,7 +277,7 @@ func TestValidate(t *testing.T) {
 			name: "MaxPreprocessingTokens too small",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -295,7 +295,7 @@ func TestValidate(t *testing.T) {
 			name: "Preprocessing disabled with small tokens - valid",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -314,7 +314,7 @@ func TestValidate(t *testing.T) {
 			name: "With valid alerts channel",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -332,7 +332,7 @@ func TestValidate(t *testing.T) {
 			name: "AI timeout too small",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -350,7 +350,7 @@ func TestValidate(t *testing.T) {
 			name: "AI timeout too large",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -368,7 +368,7 @@ func TestValidate(t *testing.T) {
 			name: "AI max tokens too small",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -386,7 +386,7 @@ func TestValidate(t *testing.T) {
 			name: "AI max tokens too large",
 			config: &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -598,7 +598,7 @@ func TestTelegramTokenRegex(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       tt.token,
 				TelegramArchiveChannel: -1001234567890,
@@ -632,7 +632,7 @@ func TestLogLevelCaseInsensitive(t *testing.T) {
 		t.Run(level, func(t *testing.T) {
 			config := &Config{
 				LLMProvider:            "anthropic",
-				ClaudeModel:            "claude-sonnet-4-5-20250929",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
 				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 				TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 				TelegramArchiveChannel: -1001234567890,
@@ -765,7 +765,7 @@ func TestValidateLogSource(t *testing.T) {
 	baseConfig := func() *Config {
 		return &Config{
 			LLMProvider:            "anthropic",
-			ClaudeModel:            "claude-sonnet-4-5-20250929",
+			ClaudeModel:            "claude-haiku-4-5-20251001",
 			AnthropicAPIKey:        "sk-ant-test-key-1234567890",
 			TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
 			TelegramArchiveChannel: -1001234567890,
@@ -1282,16 +1282,16 @@ func TestGetLLMModel(t *testing.T) {
 			name: "Anthropic provider returns Claude model",
 			config: &Config{
 				LLMProvider: "anthropic",
-				ClaudeModel: "claude-sonnet-4-5-20250929",
+				ClaudeModel: "claude-haiku-4-5-20251001",
 				OllamaModel: "llama3.3:latest",
 			},
-			expectedModel: "claude-sonnet-4-5-20250929",
+			expectedModel: "claude-haiku-4-5-20251001",
 		},
 		{
 			name: "Ollama provider returns Ollama model",
 			config: &Config{
 				LLMProvider: "ollama",
-				ClaudeModel: "claude-sonnet-4-5-20250929",
+				ClaudeModel: "claude-haiku-4-5-20251001",
 				OllamaModel: "llama3.3:latest",
 			},
 			expectedModel: "llama3.3:latest",
@@ -1300,7 +1300,7 @@ func TestGetLLMModel(t *testing.T) {
 			name: "LMStudio provider returns LMStudio model",
 			config: &Config{
 				LLMProvider:   "lmstudio",
-				ClaudeModel:   "claude-sonnet-4-5-20250929",
+				ClaudeModel:   "claude-haiku-4-5-20251001",
 				LMStudioModel: "local-model",
 			},
 			expectedModel: "local-model",
@@ -1309,9 +1309,9 @@ func TestGetLLMModel(t *testing.T) {
 			name: "Unknown provider defaults to Claude model",
 			config: &Config{
 				LLMProvider: "unknown",
-				ClaudeModel: "claude-sonnet-4-5-20250929",
+				ClaudeModel: "claude-haiku-4-5-20251001",
 			},
-			expectedModel: "claude-sonnet-4-5-20250929",
+			expectedModel: "claude-haiku-4-5-20251001",
 		},
 	}
 
@@ -1345,6 +1345,60 @@ func TestValidateAnthropicMissingModel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "CLAUDE_MODEL is required") {
 		t.Errorf("Expected CLAUDE_MODEL error, got: %v", err)
+	}
+}
+
+// TestValidateAnthropicModelFormat ensures that values which are clearly not
+// Claude model IDs (e.g. an API key accidentally pasted into CLAUDE_MODEL)
+// are rejected before they can reach logs or the API.
+func TestValidateAnthropicModelFormat(t *testing.T) {
+	base := Config{
+		LLMProvider:            "anthropic",
+		AnthropicAPIKey:        "sk-ant-test-key-1234567890",
+		TelegramBotToken:       "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+		TelegramArchiveChannel: -1001234567890,
+		LogSourceType:          "logwatch",
+		LogwatchOutputPath:     "/tmp/logwatch.txt",
+		MaxLogSizeMB:           10,
+		LogLevel:               "info",
+		AITimeoutSeconds:       120,
+		AIMaxTokens:            8000,
+	}
+
+	tests := []struct {
+		name    string
+		model   string
+		wantErr bool
+	}{
+		{"haiku 4.5 dated", "claude-haiku-4-5-20251001", false},
+		{"sonnet 4.6 alias", "claude-sonnet-4-6", false},
+		{"opus 4.7 alias", "claude-opus-4-7", false},
+		{"sonnet 4.5 dated", "claude-sonnet-4-5-20250929", false},
+		{"API key shape rejected", "sk-ant-api03-abcdef1234567890", true},
+		{"uppercase rejected", "Claude-Haiku-4-5", true},
+		{"path-like rejected", "/opt/model", true},
+		{"prefix-only rejected", "claude-", true},
+		{"space rejected", "claude foo", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base
+			cfg.ClaudeModel = tt.model
+			err := cfg.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Validate() for %q: want error, got nil", tt.model)
+				}
+				if !strings.Contains(err.Error(), "CLAUDE_MODEL has invalid format") {
+					t.Errorf("Validate() for %q: want format error, got %v", tt.model, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Validate() for %q: want nil error, got %v", tt.model, err)
+			}
+		})
 	}
 }
 

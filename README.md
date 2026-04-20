@@ -11,7 +11,7 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 - **Drupal Watchdog** - PHP/Drupal application logs (JSON or drush export)
 
 **Supported LLM Providers:**
-- **Anthropic Claude** - Cloud-based AI (Claude Sonnet 4.5 default)
+- **Anthropic Claude** - Cloud-based AI (Claude Haiku 4.5 default; Sonnet 4.6 and Opus 4.7 supported)
 - **Ollama** - Local LLM inference for privacy and zero-cost operation
 - **LM Studio** - Local LLM inference with user-friendly GUI
 
@@ -83,7 +83,7 @@ LLM_PROVIDER=anthropic
 
 # Anthropic/Claude Configuration (used when LLM_PROVIDER=anthropic)
 ANTHROPIC_API_KEY=sk-ant-xxxxx
-CLAUDE_MODEL=claude-sonnet-4-5-20250929
+CLAUDE_MODEL=claude-haiku-4-5-20251001
 
 # Ollama Configuration (used when LLM_PROVIDER=ollama)
 # Requires Ollama running locally: https://ollama.ai
@@ -509,7 +509,7 @@ logwatch-ai-go/
 3. **File Reading**: Source-specific reader validates and parses log content
 4. **Preprocessing**: Large files are intelligently compressed with source-aware priority
 5. **Historical Context**: Retrieves last 7 days of analysis from database
-6. **AI Analysis**: Claude Sonnet 4.5 analyzes with source-specific prompts
+6. **AI Analysis**: Claude (Haiku 4.5 by default) analyzes with source-specific prompts
 7. **Storage**: Results saved to SQLite database
 8. **Notifications**: Sent to Telegram (archive channel always, alerts channel conditionally)
 9. **Cleanup**: Old database entries (>90 days) are removed
@@ -518,17 +518,23 @@ logwatch-ai-go/
 
 ### Anthropic Claude (Cloud)
 
-**Pricing (Sonnet 4.5):**
-- Input: $3.00 per million tokens
-- Output: $15.00 per million tokens
-- Cache write: $3.75 per million tokens
-- Cache read: $0.30 per million tokens (90% savings)
+**Pricing (per 1M tokens):**
 
-**Typical Costs:**
-- **First run**: $0.0160-0.0220 (cache creation)
-- **Cached run**: $0.0107-0.0154 (cache hits)
-- **Monthly (daily)**: ~$0.47/month
-- **Yearly**: ~$5.64/year
+| Model                         | Input | Output | Cache write | Cache read |
+|-------------------------------|------:|-------:|------------:|-----------:|
+| claude-haiku-4-5-20251001 (default) | $1  | $5   | $1.25       | $0.10      |
+| claude-sonnet-4-6             | $3    | $15    | $3.75       | $0.30      |
+| claude-opus-4-7               | $5    | $25    | $6.25       | $0.50      |
+
+Canonical pricing table lives in `internal/ai/pricing.go`.
+
+**Typical Costs (Haiku 4.5 default):**
+- **First run**: ~$0.005 (cache creation)
+- **Cached run**: ~$0.003-$0.005 (cache hits)
+- **Monthly (daily)**: ~$0.15/month
+- **Yearly**: ~$1.80/year
+
+Sonnet 4.6 multiplies these by ~3; Opus 4.7 by ~5.
 
 ### Ollama / LM Studio (Local)
 
@@ -546,7 +552,7 @@ Trade-off: Requires capable hardware (see [Ollama Setup](#ollama-setup-optional)
 🟢 Status: Good
 
 📋 Execution Stats
-• LLM: claude-sonnet-4-5-20250929 (Anthropic)
+• LLM: claude-haiku-4-5-20251001 (Anthropic)
 • Critical Issues: 0
 • Warnings: 2
 • Recommendations: 3
