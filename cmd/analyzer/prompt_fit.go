@@ -152,7 +152,7 @@ func prepareAnthropicPromptForAnalysis(
 
 		if !cfg.EnablePreprocessing {
 			return nil, fmt.Errorf(
-				"Anthropic prompt is too long and preprocessing is disabled: %d tokens > target %d",
+				"prompt is too long for Anthropic and preprocessing is disabled: %d tokens > target %d",
 				exactPromptTokens,
 				targetInputTokens,
 			)
@@ -180,7 +180,7 @@ func prepareAnthropicPromptForAnalysis(
 	}
 
 	return nil, fmt.Errorf(
-		"Anthropic prompt still exceeds context window after %d compression attempts: %d tokens > target %d",
+		"prompt still exceeds Anthropic context window after %d compression attempts: %d tokens > target %d",
 		compressionAttempts,
 		exactPromptTokens,
 		targetInputTokens,

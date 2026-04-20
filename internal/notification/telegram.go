@@ -85,12 +85,12 @@ func writeSection(msg *strings.Builder, emoji, title string, items []string, sho
 		return
 	}
 	if showCount {
-		msg.WriteString(fmt.Sprintf("%s *%s* \\(%d\\)\n", emoji, title, len(items)))
+		fmt.Fprintf(msg, "%s *%s* \\(%d\\)\n", emoji, title, len(items))
 	} else {
-		msg.WriteString(fmt.Sprintf("%s *%s*\n", emoji, title))
+		fmt.Fprintf(msg, "%s *%s*\n", emoji, title)
 	}
 	for i, item := range items {
-		msg.WriteString(fmt.Sprintf("%d\\. %s\n", i+1, escapeMarkdown(item)))
+		fmt.Fprintf(msg, "%d\\. %s\n", i+1, escapeMarkdown(item))
 	}
 	msg.WriteString("\n")
 }

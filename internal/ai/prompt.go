@@ -323,9 +323,10 @@ func extractJSON(response string) string {
 			continue
 		}
 
-		if char == '{' {
+		switch char {
+		case '{':
 			depth++
-		} else if char == '}' {
+		case '}':
 			depth--
 			if depth == 0 {
 				return response[startIdx : i+1]

@@ -365,7 +365,7 @@ func TestPreparePromptForAnalysisAnthropicStillTooLargeAfterRetries(t *testing.T
 		t.Fatal("preparePromptForAnalysis() expected error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "Anthropic prompt still exceeds context window") {
+	if !strings.Contains(err.Error(), "prompt still exceeds Anthropic context window") {
 		t.Fatalf("expected oversized prompt error, got %v", err)
 	}
 

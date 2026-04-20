@@ -924,9 +924,10 @@ func TestFormatMessage_NoEntriesReport(t *testing.T) {
 			// Test getLogSourceDisplayName which is used in the report
 			displayName := getLogSourceDisplayName(tt.logSourceType)
 			expectedDisplay := ""
-			if tt.logSourceType == "logwatch" {
+			switch tt.logSourceType {
+			case "logwatch":
 				expectedDisplay = "Logwatch"
-			} else if tt.logSourceType == "drupal_watchdog" {
+			case "drupal_watchdog":
 				expectedDisplay = "Drupal Watchdog"
 			}
 			if displayName != expectedDisplay {

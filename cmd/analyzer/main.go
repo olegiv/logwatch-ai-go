@@ -265,7 +265,6 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 	if err != nil {
 		return err
 	}
-	logContent = promptResult.LogContent
 	userPrompt := promptResult.UserPrompt
 
 	// Analyze with LLM
