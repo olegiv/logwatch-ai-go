@@ -38,6 +38,16 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: "version is required",
 		},
 		{
+			name:    "unsupported future version",
+			cfg:     Config{Version: "2.0"},
+			wantErr: `unsupported version "2.0"`,
+		},
+		{
+			name:    "unsupported arbitrary version",
+			cfg:     Config{Version: "v1"},
+			wantErr: "unsupported version",
+		},
+		{
 			name:    "blank global pattern",
 			cfg:     Config{Version: "1.0", Global: []string{"ok", ""}},
 			wantErr: "global[1]: pattern is blank",

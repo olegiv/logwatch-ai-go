@@ -49,7 +49,7 @@ If the file is absent the feature is a silent no-op.
 
 | Field     | Meaning                                                                                     |
 |-----------|---------------------------------------------------------------------------------------------|
-| `version` | Config format version. Must be `"1.0"` today. Required.                                     |
+| `version` | Config format version. Must be exactly `"1.0"`; other values fail validation. Required.     |
 | `global`  | Patterns applied to every run, regardless of log source.                                    |
 | `sites`   | Optional map keyed by Drupal site ID (from `drupal-sites.json`). Stacked on top of `global`.|
 
@@ -101,7 +101,7 @@ saw issues, even if all of them were suppressed.
 
 `exclusions.json` is validated on load. The analyzer refuses to start if:
 
-- `version` is missing.
+- `version` is missing or is anything other than `"1.0"`.
 - Any pattern is blank or whitespace-only.
 - The same pattern appears twice (case-insensitively) in the same list.
 - Any site key is empty.

@@ -28,6 +28,11 @@ import (
 // realistic use.
 const maxConfigFileSize = 1 << 20 // 1 MiB
 
+// supportedVersion is the only exclusions.json schema version this build
+// understands. Introducing a new version bumps this and adds a migration
+// path, so that a v2 file is not silently processed with v1 semantics.
+const supportedVersion = "1.0"
+
 // Config represents the parsed exclusions.json file.
 //
 // Global patterns apply to every analysis. Per-site patterns apply only
@@ -55,8 +60,12 @@ func (s FilterStats) Total() int {
 // after Load parses the file, and may also be called on hand-constructed
 // Config values in tests.
 func (c *Config) Validate() error {
-	if strings.TrimSpace(c.Version) == "" {
+	version := strings.TrimSpace(c.Version)
+	if version == "" {
 		return fmt.Errorf("version is required")
+	}
+	if version != supportedVersion {
+		return fmt.Errorf("unsupported version %q: this build only supports %q", c.Version, supportedVersion)
 	}
 
 	seen := make(map[string]struct{}, len(c.Global))
