@@ -18,6 +18,8 @@ Execute the following steps:
    cp bin/logwatch-analyzer-linux-amd64 logwatch-ai-deploy/logwatch-analyzer
    cp -r scripts logwatch-ai-deploy/
    cp configs/.env.example logwatch-ai-deploy/
+   cp configs/drupal-sites.json.example logwatch-ai-deploy/
+   cp configs/exclusions.json.example logwatch-ai-deploy/
    ```
 
 4. Set correct permissions:
@@ -54,6 +56,7 @@ Execute the following steps:
    - Extract: `tar -xzf logwatch-ai-deploy.tar.gz`
    - Install: `sudo cp logwatch-ai-deploy/logwatch-analyzer /opt/logwatch-ai/`
    - Configure: Edit `/opt/logwatch-ai/.env` with production credentials
+   - Optional: `cp exclusions.json.example /opt/logwatch-ai/exclusions.json` to enable finding-exclusion filtering (see `docs/EXCLUSIONS.md`)
    - Test: Run `/opt/logwatch-ai/logwatch-analyzer` manually
    - Schedule: Add to cron or systemd timer
 

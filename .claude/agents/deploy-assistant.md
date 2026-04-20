@@ -65,6 +65,9 @@ sudo ./scripts/install.sh
 /opt/logwatch-ai/
 ├── logwatch-analyzer          # Main binary
 ├── .env                        # Configuration (must be configured)
+├── drupal-sites.json           # Drupal multi-site config (if using Drupal source)
+├── exclusions.json.example     # Template for optional finding-exclusion filtering
+├── exclusions.json             # Active exclusions (opt-in; create from template)
 ├── data/
 │   └── summaries.db           # SQLite database (created on first run)
 ├── logs/
@@ -337,6 +340,8 @@ mkdir -p logwatch-ai-deploy
 cp bin/logwatch-analyzer-linux-amd64 logwatch-ai-deploy/logwatch-analyzer
 cp -r scripts logwatch-ai-deploy/
 cp configs/.env.example logwatch-ai-deploy/
+cp configs/drupal-sites.json.example logwatch-ai-deploy/
+cp configs/exclusions.json.example logwatch-ai-deploy/
 chmod +x logwatch-ai-deploy/logwatch-analyzer
 chmod +x logwatch-ai-deploy/scripts/*.sh
 
