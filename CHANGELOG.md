@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-20
+
 ### Changed
 
 #### Anthropic model default and cost tracking
@@ -27,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cost_usd` is now correct when `CLAUDE_MODEL` is set to Haiku 4.5,
   Opus 4.x, or Sonnet 4.6. The previous hardcoded Sonnet 4.5 formula
   would over-report Haiku cost ~3× and under-report Opus cost ~5×.
+
+### Security
+- **I-03**: Reject malformed `CLAUDE_MODEL` values at config load via a
+  `^claude-[a-z0-9-]+$` format check in `validateLLMProvider`. Prevents
+  a mis-pasted credential from flowing into the new unknown-model warning
+  logged in `ai.NewClient`. Rejects API-key shapes, uppercase, paths,
+  whitespace, and prefix-only strings.
 
 ## [0.8.0] - 2026-04-20
 
@@ -482,7 +491,9 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/olegiv/logwatch-ai-go/compare/v0.5.0...v0.5.1
