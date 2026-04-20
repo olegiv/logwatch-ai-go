@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "global": [
+    "TLS certificate validation failures",
+    "Deprecated PHP warning"
+  ],
+  "sites": {
+    "production": [
+      "cron run exceeded the time limit"
+    ],
+    "staging": [
+      "Email delivery delayed"
+    ]
+  }
+}

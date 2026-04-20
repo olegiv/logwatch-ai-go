@@ -6,15 +6,6 @@ import (
 	"testing"
 )
 
-// chatMessage represents a message with a Role field for validation.
-type chatMessage interface {
-	GetRole() string
-}
-
-// Implement GetRole for both message types
-func (m openAIMessage) GetRole() string { return m.Role }
-func (m ollamaMessage) GetRole() string { return m.Role }
-
 // chatRequest is a constraint for chat request types that can be validated.
 type chatRequest interface {
 	openAIChatRequest | ollamaChatRequest

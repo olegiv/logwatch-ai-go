@@ -60,7 +60,7 @@ func SanitizeString(s string) string {
 
 // Wrapf wraps an error with a formatted message, sanitizing any credentials in the underlying error.
 // This is a replacement for fmt.Errorf("...: %w", err) when the error may contain credentials.
-func Wrapf(err error, format string, args ...interface{}) error {
+func Wrapf(err error, format string, args ...any) error {
 	if err == nil {
 		return nil
 	}

@@ -166,7 +166,7 @@ func TestCountPromptTokens(t *testing.T) {
 	t.Run("failure sanitizes credentials", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"type": "error",
 				"error": map[string]string{
 					"type":    "invalid_request_error",
@@ -302,6 +302,14 @@ func TestCalculateStats(t *testing.T) {
 
 			if stats.OutputTokens != tt.outputTokens {
 				t.Errorf("Expected OutputTokens %d, got %d", tt.outputTokens, stats.OutputTokens)
+			}
+
+			if stats.CacheCreationTokens != tt.cacheCreate {
+				t.Errorf("Expected CacheCreationTokens %d, got %d", tt.cacheCreate, stats.CacheCreationTokens)
+			}
+
+			if stats.CacheReadTokens != tt.cacheRead {
+				t.Errorf("Expected CacheReadTokens %d, got %d", tt.cacheRead, stats.CacheReadTokens)
 			}
 
 			if stats.DurationSeconds != tt.durationSeconds {

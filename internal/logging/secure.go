@@ -98,9 +98,9 @@ func (e *SecureEvent) Msg(msg string) {
 
 // Msgf sends a formatted log event with sanitized format arguments.
 // Note: Only string arguments are sanitized; other types pass through unchanged.
-func (e *SecureEvent) Msgf(format string, v ...interface{}) {
+func (e *SecureEvent) Msgf(format string, v ...any) {
 	// Sanitize string arguments
-	sanitizedArgs := make([]interface{}, len(v))
+	sanitizedArgs := make([]any, len(v))
 	for i, arg := range v {
 		if s, ok := arg.(string); ok {
 			sanitizedArgs[i] = internalerrors.SanitizeString(s)
@@ -116,7 +116,7 @@ func (e *SecureEvent) Msgf(format string, v ...interface{}) {
 // Interface adds an interface field to the log event.
 // Warning: This does not sanitize the interface value.
 // Use Str() for string values that may contain credentials.
-func (e *SecureEvent) Interface(key string, val interface{}) *SecureEvent {
+func (e *SecureEvent) Interface(key string, val any) *SecureEvent {
 	// Try to sanitize string values
 	if s, ok := val.(string); ok {
 		e.event.Str(key, internalerrors.SanitizeString(s))

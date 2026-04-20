@@ -77,7 +77,7 @@ func (p *Preprocessor) processWithMaxTokens(content string, maxTokens int) (stri
 		priority := p.determinePriority(section.name, section.content)
 		processedContent := p.compressByPriority(section, priority)
 		if processedContent != "" {
-			result.WriteString(fmt.Sprintf("\n## %s\n", section.name))
+			fmt.Fprintf(&result, "\n## %s\n", section.name)
 			result.WriteString(processedContent)
 			result.WriteString("\n")
 		}
@@ -232,7 +232,7 @@ func (p *Preprocessor) compressByPriority(s section, priority int) string {
 	}
 
 	if keepCount < len(deduped) {
-		result.WriteString(fmt.Sprintf("\n[... %d similar entries omitted ...]\n", len(deduped)-keepCount))
+		fmt.Fprintf(&result, "\n[... %d similar entries omitted ...]\n", len(deduped)-keepCount)
 	}
 
 	return result.String()

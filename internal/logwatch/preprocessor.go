@@ -236,7 +236,7 @@ func (p *Preprocessor) deduplicateContent(content string) string {
 
 		count := lineCounts[normalized]
 		if count > 1 {
-			result.WriteString(fmt.Sprintf("%s (occurred %d times)\n", lineExamples[normalized], count))
+			fmt.Fprintf(&result, "%s (occurred %d times)\n", lineExamples[normalized], count)
 		} else {
 			result.WriteString(line + "\n")
 		}
@@ -299,7 +299,7 @@ func (p *Preprocessor) renderSections(sections []*Section, profile compressionPr
 	var result strings.Builder
 	for _, section := range sections {
 		compressedContent := p.compressContent(section.Content, p.keepRatioForPriority(section.Priority, profile))
-		result.WriteString(fmt.Sprintf("\n################### %s ###################\n", section.Name))
+		fmt.Fprintf(&result, "\n################### %s ###################\n", section.Name)
 		result.WriteString(compressedContent)
 		result.WriteString("\n")
 	}
@@ -339,7 +339,7 @@ func (p *Preprocessor) compressContent(content string, keepRatio float64) string
 	}
 
 	if keepCount < len(lines) {
-		result.WriteString(fmt.Sprintf("\n[... %d more lines omitted for brevity ...]\n", len(lines)-keepCount))
+		fmt.Fprintf(&result, "\n[... %d more lines omitted for brevity ...]\n", len(lines)-keepCount)
 	}
 
 	return result.String()
@@ -349,7 +349,7 @@ func (p *Preprocessor) aggressiveCompress(sections []*Section) string {
 	var result strings.Builder
 
 	for _, section := range sections {
-		result.WriteString(fmt.Sprintf("\n################### %s ###################\n", section.Name))
+		fmt.Fprintf(&result, "\n################### %s ###################\n", section.Name)
 		result.WriteString(p.extractEssentialLines(section))
 		result.WriteString("\n")
 	}
@@ -394,10 +394,7 @@ func (p *Preprocessor) extractEssentialLines(section *Section) string {
 		}
 	}
 
-	startLast := len(lines) - 2
-	if startLast < 0 {
-		startLast = 0
-	}
+	startLast := max(len(lines)-2, 0)
 	for i := startLast; i < len(lines); i++ {
 		appendLine(lines[i])
 	}

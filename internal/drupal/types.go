@@ -130,15 +130,15 @@ type WatchdogReport struct {
 	GeneratedAt time.Time `json:"generated_at"`
 
 	// PeriodStart is the start of the reporting period
-	PeriodStart time.Time `json:"period_start,omitempty"`
+	PeriodStart time.Time `json:"period_start,omitzero"`
 
 	// PeriodEnd is the end of the reporting period
-	PeriodEnd time.Time `json:"period_end,omitempty"`
+	PeriodEnd time.Time `json:"period_end,omitzero"`
 }
 
 // Stats returns statistics about the watchdog entries.
-func (r *WatchdogReport) Stats() map[string]interface{} {
-	stats := map[string]interface{}{
+func (r *WatchdogReport) Stats() map[string]any {
+	stats := map[string]any{
 		"total_entries": len(r.Entries),
 	}
 

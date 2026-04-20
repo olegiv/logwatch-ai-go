@@ -13,12 +13,12 @@ import (
 
 // Analysis represents the structured analysis result from Claude
 type Analysis struct {
-	SystemStatus    string                 `json:"systemStatus"`
-	Summary         string                 `json:"summary"`
-	CriticalIssues  []string               `json:"criticalIssues"`
-	Warnings        []string               `json:"warnings"`
-	Recommendations []string               `json:"recommendations"`
-	Metrics         map[string]interface{} `json:"metrics"`
+	SystemStatus    string         `json:"systemStatus"`
+	Summary         string         `json:"summary"`
+	CriticalIssues  []string       `json:"criticalIssues"`
+	Warnings        []string       `json:"warnings"`
+	Recommendations []string       `json:"recommendations"`
+	Metrics         map[string]any `json:"metrics"`
 }
 
 // GetSystemPrompt returns the system prompt with cache control
@@ -255,7 +255,7 @@ func validateAnalysis(analysis *Analysis) error {
 		analysis.Recommendations = []string{}
 	}
 	if analysis.Metrics == nil {
-		analysis.Metrics = make(map[string]interface{})
+		analysis.Metrics = make(map[string]any)
 	}
 
 	return nil
@@ -323,9 +323,10 @@ func extractJSON(response string) string {
 			continue
 		}
 
-		if char == '{' {
+		switch char {
+		case '{':
 			depth++
-		} else if char == '}' {
+		case '}':
 			depth--
 			if depth == 0 {
 				return response[startIdx : i+1]

@@ -56,3 +56,8 @@ Thumbs.db
 # Drupal configuration (except testdata)
 drupal-sites.json
 !testdata/**/drupal-sites.json
+
+# Finding exclusions (operator-specific; may leak internal error strings)
+exclusions.json
+!testdata/**/exclusions.json
+!configs/exclusions.json.example

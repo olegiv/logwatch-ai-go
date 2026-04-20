@@ -37,7 +37,7 @@ type LogReader interface {
 
 	// GetSourceInfo returns metadata about the log source.
 	// Common keys: size_bytes, size_mb, modified, age_hours
-	GetSourceInfo(sourcePath string) (map[string]interface{}, error)
+	GetSourceInfo(sourcePath string) (map[string]any, error)
 }
 
 // Preprocessor handles content preprocessing for large logs.

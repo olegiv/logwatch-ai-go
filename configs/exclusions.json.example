@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "global": [
+    "TLS certificate validation failures"
+  ],
+  "sites": {
+    "production": [
+      "cron run exceeded the time limit"
+    ],
+    "staging": [
+      "Email delivery delayed"
+    ]
+  }
+}

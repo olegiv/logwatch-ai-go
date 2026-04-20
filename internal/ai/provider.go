@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Oleg Ivanchenko
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// Package ai exposes LLM provider clients (Anthropic, Ollama, LM Studio)
+// and shared prompt, parsing, and token-counting helpers.
 package ai
 
 import "context"
@@ -11,7 +13,7 @@ type Provider interface {
 	Analyze(ctx context.Context, systemPrompt, userPrompt string) (*Analysis, *Stats, error)
 
 	// GetModelInfo returns information about the configured model
-	GetModelInfo() map[string]interface{}
+	GetModelInfo() map[string]any
 
 	// GetProviderName returns the name of the provider (e.g., "Anthropic", "Ollama")
 	GetProviderName() string

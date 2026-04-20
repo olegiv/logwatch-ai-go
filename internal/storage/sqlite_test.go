@@ -101,7 +101,7 @@ func TestSaveSummary(t *testing.T) {
 		Recommendations: []string{
 			"Recommendation 1",
 		},
-		Metrics: map[string]interface{}{
+		Metrics: map[string]any{
 			"failedLogins": float64(5),
 			"diskUsage":    "85%",
 		},
@@ -140,7 +140,7 @@ func TestGetRecentSummaries(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.01,
@@ -152,7 +152,7 @@ func TestGetRecentSummaries(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.01,
@@ -164,7 +164,7 @@ func TestGetRecentSummaries(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.01,
@@ -217,7 +217,7 @@ func TestGetHistoricalContext(t *testing.T) {
 			"Warning 2",
 		},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 		InputTokens:     1000,
 		OutputTokens:    500,
 		CostUSD:         0.01,
@@ -296,7 +296,7 @@ func TestCleanupOldSummaries(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.01,
@@ -308,7 +308,7 @@ func TestCleanupOldSummaries(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.01,
@@ -365,7 +365,7 @@ func TestGetStatistics(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.01,
@@ -377,7 +377,7 @@ func TestGetStatistics(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.02,
@@ -389,7 +389,7 @@ func TestGetStatistics(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.015,
@@ -512,7 +512,7 @@ func TestSummaryStructure(t *testing.T) {
 		Recommendations: []string{
 			"Rec 1",
 		},
-		Metrics: map[string]interface{}{
+		Metrics: map[string]any{
 			"failedLogins": float64(5),
 		},
 		InputTokens:  1000,
@@ -524,16 +524,44 @@ func TestSummaryStructure(t *testing.T) {
 		t.Error("ID not set correctly")
 	}
 
+	if summary.Timestamp.IsZero() {
+		t.Error("Timestamp not set correctly")
+	}
+
 	if summary.SystemStatus != "Good" {
 		t.Error("SystemStatus not set correctly")
+	}
+
+	if summary.Summary != "Test" {
+		t.Error("Summary not set correctly")
 	}
 
 	if len(summary.CriticalIssues) != 1 {
 		t.Error("CriticalIssues not set correctly")
 	}
 
+	if len(summary.Warnings) != 1 {
+		t.Error("Warnings not set correctly")
+	}
+
+	if len(summary.Recommendations) != 1 {
+		t.Error("Recommendations not set correctly")
+	}
+
+	if summary.Metrics["failedLogins"] != float64(5) {
+		t.Error("Metrics not set correctly")
+	}
+
 	if summary.InputTokens != 1000 {
 		t.Error("InputTokens not set correctly")
+	}
+
+	if summary.OutputTokens != 500 {
+		t.Error("OutputTokens not set correctly")
+	}
+
+	if summary.CostUSD != 0.01 {
+		t.Error("CostUSD not set correctly")
 	}
 }
 
@@ -565,7 +593,7 @@ func TestSaveAndRetrieveSummary(t *testing.T) {
 			"Recommendation 1",
 			"Recommendation 2",
 		},
-		Metrics: map[string]interface{}{
+		Metrics: map[string]any{
 			"failedLogins": float64(10),
 			"diskUsage":    "75%",
 			"errorCount":   float64(0),
@@ -639,7 +667,7 @@ func TestInitSchema(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 		InputTokens:     100,
 		OutputTokens:    50,
 		CostUSD:         0.001,
@@ -714,7 +742,7 @@ func TestDatabaseConnectionPoolSettings(t *testing.T) {
 
 	// Verify database is working with configured pool settings
 	// by performing multiple operations
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		summary := &Summary{
 			Timestamp:       time.Now(),
 			SystemStatus:    "Good",
@@ -722,7 +750,7 @@ func TestDatabaseConnectionPoolSettings(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     100,
 			OutputTokens:    50,
 			CostUSD:         0.001,
@@ -770,7 +798,7 @@ func TestSaveAndRetrieveWithSourceFilter(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.01,
@@ -784,7 +812,7 @@ func TestSaveAndRetrieveWithSourceFilter(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{"Warning 1"},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     2000,
 			OutputTokens:    1000,
 			CostUSD:         0.02,
@@ -798,7 +826,7 @@ func TestSaveAndRetrieveWithSourceFilter(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1500,
 			OutputTokens:    750,
 			CostUSD:         0.015,
@@ -892,7 +920,7 @@ func TestGetHistoricalContextWithFilter(t *testing.T) {
 		CriticalIssues:  []string{"Logwatch issue"},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 		InputTokens:     1000,
 		OutputTokens:    500,
 		CostUSD:         0.01,
@@ -907,7 +935,7 @@ func TestGetHistoricalContextWithFilter(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{"Drupal warning"},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 		InputTokens:     2000,
 		OutputTokens:    1000,
 		CostUSD:         0.02,
@@ -978,7 +1006,7 @@ func TestGetStatisticsWithFilter(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.01,
@@ -992,7 +1020,7 @@ func TestGetStatisticsWithFilter(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     1000,
 			OutputTokens:    500,
 			CostUSD:         0.02,
@@ -1006,7 +1034,7 @@ func TestGetStatisticsWithFilter(t *testing.T) {
 			CriticalIssues:  []string{},
 			Warnings:        []string{},
 			Recommendations: []string{},
-			Metrics:         map[string]interface{}{},
+			Metrics:         map[string]any{},
 			InputTokens:     2000,
 			OutputTokens:    1000,
 			CostUSD:         0.05,
@@ -1082,7 +1110,7 @@ func TestSaveWithDefaultLogSourceType(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 		InputTokens:     1000,
 		OutputTokens:    500,
 		CostUSD:         0.01,

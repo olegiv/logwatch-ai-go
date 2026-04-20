@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/liushuangls/go-anthropic/v2"
@@ -100,15 +101,15 @@ func (c *Client) Analyze(ctx context.Context, systemPrompt, userPrompt string) (
 		return nil, nil, fmt.Errorf("empty response from Claude")
 	}
 
-	responseText := ""
+	var responseText strings.Builder
 	for _, content := range response.Content {
 		if content.Type == "text" && content.Text != nil {
-			responseText += *content.Text
+			responseText.WriteString(*content.Text)
 		}
 	}
 
 	// Parse analysis
-	analysis, err := ParseAnalysis(responseText)
+	analysis, err := ParseAnalysis(responseText.String())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse analysis: %w", err)
 	}
@@ -201,8 +202,8 @@ func (c *Client) calculateStats(response anthropic.MessagesResponse, durationSec
 }
 
 // GetModelInfo returns information about the configured model
-func (c *Client) GetModelInfo() map[string]interface{} {
-	return map[string]interface{}{
+func (c *Client) GetModelInfo() map[string]any {
+	return map[string]any{
 		"model":         c.model,
 		"provider":      "Anthropic",
 		"max_tokens":    c.maxTokens, // L-02 fix: use configurable value

@@ -35,6 +35,16 @@ if ! [[ "$DETAIL_LEVEL" =~ ^[0-9]+$ ]] || [ "$DETAIL_LEVEL" -lt 0 ] || [ "$DETAI
     exit 1
 fi
 
+# Validate range against the set logwatch accepts. An unvalidated positional
+# argument would otherwise be forwarded verbatim to `logwatch --range`.
+case "$RANGE" in
+    yesterday|today|all|help) ;;
+    *)
+        echo "ERROR: Range must be one of: yesterday, today, all, help (got: $RANGE)"
+        exit 1
+        ;;
+esac
+
 # Auto-detect logwatch location
 if [ -f "/opt/local/bin/logwatch" ]; then
     LOGWATCH_BIN="/opt/local/bin/logwatch"  # macOS (MacPorts)

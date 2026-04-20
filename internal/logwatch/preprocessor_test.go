@@ -538,10 +538,7 @@ func TestTokenEstimationAlgorithm(t *testing.T) {
 				charsEstimate := chars / 4
 				wordsEstimate := int(float64(words) / 0.75)
 
-				expected := charsEstimate
-				if wordsEstimate > charsEstimate {
-					expected = wordsEstimate
-				}
+				expected := max(wordsEstimate, charsEstimate)
 
 				if tokens != expected {
 					t.Errorf("Token estimation mismatch: got %d, expected %d (chars=%d, words=%d)",
@@ -638,16 +635,16 @@ func TestProcessWithBudget_AggressiveCompress(t *testing.T) {
 	// Many unique lines so dedup and standard profiles can't shrink enough.
 	var sb strings.Builder
 	sb.WriteString("################### SSH Security ###################\n")
-	for i := 0; i < 200; i++ {
-		sb.WriteString(fmt.Sprintf("Failed login attempt %d from 10.0.0.%d error denied\n", i, i%256))
+	for i := range 200 {
+		fmt.Fprintf(&sb, "Failed login attempt %d from 10.0.0.%d error denied\n", i, i%256)
 	}
 	sb.WriteString("\n################### Network ###################\n")
-	for i := 0; i < 200; i++ {
-		sb.WriteString(fmt.Sprintf("Network warning on interface eth%d, packet loss %d%%\n", i, i%100))
+	for i := range 200 {
+		fmt.Fprintf(&sb, "Network warning on interface eth%d, packet loss %d%%\n", i, i%100)
 	}
 	sb.WriteString("\n################### General ###################\n")
-	for i := 0; i < 300; i++ {
-		sb.WriteString(fmt.Sprintf("Service check %d completed at node-%d\n", i, i%50))
+	for i := range 300 {
+		fmt.Fprintf(&sb, "Service check %d completed at node-%d\n", i, i%50)
 	}
 
 	content := sb.String()
@@ -707,7 +704,7 @@ func TestExtractEssentialLines_LongSection(t *testing.T) {
 	var lines []string
 	lines = append(lines, "first line")
 	lines = append(lines, "second line")
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		lines = append(lines, fmt.Sprintf("routine line %d", i))
 	}
 	lines = append(lines, "error detected on disk sda")
@@ -754,7 +751,7 @@ func TestTrimToTokenBudget(t *testing.T) {
 
 	t.Run("trims large content", func(t *testing.T) {
 		var lines []string
-		for i := 0; i < 500; i++ {
+		for i := range 500 {
 			lines = append(lines, fmt.Sprintf("log entry number %d with some additional text here", i))
 		}
 		content := strings.Join(lines, "\n")

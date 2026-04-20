@@ -11,6 +11,7 @@ import (
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 	"github.com/olegiv/logwatch-ai-go/internal/config"
+	internalerrors "github.com/olegiv/logwatch-ai-go/internal/errors"
 	"github.com/olegiv/logwatch-ai-go/internal/logging"
 )
 
@@ -74,10 +75,7 @@ func prepareAnthropicPromptForAnalysis(
 	log *logging.SecureLogger,
 ) (*promptPreparationResult, error) {
 	contextLimit := analyzer.ContextLimitFromModelInfo(llmClient.GetModelInfo())
-	targetInputTokens := contextLimit - cfg.AIMaxTokens - anthropicPromptSafetyMarginTokens
-	if targetInputTokens < 1 {
-		targetInputTokens = 1
-	}
+	targetInputTokens := max(contextLimit-cfg.AIMaxTokens-anthropicPromptSafetyMarginTokens, 1)
 
 	baseUserPrompt := logSource.PromptBuilder.GetUserPrompt("", historicalContext)
 	exactBasePromptTokens, err := counter.CountPromptTokens(ctx, systemPrompt, baseUserPrompt)
@@ -89,10 +87,7 @@ func prepareAnthropicPromptForAnalysis(
 		return prepareHeuristicPromptForAnalysis(cfg, llmClient, logSource, systemPrompt, rawLogContent, historicalContext, log)
 	}
 
-	targetLogTokensExact := targetInputTokens - exactBasePromptTokens
-	if targetLogTokensExact < minPromptFitLogBudget {
-		targetLogTokensExact = minPromptFitLogBudget
-	}
+	targetLogTokensExact := max(targetInputTokens-exactBasePromptTokens, minPromptFitLogBudget)
 
 	if log != nil {
 		log.Info().
@@ -117,7 +112,7 @@ func prepareAnthropicPromptForAnalysis(
 			compressionAttempts,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("preprocessing failed: %w", err)
+			return nil, internalerrors.Wrapf(err, "preprocessing failed")
 		}
 
 		userPrompt = logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext)
@@ -152,7 +147,7 @@ func prepareAnthropicPromptForAnalysis(
 
 		if !cfg.EnablePreprocessing {
 			return nil, fmt.Errorf(
-				"Anthropic prompt is too long and preprocessing is disabled: %d tokens > target %d",
+				"prompt is too long for Anthropic and preprocessing is disabled: %d tokens > target %d",
 				exactPromptTokens,
 				targetInputTokens,
 			)
@@ -162,10 +157,7 @@ func prepareAnthropicPromptForAnalysis(
 			break
 		}
 
-		actualLogTokens := exactPromptTokens - exactBasePromptTokens
-		if actualLogTokens < 1 {
-			actualLogTokens = 1
-		}
+		actualLogTokens := max(exactPromptTokens-exactBasePromptTokens, 1)
 
 		nextBudget := int(math.Floor(
 			float64(currentBudget) *
@@ -180,7 +172,7 @@ func prepareAnthropicPromptForAnalysis(
 	}
 
 	return nil, fmt.Errorf(
-		"Anthropic prompt still exceeds context window after %d compression attempts: %d tokens > target %d",
+		"prompt still exceeds Anthropic context window after %d compression attempts: %d tokens > target %d",
 		compressionAttempts,
 		exactPromptTokens,
 		targetInputTokens,
@@ -229,7 +221,7 @@ func prepareHeuristicPromptForAnalysis(
 			0,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("preprocessing failed: %w", err)
+			return nil, internalerrors.Wrapf(err, "preprocessing failed")
 		}
 
 		logContent = processedLogContent

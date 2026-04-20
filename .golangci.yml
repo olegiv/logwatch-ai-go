@@ -1,0 +1,62 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - errorlint
+    - gocritic
+    - modernize
+    - unconvert
+    - unparam
+    - usetesting
+    - misspell
+    - revive
+    - dupl
+    - gocyclo
+
+  settings:
+    staticcheck:
+      checks:
+        - all
+
+    govet:
+      enable:
+        - unusedwrite
+
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+
+    revive:
+      rules:
+        - name: var-naming
+        - name: indent-error-flow
+        - name: errorf
+
+    gocyclo:
+      min-complexity: 20
+
+    dupl:
+      threshold: 150
+
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+    rules:
+      - linters: [unparam, dupl]
+        path: _test\.go
+      - linters: [gocyclo]
+        path: cmd/analyzer/main\.go
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

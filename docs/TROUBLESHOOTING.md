@@ -156,6 +156,24 @@ Configuration error: TELEGRAM_CHANNEL_ARCHIVE_ID must be less than -100 (supergr
 # ✅ Correct: -1001234567890
 ```
 
+### Exclusions Not Being Applied
+
+**Symptom:** A finding you listed in `exclusions.json` still shows up in Telegram or the database.
+
+**Causes and fixes:**
+
+1. **File not in a search path.** Auto-discovery looks at `./exclusions.json`, `./configs/exclusions.json`, `/opt/logwatch-ai/exclusions.json`, and `~/.config/logwatch-ai/exclusions.json`. Confirm location or pass `-exclusions-config /absolute/path/exclusions.json`.
+
+2. **Pattern does not appear in the finding text.** Match is case-insensitive *substring*, not semantic. Check what the LLM actually produced — e.g. via `sqlite3 /opt/logwatch-ai/data/summaries.db 'select critical_issues from summaries order by id desc limit 1;'` — then refine the pattern.
+
+3. **Site-scoped pattern but no `-drupal-site`.** Patterns under `sites.<id>` only apply when the analyzer is invoked with the matching `-drupal-site <id>`. For logwatch runs, only `global` applies.
+
+4. **Config failed to load.** The startup log prints `Loaded finding exclusions` with the path when the file is active. If that line is missing, check the analyzer's log for a `failed to load exclusions config` error.
+
+See `docs/EXCLUSIONS.md` for the full spec.
+
+---
+
 ### Environment Variables Not Loading from .env File (v0.2.0+)
 
 **Symptom:** Settings in .env file are ignored, using OS environment variables instead.

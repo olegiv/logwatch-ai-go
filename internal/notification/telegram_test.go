@@ -29,7 +29,7 @@ func TestFormatMessage(t *testing.T) {
 			"Run command: apt-get update",
 			"Check disk space at 85.5%",
 		},
-		Metrics: map[string]interface{}{
+		Metrics: map[string]any{
 			"failedLogins": 5,
 			"diskUsage":    "85.5% on /var",
 			"errorCount":   0,
@@ -191,7 +191,7 @@ func TestFormatMessage_EmptyFields(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 	}
 
 	stats := &ai.Stats{
@@ -231,7 +231,7 @@ func TestFormatMessage_WithCacheTokens(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 	}
 
 	stats := &ai.Stats{
@@ -262,7 +262,7 @@ func TestFormatMessage_WithoutCacheTokens(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 	}
 
 	stats := &ai.Stats{
@@ -297,7 +297,7 @@ func TestFormatMessage_AllStatuses(t *testing.T) {
 				CriticalIssues:  []string{},
 				Warnings:        []string{},
 				Recommendations: []string{},
-				Metrics:         map[string]interface{}{},
+				Metrics:         map[string]any{},
 			}
 
 			stats := &ai.Stats{
@@ -364,7 +364,7 @@ func TestFormatMessage_MultipleIssues(t *testing.T) {
 			"Fix issue 2",
 			"Fix issue 3",
 		},
-		Metrics: map[string]interface{}{
+		Metrics: map[string]any{
 			"failedLogins": float64(10),
 			"errorCount":   float64(5),
 			"diskUsage":    "95%",
@@ -501,7 +501,7 @@ func TestFormatMessage_DrupalWatchdogHeader(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 	}
 
 	stats := &ai.Stats{
@@ -530,7 +530,7 @@ func TestFormatMessage_WithSiteName(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 	}
 
 	stats := &ai.Stats{
@@ -565,7 +565,7 @@ func TestFormatMessage_WithoutSiteName(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 	}
 
 	stats := &ai.Stats{
@@ -785,7 +785,7 @@ func TestFormatMessage_Provider(t *testing.T) {
 		CriticalIssues:  []string{},
 		Warnings:        []string{},
 		Recommendations: []string{},
-		Metrics:         map[string]interface{}{},
+		Metrics:         map[string]any{},
 	}
 
 	tests := []struct {
@@ -924,9 +924,10 @@ func TestFormatMessage_NoEntriesReport(t *testing.T) {
 			// Test getLogSourceDisplayName which is used in the report
 			displayName := getLogSourceDisplayName(tt.logSourceType)
 			expectedDisplay := ""
-			if tt.logSourceType == "logwatch" {
+			switch tt.logSourceType {
+			case "logwatch":
 				expectedDisplay = "Logwatch"
-			} else if tt.logSourceType == "drupal_watchdog" {
+			case "drupal_watchdog":
 				expectedDisplay = "Drupal Watchdog"
 			}
 			if displayName != expectedDisplay {

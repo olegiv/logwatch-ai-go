@@ -69,6 +69,13 @@ else
     echo_info "drupal-sites.json file already exists, skipping"
 fi
 
+# Install exclusions.json.example as a reference. The exclusions feature is
+# opt-in: operators must explicitly rename/copy this to exclusions.json to
+# activate it, so we never auto-create the active config.
+echo_info "Copying exclusions.json.example reference..."
+cp "configs/exclusions.json.example" "$INSTALL_DIR/exclusions.json.example"
+chmod 644 "$INSTALL_DIR/exclusions.json.example"
+
 # Set ownership
 echo_info "Setting ownership to $SERVICE_USER..."
 chown -R "$SERVICE_USER:$(id -gn "$SERVICE_USER")" "$INSTALL_DIR"
@@ -81,8 +88,11 @@ echo_info ""
 echo_info "Next steps:"
 echo_info "1. Configure $INSTALL_DIR/.env with your API credentials"
 echo_info "2. For Drupal: Edit $INSTALL_DIR/drupal-sites.json with your sites"
-echo_info "3. Test the analyzer: $BINARY_NAME"
-echo_info "4. Set up cron jobs (see docs/CRON_SETUP.md)"
+echo_info "3. Optional: to suppress known-acceptable findings, copy"
+echo_info "   $INSTALL_DIR/exclusions.json.example to $INSTALL_DIR/exclusions.json"
+echo_info "   and edit patterns (see docs/EXCLUSIONS.md)"
+echo_info "4. Test the analyzer: $BINARY_NAME"
+echo_info "5. Set up cron jobs (see docs/CRON_SETUP.md)"
 echo_info ""
 echo_info "Cron setup for Logwatch (as root):"
 echo_info "  0 2 * * * $INSTALL_DIR/scripts/generate-logwatch.sh"

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -17,10 +18,8 @@ func checkError(t *testing.T, err error, expectError bool, errorContains string)
 		if errorContains != "" && !strings.Contains(err.Error(), errorContains) {
 			t.Errorf("Expected error to contain '%s', got '%s'", errorContains, err.Error())
 		}
-	} else {
-		if err != nil {
-			t.Errorf("Unexpected error: %v", err)
-		}
+	} else if err != nil {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
@@ -981,6 +980,7 @@ func TestCLIOptionsStructure(t *testing.T) {
 		DrupalSite:        "production",
 		DrupalSitesConfig: "/etc/drupal-sites.json",
 		ListDrupalSites:   true,
+		ExclusionsConfig:  "/etc/exclusions.json",
 		ShowHelp:          true,
 		ShowVersion:       true,
 	}
@@ -996,6 +996,9 @@ func TestCLIOptionsStructure(t *testing.T) {
 	}
 	if opts.DrupalSitesConfig != "/etc/drupal-sites.json" {
 		t.Errorf("DrupalSitesConfig not set correctly")
+	}
+	if opts.ExclusionsConfig != "/etc/exclusions.json" {
+		t.Errorf("ExclusionsConfig not set correctly")
 	}
 	if !opts.ListDrupalSites {
 		t.Errorf("ListDrupalSites not set correctly")
@@ -1023,6 +1026,9 @@ func TestCLIOptionsDefaults(t *testing.T) {
 	}
 	if opts.DrupalSitesConfig != "" {
 		t.Errorf("Expected empty DrupalSitesConfig by default, got %q", opts.DrupalSitesConfig)
+	}
+	if opts.ExclusionsConfig != "" {
+		t.Errorf("Expected empty ExclusionsConfig by default, got %q", opts.ExclusionsConfig)
 	}
 	if opts.ListDrupalSites {
 		t.Errorf("Expected ListDrupalSites to be false by default")
@@ -1340,4 +1346,53 @@ func TestValidateAnthropicMissingModel(t *testing.T) {
 	if !strings.Contains(err.Error(), "CLAUDE_MODEL is required") {
 		t.Errorf("Expected CLAUDE_MODEL error, got: %v", err)
 	}
+}
+
+func TestApplyExclusionsConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	goodPath := filepath.Join(tmpDir, "exclusions.json")
+	goodContent := `{"version":"1.0","global":["TLS cert"]}`
+	if err := os.WriteFile(goodPath, []byte(goodContent), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	t.Run("loads config when CLI path provided", func(t *testing.T) {
+		cfg := &Config{}
+		if err := cfg.applyExclusionsConfig(&CLIOptions{ExclusionsConfig: goodPath}); err != nil {
+			t.Fatalf("applyExclusionsConfig: %v", err)
+		}
+		if cfg.Exclusions == nil {
+			t.Fatal("Exclusions = nil, want non-nil")
+		}
+		if cfg.ExclusionsConfigPath != goodPath {
+			t.Errorf("ExclusionsConfigPath = %q, want %q", cfg.ExclusionsConfigPath, goodPath)
+		}
+		if len(cfg.Exclusions.Global) != 1 {
+			t.Errorf("len(Global) = %d, want 1", len(cfg.Exclusions.Global))
+		}
+	})
+
+	t.Run("nil CLI does not error when no config discoverable", func(t *testing.T) {
+		t.Setenv("HOME", "/nonexistent-home-for-exclusions-config-test")
+		t.Chdir(t.TempDir())
+
+		cfg := &Config{}
+		if err := cfg.applyExclusionsConfig(nil); err != nil {
+			t.Fatalf("applyExclusionsConfig: %v", err)
+		}
+		if cfg.Exclusions != nil {
+			t.Errorf("Exclusions = %+v, want nil", cfg.Exclusions)
+		}
+	})
+
+	t.Run("explicit missing path is hard error", func(t *testing.T) {
+		cfg := &Config{}
+		err := cfg.applyExclusionsConfig(&CLIOptions{ExclusionsConfig: "/no/such/file.json"})
+		if err == nil {
+			t.Fatal("expected error for missing explicit path")
+		}
+		if !strings.Contains(err.Error(), "failed to load exclusions config") {
+			t.Errorf("error = %v, want wrapped 'failed to load exclusions config'", err)
+		}
+	})
 }

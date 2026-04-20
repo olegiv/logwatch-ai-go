@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Oleg Ivanchenko
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// Package config loads runtime configuration from environment variables
+// and optional JSON side-files (drupal-sites.json, exclusions.json).
 package config
 
 import (
@@ -13,6 +15,8 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
+
+	"github.com/olegiv/logwatch-ai-go/internal/exclusions"
 )
 
 // CLIOptions holds command-line argument overrides
@@ -22,6 +26,7 @@ type CLIOptions struct {
 	DrupalSite        string // -drupal-site: Drupal site ID from drupal-sites.json
 	DrupalSitesConfig string // -drupal-sites-config: path to drupal-sites.json
 	ListDrupalSites   bool   // -list-drupal-sites: list available sites and exit
+	ExclusionsConfig  string // -exclusions-config: path to exclusions.json
 	ShowHelp          bool   // -help: show usage
 	ShowVersion       bool   // -version: show version
 }
@@ -35,6 +40,7 @@ func ParseCLI() *CLIOptions {
 	flag.StringVar(&opts.DrupalSite, "drupal-site", "", "Drupal site ID from drupal-sites.json (for multi-site deployments)")
 	flag.StringVar(&opts.DrupalSitesConfig, "drupal-sites-config", "", "Path to drupal-sites.json configuration file")
 	flag.BoolVar(&opts.ListDrupalSites, "list-drupal-sites", false, "List available Drupal sites from drupal-sites.json and exit")
+	flag.StringVar(&opts.ExclusionsConfig, "exclusions-config", "", "Path to exclusions.json configuration file")
 	flag.BoolVar(&opts.ShowHelp, "help", false, "Show usage information")
 	flag.BoolVar(&opts.ShowHelp, "h", false, "Show usage information (shorthand)")
 	flag.BoolVar(&opts.ShowVersion, "version", false, "Show version information")
@@ -105,6 +111,10 @@ type Config struct {
 	DrupalSiteID          string             // Selected site ID from drupal-sites.json
 	DrupalSitesConfig     *DrupalSitesConfig // Loaded multi-site config (nil if single-site mode)
 	DrupalSitesConfigPath string             // Path to drupal-sites.json (if used)
+
+	// Finding exclusions (loaded from exclusions.json, nil if feature not used)
+	Exclusions           *exclusions.Config
+	ExclusionsConfigPath string
 
 	// Common Log Settings
 	MaxLogSizeMB int
@@ -203,12 +213,40 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 		return nil, err
 	}
 
+	// Load optional finding exclusions
+	if err := config.applyExclusionsConfig(cli); err != nil {
+		return nil, err
+	}
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
 	return config, nil
+}
+
+// applyExclusionsConfig loads exclusions.json (if present) and attaches
+// the parsed Config. A missing file without an explicit CLI path is not
+// an error: the feature is opt-in. An explicit -exclusions-config path
+// that cannot be read is a hard error so typos fail fast.
+func (c *Config) applyExclusionsConfig(cli *CLIOptions) error {
+	var explicitPath string
+	if cli != nil {
+		explicitPath = cli.ExclusionsConfig
+	}
+
+	cfg, foundPath, err := exclusions.Load(explicitPath)
+	if err != nil {
+		return fmt.Errorf("failed to load exclusions config: %w", err)
+	}
+	if cfg == nil {
+		return nil
+	}
+
+	c.Exclusions = cfg
+	c.ExclusionsConfigPath = foundPath
+	return nil
 }
 
 // applyDrupalMultiSiteConfig loads and applies Drupal site configuration from drupal-sites.json

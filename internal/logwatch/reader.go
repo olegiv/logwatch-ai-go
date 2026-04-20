@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Oleg Ivanchenko
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// Package logwatch reads and preprocesses Linux logwatch reports for LLM analysis.
 package logwatch
 
 import (
@@ -94,6 +95,7 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 }
 
 // ReadLogwatchOutput reads and processes the logwatch output file.
+//
 // Deprecated: Use Read() instead. This method is kept for backward compatibility.
 func (r *Reader) ReadLogwatchOutput(filePath string) (string, error) {
 	return r.Read(filePath)
@@ -122,13 +124,13 @@ func (r *Reader) validateContent(content string) error {
 
 // GetSourceInfo implements analyzer.LogReader.GetSourceInfo.
 // Returns metadata about the logwatch file.
-func (r *Reader) GetSourceInfo(sourcePath string) (map[string]interface{}, error) {
+func (r *Reader) GetSourceInfo(sourcePath string) (map[string]any, error) {
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		return nil, err
 	}
 
-	info := map[string]interface{}{
+	info := map[string]any{
 		"size_bytes": fileInfo.Size(),
 		"size_mb":    float64(fileInfo.Size()) / 1024 / 1024,
 		"modified":   fileInfo.ModTime(),
@@ -139,7 +141,8 @@ func (r *Reader) GetSourceInfo(sourcePath string) (map[string]interface{}, error
 }
 
 // GetFileInfo returns information about the logwatch file.
+//
 // Deprecated: Use GetSourceInfo() instead. This method is kept for backward compatibility.
-func (r *Reader) GetFileInfo(filePath string) (map[string]interface{}, error) {
+func (r *Reader) GetFileInfo(filePath string) (map[string]any, error) {
 	return r.GetSourceInfo(filePath)
 }
