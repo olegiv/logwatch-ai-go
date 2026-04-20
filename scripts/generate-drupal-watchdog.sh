@@ -101,13 +101,16 @@ find_sites_config() {
     return 1
 }
 
-# Get site configuration field using jq
+# Get site configuration field using jq.
+# Passes site_id and field via --arg to avoid jq-filter injection from crafted
+# CLI input or config keys.
 get_site_config() {
     local config_file="$1"
     local site_id="$2"
     local field="$3"
 
-    jq -r ".sites[\"$site_id\"].$field // empty" "$config_file" 2>/dev/null
+    jq -r --arg site "$site_id" --arg field "$field" \
+        '.sites[$site][$field] // empty' "$config_file" 2>/dev/null
 }
 
 # List all available sites from drupal-sites.json
@@ -155,8 +158,8 @@ apply_site_config() {
         exit 1
     fi
 
-    # Validate site exists
-    if ! jq -e ".sites[\"$site_id\"]" "$config_file" > /dev/null 2>&1; then
+    # Validate site exists (use --arg to avoid jq-filter injection)
+    if ! jq -e --arg site "$site_id" '.sites[$site]' "$config_file" > /dev/null 2>&1; then
         log_error "Site '$site_id' not found in $config_file"
         log_error "Use --list-sites to see available sites"
         exit 1
@@ -347,6 +350,20 @@ fi
 # Validate limit is a number
 if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
     log_error "Limit must be a positive number (got: $LIMIT)"
+    exit 1
+fi
+
+# Validate LOG_TYPE and SEVERITY shapes before forwarding to drush.
+# Drush watchdog type names and severity labels are always simple identifiers,
+# so a restrictive charset both catches typos and blocks crafted args that
+# could otherwise reach drush.
+if [ -n "$LOG_TYPE" ] && ! [[ "$LOG_TYPE" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    log_error "Invalid --type '$LOG_TYPE'. Allowed: letters, digits, '_', '.', '-'"
+    exit 1
+fi
+
+if [ -n "$SEVERITY" ] && ! [[ "$SEVERITY" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    log_error "Invalid --severity '$SEVERITY'. Allowed: letters, digits, '_', '-'"
     exit 1
 fi
 

@@ -11,6 +11,7 @@ import (
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 	"github.com/olegiv/logwatch-ai-go/internal/config"
+	internalerrors "github.com/olegiv/logwatch-ai-go/internal/errors"
 	"github.com/olegiv/logwatch-ai-go/internal/logging"
 )
 
@@ -111,7 +112,7 @@ func prepareAnthropicPromptForAnalysis(
 			compressionAttempts,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("preprocessing failed: %w", err)
+			return nil, internalerrors.Wrapf(err, "preprocessing failed")
 		}
 
 		userPrompt = logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext)
@@ -220,7 +221,7 @@ func prepareHeuristicPromptForAnalysis(
 			0,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("preprocessing failed: %w", err)
+			return nil, internalerrors.Wrapf(err, "preprocessing failed")
 		}
 
 		logContent = processedLogContent
