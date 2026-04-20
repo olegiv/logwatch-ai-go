@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Oleg Ivanchenko
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// Package notification delivers analysis results via Telegram.
 package notification
 
 import (

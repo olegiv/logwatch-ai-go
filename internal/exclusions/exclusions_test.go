@@ -312,13 +312,8 @@ func TestLoad_ValidFromTestdata(t *testing.T) {
 func TestLoad_MissingWithoutExplicitPathReturnsNil(t *testing.T) {
 	// Isolate: no HOME pointing to a real config, and cd to a temp dir so
 	// relative search paths don't accidentally find a repo-level file.
-	origHome := os.Getenv("HOME")
-	defer func() { _ = os.Setenv("HOME", origHome) }()
-	_ = os.Setenv("HOME", "/nonexistent-home-for-exclusions-test")
-
-	origDir, _ := os.Getwd()
-	defer func() { _ = os.Chdir(origDir) }()
-	_ = os.Chdir(t.TempDir())
+	t.Setenv("HOME", "/nonexistent-home-for-exclusions-test")
+	t.Chdir(t.TempDir())
 
 	cfg, path, err := Load("")
 	if err != nil {
@@ -411,15 +406,9 @@ func TestLoad_SearchPathsDiscovery(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	origDir, _ := os.Getwd()
-	defer func() { _ = os.Chdir(origDir) }()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	t.Chdir(dir)
 	// Prevent HOME-based path from masking the discovery order.
-	origHome := os.Getenv("HOME")
-	defer func() { _ = os.Setenv("HOME", origHome) }()
-	_ = os.Setenv("HOME", "/nonexistent-home-for-exclusions-test")
+	t.Setenv("HOME", "/nonexistent-home-for-exclusions-test")
 
 	cfg, foundPath, err := Load("")
 	if err != nil {

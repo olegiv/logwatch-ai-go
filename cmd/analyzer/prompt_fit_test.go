@@ -71,9 +71,7 @@ func (p *scalingBudgetPreprocessor) Process(content string) (string, error) {
 func (p *scalingBudgetPreprocessor) ProcessWithBudget(content string, maxTokens int) (string, error) {
 	p.processCalls++
 	actualSize := min(int(math.Ceil(float64(maxTokens)*p.multiplier)), len(content))
-	if actualSize < 0 {
-		actualSize = 0
-	}
+	actualSize = max(actualSize, 0)
 	return content[:actualSize], nil
 }
 

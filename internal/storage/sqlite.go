@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Oleg Ivanchenko
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// Package storage persists analysis summaries to a local SQLite database.
 package storage
 
 import (
@@ -390,20 +391,20 @@ func (s *Storage) GetHistoricalContext(days int, filter *SourceFilter) (string, 
 	}
 
 	var context strings.Builder
-	context.WriteString(fmt.Sprintf("Previous %d analysis summaries:\n\n", len(summaries)))
+	fmt.Fprintf(&context, "Previous %d analysis summaries:\n\n", len(summaries))
 
 	for i, sum := range summaries {
-		context.WriteString(fmt.Sprintf("%d. %s - Status: %s\n",
+		fmt.Fprintf(&context, "%d. %s - Status: %s\n",
 			i+1,
 			sum.Timestamp.Format("2006-01-02 15:04"),
 			sum.SystemStatus,
-		))
-		context.WriteString(fmt.Sprintf("   Summary: %s\n", sum.Summary))
+		)
+		fmt.Fprintf(&context, "   Summary: %s\n", sum.Summary)
 		if len(sum.CriticalIssues) > 0 {
-			context.WriteString(fmt.Sprintf("   Critical Issues: %d\n", len(sum.CriticalIssues)))
+			fmt.Fprintf(&context, "   Critical Issues: %d\n", len(sum.CriticalIssues))
 		}
 		if len(sum.Warnings) > 0 {
-			context.WriteString(fmt.Sprintf("   Warnings: %d\n", len(sum.Warnings)))
+			fmt.Fprintf(&context, "   Warnings: %d\n", len(sum.Warnings))
 		}
 		context.WriteString("\n")
 	}

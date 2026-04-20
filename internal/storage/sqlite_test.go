@@ -524,16 +524,44 @@ func TestSummaryStructure(t *testing.T) {
 		t.Error("ID not set correctly")
 	}
 
+	if summary.Timestamp.IsZero() {
+		t.Error("Timestamp not set correctly")
+	}
+
 	if summary.SystemStatus != "Good" {
 		t.Error("SystemStatus not set correctly")
+	}
+
+	if summary.Summary != "Test" {
+		t.Error("Summary not set correctly")
 	}
 
 	if len(summary.CriticalIssues) != 1 {
 		t.Error("CriticalIssues not set correctly")
 	}
 
+	if len(summary.Warnings) != 1 {
+		t.Error("Warnings not set correctly")
+	}
+
+	if len(summary.Recommendations) != 1 {
+		t.Error("Recommendations not set correctly")
+	}
+
+	if summary.Metrics["failedLogins"] != float64(5) {
+		t.Error("Metrics not set correctly")
+	}
+
 	if summary.InputTokens != 1000 {
 		t.Error("InputTokens not set correctly")
+	}
+
+	if summary.OutputTokens != 500 {
+		t.Error("OutputTokens not set correctly")
+	}
+
+	if summary.CostUSD != 0.01 {
+		t.Error("CostUSD not set correctly")
 	}
 }
 

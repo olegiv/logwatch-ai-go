@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Oleg Ivanchenko
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// Package logwatch reads and preprocesses Linux logwatch reports for LLM analysis.
 package logwatch
 
 import (
@@ -94,6 +95,7 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 }
 
 // ReadLogwatchOutput reads and processes the logwatch output file.
+//
 // Deprecated: Use Read() instead. This method is kept for backward compatibility.
 func (r *Reader) ReadLogwatchOutput(filePath string) (string, error) {
 	return r.Read(filePath)
@@ -139,6 +141,7 @@ func (r *Reader) GetSourceInfo(sourcePath string) (map[string]any, error) {
 }
 
 // GetFileInfo returns information about the logwatch file.
+//
 // Deprecated: Use GetSourceInfo() instead. This method is kept for backward compatibility.
 func (r *Reader) GetFileInfo(filePath string) (map[string]any, error) {
 	return r.GetSourceInfo(filePath)

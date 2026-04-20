@@ -41,7 +41,7 @@ type ollamaChatRequest struct {
 	Model    string          `json:"model"`
 	Messages []ollamaMessage `json:"messages"`
 	Stream   bool            `json:"stream"`
-	Options  ollamaOptions   `json:"options,omitempty"`
+	Options  ollamaOptions   `json:"options,omitzero"`
 	Format   string          `json:"format,omitempty"`
 }
 
@@ -177,8 +177,8 @@ func (c *OllamaClient) calculateStats(response *ollamaChatResponse, durationSeco
 }
 
 // GetModelInfo returns information about the configured model
-func (c *OllamaClient) GetModelInfo() map[string]interface{} {
-	return map[string]interface{}{
+func (c *OllamaClient) GetModelInfo() map[string]any {
+	return map[string]any{
 		"model":         c.model,
 		"provider":      "Ollama",
 		"max_tokens":    c.maxTokens,

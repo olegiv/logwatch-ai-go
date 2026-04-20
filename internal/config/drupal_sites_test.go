@@ -167,10 +167,8 @@ func TestDrupalSitesConfig_Validate(t *testing.T) {
 				if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
 					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error = %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("Validate() unexpected error = %v", err)
 			}
 		})
 	}
@@ -344,10 +342,8 @@ func TestLoadDrupalSitesConfig_FromTestdata(t *testing.T) {
 	dev, exists := config.Sites["dev"]
 	if !exists {
 		t.Error("config.Sites['dev'] does not exist")
-	} else {
-		if dev.WatchdogFormat != "drush" {
-			t.Errorf("dev.WatchdogFormat = %q, want %q", dev.WatchdogFormat, "drush")
-		}
+	} else if dev.WatchdogFormat != "drush" {
+		t.Errorf("dev.WatchdogFormat = %q, want %q", dev.WatchdogFormat, "drush")
 	}
 }
 
@@ -356,15 +352,10 @@ func TestLoadDrupalSitesConfig_NotFound(t *testing.T) {
 	// This should return nil, nil (not an error, just no config found)
 
 	// Save and restore HOME to control search paths
-	origHome := os.Getenv("HOME")
-	defer func() { _ = os.Setenv("HOME", origHome) }()
-	_ = os.Setenv("HOME", "/nonexistent-home-for-test")
+	t.Setenv("HOME", "/nonexistent-home-for-test")
 
 	// Change to temp dir to avoid finding any config
-	origDir, _ := os.Getwd()
-	defer func() { _ = os.Chdir(origDir) }()
-	tmpDir := t.TempDir()
-	_ = os.Chdir(tmpDir)
+	t.Chdir(t.TempDir())
 
 	config, path, err := LoadDrupalSitesConfig("")
 	if err != nil {

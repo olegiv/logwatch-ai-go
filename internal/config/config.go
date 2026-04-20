@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Oleg Ivanchenko
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// Package config loads runtime configuration from environment variables
+// and optional JSON side-files (drupal-sites.json, exclusions.json).
 package config
 
 import (

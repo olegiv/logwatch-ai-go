@@ -304,6 +304,14 @@ func TestCalculateStats(t *testing.T) {
 				t.Errorf("Expected OutputTokens %d, got %d", tt.outputTokens, stats.OutputTokens)
 			}
 
+			if stats.CacheCreationTokens != tt.cacheCreate {
+				t.Errorf("Expected CacheCreationTokens %d, got %d", tt.cacheCreate, stats.CacheCreationTokens)
+			}
+
+			if stats.CacheReadTokens != tt.cacheRead {
+				t.Errorf("Expected CacheReadTokens %d, got %d", tt.cacheRead, stats.CacheReadTokens)
+			}
+
 			if stats.DurationSeconds != tt.durationSeconds {
 				t.Errorf("Expected Duration %.2f, got %.2f", tt.durationSeconds, stats.DurationSeconds)
 			}

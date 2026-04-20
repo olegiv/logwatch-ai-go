@@ -18,10 +18,8 @@ func checkError(t *testing.T, err error, expectError bool, errorContains string)
 		if errorContains != "" && !strings.Contains(err.Error(), errorContains) {
 			t.Errorf("Expected error to contain '%s', got '%s'", errorContains, err.Error())
 		}
-	} else {
-		if err != nil {
-			t.Errorf("Unexpected error: %v", err)
-		}
+	} else if err != nil {
+		t.Errorf("Unexpected error: %v", err)
 	}
 }
 
@@ -1375,13 +1373,8 @@ func TestApplyExclusionsConfig(t *testing.T) {
 	})
 
 	t.Run("nil CLI does not error when no config discoverable", func(t *testing.T) {
-		origHome := os.Getenv("HOME")
-		defer func() { _ = os.Setenv("HOME", origHome) }()
-		_ = os.Setenv("HOME", "/nonexistent-home-for-exclusions-config-test")
-
-		origDir, _ := os.Getwd()
-		defer func() { _ = os.Chdir(origDir) }()
-		_ = os.Chdir(t.TempDir())
+		t.Setenv("HOME", "/nonexistent-home-for-exclusions-config-test")
+		t.Chdir(t.TempDir())
 
 		cfg := &Config{}
 		if err := cfg.applyExclusionsConfig(nil); err != nil {
