@@ -110,6 +110,13 @@ func run() int {
 		Str("provider", cfg.LLMProvider).
 		Str("model", cfg.GetLLMModel()).
 		Msg("Configured LLM")
+	if cfg.Exclusions != nil {
+		log.Info().
+			Str("path", cfg.ExclusionsConfigPath).
+			Int("global_patterns", len(cfg.Exclusions.Global)).
+			Int("sites", len(cfg.Exclusions.Sites)).
+			Msg("Loaded finding exclusions")
+	}
 
 	// Run the analyzer
 	if err := runAnalyzer(ctx, cfg, log); err != nil {
@@ -269,6 +276,20 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 	analysis, stats, err := llmClient.Analyze(ctx, systemPrompt, userPrompt)
 	if err != nil {
 		return fmt.Errorf("LLM analysis failed: %w", err)
+	}
+
+	// Apply operator-defined finding exclusions (optional feature).
+	// Pattern text is intentionally not logged to avoid leaking operator
+	// config into log aggregation at info level.
+	if cfg.Exclusions != nil {
+		fs := cfg.Exclusions.Filter(analysis, cfg.DrupalSiteID)
+		if fs.Total() > 0 {
+			log.Info().
+				Int("critical_excluded", fs.CriticalExcluded).
+				Int("warnings_excluded", fs.WarningsExcluded).
+				Int("recommendations_excluded", fs.RecommendationsExcluded).
+				Msg("Applied finding exclusions")
+		}
 	}
 
 	log.Info().

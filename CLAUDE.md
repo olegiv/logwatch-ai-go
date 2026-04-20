@@ -38,6 +38,7 @@ internal/
   ├── config/      - Configuration loading (viper + .env)
   ├── drupal/      - Drupal watchdog reader, preprocessor, prompts
   ├── errors/      - Error sanitization (credential redaction)
+  ├── exclusions/  - Finding exclusion config loader and filter
   ├── logging/     - Secure logger wrapper (credential filtering)
   ├── logwatch/    - Logwatch reader, preprocessing, token estimation
   ├── notification/- Telegram client and message formatting
@@ -94,6 +95,13 @@ type PromptBuilder interface {
 **Multi-Site Drupal:** Uses `drupal-sites.json` for centralized site configuration.
 - CLI: `-drupal-site <id>`, `-drupal-sites-config <path>`, `-list-drupal-sites`
 - Search locations: `./`, `./configs/`, `/opt/logwatch-ai/`, `~/.config/logwatch-ai/`
+
+**Finding Exclusions (optional):** `exclusions.json` suppresses known/acceptable findings (e.g., "TLS certificate validation failures") before storage and Telegram notification.
+- CLI: `-exclusions-config <path>` (auto-discovery uses the same search locations as `drupal-sites.json`)
+- Match is case-insensitive substring; regex metacharacters are inert
+- Applied uniformly to `criticalIssues`, `warnings`, `recommendations`
+- `global` patterns apply to every run; per-Drupal-site patterns stack on top when `-drupal-site` matches
+- Template: `configs/exclusions.json.example`; full docs: `docs/EXCLUSIONS.md`
 
 ## Preprocessing & Prompt Fitting
 
@@ -181,6 +189,7 @@ package <name>
 - **Cost Optimization**: See `docs/COST_OPTIMIZATION.md`
 - **Cron Setup**: See `docs/CRON_SETUP.md`
 - **Troubleshooting**: See `docs/TROUBLESHOOTING.md`
+- **Finding Exclusions**: See `docs/EXCLUSIONS.md`
 
 ## Claude Code Extensions
 
