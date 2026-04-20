@@ -102,27 +102,27 @@ func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats, l
 	// Header with log source type and optional site name
 	sourceDisplayName := getLogSourceDisplayName(logSourceType)
 	if siteName != "" {
-		msg.WriteString(fmt.Sprintf("🔍 *%s Report* \\- %s\n", sourceDisplayName, escapeMarkdown(siteName)))
+		fmt.Fprintf(&msg, "🔍 *%s Report* \\- %s\n", sourceDisplayName, escapeMarkdown(siteName))
 	} else {
-		msg.WriteString(fmt.Sprintf("🔍 *%s Report*\n", sourceDisplayName))
+		fmt.Fprintf(&msg, "🔍 *%s Report*\n", sourceDisplayName)
 	}
-	msg.WriteString(fmt.Sprintf("🖥 Host\\: %s\n", escapeMarkdown(t.hostname)))
-	msg.WriteString(fmt.Sprintf("📅 Date\\: %s\n", escapeMarkdown(time.Now().Format("2006-01-02 15:04:05"))))
-	msg.WriteString(fmt.Sprintf("🌍 Timezone\\: %s\n", escapeMarkdown(time.Now().Location().String())))
-	msg.WriteString(fmt.Sprintf("%s *Status\\:* %s\n\n", ai.GetStatusEmoji(analysis.SystemStatus), analysis.SystemStatus))
+	fmt.Fprintf(&msg, "🖥 Host\\: %s\n", escapeMarkdown(t.hostname))
+	fmt.Fprintf(&msg, "📅 Date\\: %s\n", escapeMarkdown(time.Now().Format("2006-01-02 15:04:05")))
+	fmt.Fprintf(&msg, "🌍 Timezone\\: %s\n", escapeMarkdown(time.Now().Location().String()))
+	fmt.Fprintf(&msg, "%s *Status\\:* %s\n\n", ai.GetStatusEmoji(analysis.SystemStatus), analysis.SystemStatus)
 
 	// Execution Stats
 	msg.WriteString("📋 *Execution Stats*\n")
-	msg.WriteString(fmt.Sprintf("• LLM\\: %s \\(%s\\)\n", escapeMarkdown(stats.Model), escapeMarkdown(stats.Provider)))
-	msg.WriteString(fmt.Sprintf("• Critical Issues\\: %d\n", len(analysis.CriticalIssues)))
-	msg.WriteString(fmt.Sprintf("• Warnings\\: %d\n", len(analysis.Warnings)))
-	msg.WriteString(fmt.Sprintf("• Recommendations\\: %d\n", len(analysis.Recommendations)))
-	msg.WriteString(fmt.Sprintf("• Cost\\: %s\n", escapeMarkdown(fmt.Sprintf("$%.4f", stats.CostUSD))))
-	msg.WriteString(fmt.Sprintf("• Duration\\: %s\n", escapeMarkdown(fmt.Sprintf("%.2fs", stats.DurationSeconds))))
+	fmt.Fprintf(&msg, "• LLM\\: %s \\(%s\\)\n", escapeMarkdown(stats.Model), escapeMarkdown(stats.Provider))
+	fmt.Fprintf(&msg, "• Critical Issues\\: %d\n", len(analysis.CriticalIssues))
+	fmt.Fprintf(&msg, "• Warnings\\: %d\n", len(analysis.Warnings))
+	fmt.Fprintf(&msg, "• Recommendations\\: %d\n", len(analysis.Recommendations))
+	fmt.Fprintf(&msg, "• Cost\\: %s\n", escapeMarkdown(fmt.Sprintf("$%.4f", stats.CostUSD)))
+	fmt.Fprintf(&msg, "• Duration\\: %s\n", escapeMarkdown(fmt.Sprintf("%.2fs", stats.DurationSeconds)))
 
 	// Token usage details
 	if stats.CacheReadTokens > 0 || stats.CacheCreationTokens > 0 {
-		msg.WriteString(fmt.Sprintf("• Cache Read\\: %d tokens\n", stats.CacheReadTokens))
+		fmt.Fprintf(&msg, "• Cache Read\\: %d tokens\n", stats.CacheReadTokens)
 	}
 	msg.WriteString("\n")
 
@@ -141,7 +141,7 @@ func (t *TelegramClient) formatMessage(analysis *ai.Analysis, stats *ai.Stats, l
 		msg.WriteString("📈 *Key Metrics*\n")
 		for key, value := range analysis.Metrics {
 			valueStr := fmt.Sprintf("%v", value)
-			msg.WriteString(fmt.Sprintf("• %s\\: %s\n", escapeMarkdown(key), escapeMarkdown(valueStr)))
+			fmt.Fprintf(&msg, "• %s\\: %s\n", escapeMarkdown(key), escapeMarkdown(valueStr))
 		}
 	}
 
@@ -271,10 +271,7 @@ func (t *TelegramClient) splitMessage(message string) []string {
 			// If a single line is too long, split it
 			if len(line) > maxMessageLength {
 				for i := 0; i < len(line); i += maxMessageLength {
-					end := i + maxMessageLength
-					if end > len(line) {
-						end = len(line)
-					}
+					end := min(i+maxMessageLength, len(line))
 					messages = append(messages, line[i:end])
 				}
 				continue
@@ -335,13 +332,13 @@ func (t *TelegramClient) SendNoEntriesReport(logSourceType, siteName string) err
 	// Header with log source type and optional site name
 	sourceDisplayName := getLogSourceDisplayName(logSourceType)
 	if siteName != "" {
-		msg.WriteString(fmt.Sprintf("ℹ️ *%s Report* \\- %s\n", sourceDisplayName, escapeMarkdown(siteName)))
+		fmt.Fprintf(&msg, "ℹ️ *%s Report* \\- %s\n", sourceDisplayName, escapeMarkdown(siteName))
 	} else {
-		msg.WriteString(fmt.Sprintf("ℹ️ *%s Report*\n", sourceDisplayName))
+		fmt.Fprintf(&msg, "ℹ️ *%s Report*\n", sourceDisplayName)
 	}
-	msg.WriteString(fmt.Sprintf("🖥 Host\\: %s\n", escapeMarkdown(t.hostname)))
-	msg.WriteString(fmt.Sprintf("📅 Date\\: %s\n", escapeMarkdown(time.Now().Format("2006-01-02 15:04:05"))))
-	msg.WriteString(fmt.Sprintf("🌍 Timezone\\: %s\n\n", escapeMarkdown(time.Now().Location().String())))
+	fmt.Fprintf(&msg, "🖥 Host\\: %s\n", escapeMarkdown(t.hostname))
+	fmt.Fprintf(&msg, "📅 Date\\: %s\n", escapeMarkdown(time.Now().Format("2006-01-02 15:04:05")))
+	fmt.Fprintf(&msg, "🌍 Timezone\\: %s\n\n", escapeMarkdown(time.Now().Location().String()))
 
 	msg.WriteString("📭 *No Entries Found*\n\n")
 	msg.WriteString("No log entries were found for the analyzed time period \\(yesterday\\)\\.\n")
@@ -357,8 +354,8 @@ func (t *TelegramClient) SendNoEntriesReport(logSourceType, siteName string) err
 }
 
 // GetBotInfo returns information about the bot
-func (t *TelegramClient) GetBotInfo() map[string]interface{} {
-	return map[string]interface{}{
+func (t *TelegramClient) GetBotInfo() map[string]any {
+	return map[string]any{
 		"username":        t.bot.Self.UserName,
 		"archive_channel": t.archiveChannel,
 		"alerts_channel":  t.alertsChannel,

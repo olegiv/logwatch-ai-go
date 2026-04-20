@@ -156,7 +156,7 @@ func TestSecureEventInterface(t *testing.T) {
 	tests := []struct {
 		name  string
 		key   string
-		value interface{}
+		value any
 	}{
 		{
 			name:  "string with credential",
@@ -259,27 +259,27 @@ func TestSecureEventMsgfWithMultipleTypes(t *testing.T) {
 	tests := []struct {
 		name   string
 		format string
-		args   []interface{}
+		args   []any
 	}{
 		{
 			name:   "mixed types without credentials",
 			format: "Count: %d, Rate: %.2f, Name: %s",
-			args:   []interface{}{42, 0.95, "test"},
+			args:   []any{42, 0.95, "test"},
 		},
 		{
 			name:   "string with credential",
 			format: "API Key: %s",
-			args:   []interface{}{"sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890"},
+			args:   []any{"sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890"},
 		},
 		{
 			name:   "error with credential",
 			format: "Error: %v",
-			args:   []interface{}{errors.New("failed with sk-ant-api03-secret123456789")},
+			args:   []any{errors.New("failed with sk-ant-api03-secret123456789")},
 		},
 		{
 			name:   "multiple credentials",
 			format: "Key: %s, Token: %s",
-			args:   []interface{}{"sk-ant-api03-secret123456789", "1234567890:ABCdefGHI_jklMNOpqrSTUvwxYZ-12345678"},
+			args:   []any{"sk-ant-api03-secret123456789", "1234567890:ABCdefGHI_jklMNOpqrSTUvwxYZ-12345678"},
 		},
 	}
 
@@ -377,7 +377,7 @@ func TestSecureEventInterfaceNonString(t *testing.T) {
 	tests := []struct {
 		name  string
 		key   string
-		value interface{}
+		value any
 	}{
 		{"int value", "count", 42},
 		{"float value", "rate", 0.95},

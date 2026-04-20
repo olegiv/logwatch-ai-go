@@ -129,7 +129,7 @@ func TestWrapf(t *testing.T) {
 		name        string
 		err         error
 		format      string
-		args        []interface{}
+		args        []any
 		wantNil     bool
 		wantMessage string
 	}{
@@ -155,7 +155,7 @@ func TestWrapf(t *testing.T) {
 			name:        "wrap with format args",
 			err:         errors.New("error"),
 			format:      "operation %s failed with code %d",
-			args:        []interface{}{"upload", 500},
+			args:        []any{"upload", 500},
 			wantMessage: "operation upload failed with code 500: error",
 		},
 	}

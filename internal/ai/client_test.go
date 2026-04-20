@@ -166,7 +166,7 @@ func TestCountPromptTokens(t *testing.T) {
 	t.Run("failure sanitizes credentials", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"type": "error",
 				"error": map[string]string{
 					"type":    "invalid_request_error",

@@ -122,13 +122,13 @@ func (r *Reader) validateContent(content string) error {
 
 // GetSourceInfo implements analyzer.LogReader.GetSourceInfo.
 // Returns metadata about the logwatch file.
-func (r *Reader) GetSourceInfo(sourcePath string) (map[string]interface{}, error) {
+func (r *Reader) GetSourceInfo(sourcePath string) (map[string]any, error) {
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		return nil, err
 	}
 
-	info := map[string]interface{}{
+	info := map[string]any{
 		"size_bytes": fileInfo.Size(),
 		"size_mb":    float64(fileInfo.Size()) / 1024 / 1024,
 		"modified":   fileInfo.ModTime(),
@@ -140,6 +140,6 @@ func (r *Reader) GetSourceInfo(sourcePath string) (map[string]interface{}, error
 
 // GetFileInfo returns information about the logwatch file.
 // Deprecated: Use GetSourceInfo() instead. This method is kept for backward compatibility.
-func (r *Reader) GetFileInfo(filePath string) (map[string]interface{}, error) {
+func (r *Reader) GetFileInfo(filePath string) (map[string]any, error) {
 	return r.GetSourceInfo(filePath)
 }

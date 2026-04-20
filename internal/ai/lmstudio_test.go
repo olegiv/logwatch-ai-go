@@ -108,16 +108,16 @@ func TestLMStudioClient_CheckConnection(t *testing.T) {
 	tests := []struct {
 		name       string
 		model      string
-		response   interface{}
+		response   any
 		statusCode int
 		wantErr    bool
 	}{
 		{
 			name:  "model loaded with local-model",
 			model: "local-model",
-			response: map[string]interface{}{
+			response: map[string]any{
 				"object": "list",
-				"data": []map[string]interface{}{
+				"data": []map[string]any{
 					{"id": "some-loaded-model", "object": "model"},
 				},
 			},
@@ -127,9 +127,9 @@ func TestLMStudioClient_CheckConnection(t *testing.T) {
 		{
 			name:  "specific model found",
 			model: "llama-2-7b",
-			response: map[string]interface{}{
+			response: map[string]any{
 				"object": "list",
-				"data": []map[string]interface{}{
+				"data": []map[string]any{
 					{"id": "llama-2-7b", "object": "model"},
 					{"id": "mistral-7b", "object": "model"},
 				},
@@ -140,9 +140,9 @@ func TestLMStudioClient_CheckConnection(t *testing.T) {
 		{
 			name:  "specific model not found",
 			model: "nonexistent-model",
-			response: map[string]interface{}{
+			response: map[string]any{
 				"object": "list",
-				"data": []map[string]interface{}{
+				"data": []map[string]any{
 					{"id": "llama-2-7b", "object": "model"},
 				},
 			},
@@ -152,9 +152,9 @@ func TestLMStudioClient_CheckConnection(t *testing.T) {
 		{
 			name:  "no models loaded",
 			model: "local-model",
-			response: map[string]interface{}{
+			response: map[string]any{
 				"object": "list",
-				"data":   []map[string]interface{}{},
+				"data":   []map[string]any{},
 			},
 			statusCode: http.StatusOK,
 			wantErr:    true,

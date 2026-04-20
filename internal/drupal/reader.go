@@ -159,13 +159,13 @@ func (r *Reader) Validate(content string) error {
 
 // GetSourceInfo implements analyzer.LogReader.GetSourceInfo.
 // Returns metadata about the watchdog file.
-func (r *Reader) GetSourceInfo(sourcePath string) (map[string]interface{}, error) {
+func (r *Reader) GetSourceInfo(sourcePath string) (map[string]any, error) {
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		return nil, err
 	}
 
-	info := map[string]interface{}{
+	info := map[string]any{
 		"size_bytes": fileInfo.Size(),
 		"size_mb":    float64(fileInfo.Size()) / 1024 / 1024,
 		"modified":   fileInfo.ModTime(),
@@ -310,8 +310,8 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 	// Calculate statistics
 	stats := r.calculateStats(entries)
 	sb.WriteString("## Summary Statistics\n")
-	sb.WriteString(fmt.Sprintf("Total entries: %d\n", stats["total"]))
-	sb.WriteString(fmt.Sprintf("Time range: %s to %s\n", stats["oldest"], stats["newest"]))
+	fmt.Fprintf(&sb, "Total entries: %d\n", stats["total"])
+	fmt.Fprintf(&sb, "Time range: %s to %s\n", stats["oldest"], stats["newest"])
 	sb.WriteString("\n")
 
 	// Severity breakdown
@@ -319,7 +319,7 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 	severityCounts := stats["severity_counts"].(map[string]int)
 	for _, sev := range []string{"emergency", "alert", "critical", "error", "warning", "notice", "info", "debug"} {
 		if count, ok := severityCounts[sev]; ok && count > 0 {
-			sb.WriteString(fmt.Sprintf("- %s: %d\n", strings.ToUpper(sev), count))
+			fmt.Fprintf(&sb, "- %s: %d\n", strings.ToUpper(sev), count)
 		}
 	}
 	sb.WriteString("\n")
@@ -340,7 +340,7 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 		return sortedTypes[i].count > sortedTypes[j].count
 	})
 	for _, tc := range sortedTypes {
-		sb.WriteString(fmt.Sprintf("- %s: %d\n", tc.name, tc.count))
+		fmt.Fprintf(&sb, "- %s: %d\n", tc.name, tc.count)
 	}
 	sb.WriteString("\n")
 
@@ -350,7 +350,7 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 		sb.WriteString("## Critical/Error Entries (Full Detail)\n")
 		for i, entry := range criticalEntries {
 			if i >= 50 { // Limit to 50 critical entries
-				sb.WriteString(fmt.Sprintf("\n... and %d more critical/error entries\n", len(criticalEntries)-50))
+				fmt.Fprintf(&sb, "\n... and %d more critical/error entries\n", len(criticalEntries)-50)
 				break
 			}
 			sb.WriteString(r.formatEntry(entry))
@@ -366,7 +366,7 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 		// Group by type and message pattern
 		warningGroups := r.groupByPattern(warningEntries)
 		for pattern, group := range warningGroups {
-			sb.WriteString(fmt.Sprintf("- [%dx] %s: %s\n", len(group), group[0].Type, pattern))
+			fmt.Fprintf(&sb, "- [%dx] %s: %s\n", len(group), group[0].Type, pattern)
 		}
 		sb.WriteString("\n")
 	}
@@ -377,7 +377,7 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 		sb.WriteString("## Access/Permission Events\n")
 		accessGroups := r.groupByPattern(accessDenied)
 		for pattern, group := range accessGroups {
-			sb.WriteString(fmt.Sprintf("- [%dx] %s\n", len(group), pattern))
+			fmt.Fprintf(&sb, "- [%dx] %s\n", len(group), pattern)
 		}
 		sb.WriteString("\n")
 	}
@@ -386,15 +386,15 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 	notFound := r.filterByType(entries, "page not found")
 	if len(notFound) > 0 {
 		sb.WriteString("## Page Not Found (404) Summary\n")
-		sb.WriteString(fmt.Sprintf("Total 404 errors: %d\n", len(notFound)))
+		fmt.Fprintf(&sb, "Total 404 errors: %d\n", len(notFound))
 		notFoundGroups := r.groupByPattern(notFound)
 		count := 0
 		for pattern, group := range notFoundGroups {
 			if count >= 10 {
-				sb.WriteString(fmt.Sprintf("... and %d more unique 404 patterns\n", len(notFoundGroups)-10))
+				fmt.Fprintf(&sb, "... and %d more unique 404 patterns\n", len(notFoundGroups)-10)
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- [%dx] %s\n", len(group), pattern))
+			fmt.Fprintf(&sb, "- [%dx] %s\n", len(group), pattern)
 			count++
 		}
 		sb.WriteString("\n")
@@ -406,13 +406,13 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 		sb.WriteString("## Recent Notice/Info Entries (Sample)\n")
 		for i, entry := range infoEntries {
 			if i >= 20 { // Only show first 20
-				sb.WriteString(fmt.Sprintf("... and %d more notice/info entries\n", len(infoEntries)-20))
+				fmt.Fprintf(&sb, "... and %d more notice/info entries\n", len(infoEntries)-20)
 				break
 			}
-			sb.WriteString(fmt.Sprintf("- [%s] %s: %s\n",
+			fmt.Fprintf(&sb, "- [%s] %s: %s\n",
 				entry.SeverityName(),
 				entry.Type,
-				r.truncateMessage(entry.Message, 100)))
+				r.truncateMessage(entry.Message, 100))
 		}
 	}
 
@@ -420,8 +420,8 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 }
 
 // calculateStats calculates statistics about the entries.
-func (r *Reader) calculateStats(entries []WatchdogEntry) map[string]interface{} {
-	stats := make(map[string]interface{})
+func (r *Reader) calculateStats(entries []WatchdogEntry) map[string]any {
+	stats := make(map[string]any)
 	stats["total"] = len(entries)
 
 	if len(entries) == 0 {

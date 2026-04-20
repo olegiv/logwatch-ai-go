@@ -197,8 +197,8 @@ func (c *LMStudioClient) calculateStats(response *openAIChatResponse, durationSe
 }
 
 // GetModelInfo returns information about the configured model
-func (c *LMStudioClient) GetModelInfo() map[string]interface{} {
-	return map[string]interface{}{
+func (c *LMStudioClient) GetModelInfo() map[string]any {
+	return map[string]any{
 		"model":         c.model,
 		"provider":      "LMStudio",
 		"max_tokens":    c.maxTokens,

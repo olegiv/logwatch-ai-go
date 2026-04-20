@@ -14,7 +14,7 @@ const (
 
 // ContextLimitFromModelInfo extracts a model context limit from provider metadata.
 // Falls back to DefaultContextLimit when the value is missing or invalid.
-func ContextLimitFromModelInfo(modelInfo map[string]interface{}) int {
+func ContextLimitFromModelInfo(modelInfo map[string]any) int {
 	if modelInfo == nil {
 		return DefaultContextLimit
 	}
@@ -57,10 +57,7 @@ func CalculateLogTokenBudget(contextLimit, responseReserve, systemPromptTokens, 
 		userPromptOverheadTokens = 0
 	}
 
-	safetyMargin := contextLimit / promptSafetyMarginDivisor
-	if safetyMargin < minPromptSafetyMarginTokens {
-		safetyMargin = minPromptSafetyMarginTokens
-	}
+	safetyMargin := max(contextLimit/promptSafetyMarginDivisor, minPromptSafetyMarginTokens)
 
 	budget := contextLimit - responseReserve - systemPromptTokens - userPromptOverheadTokens - safetyMargin
 	if budget < minLogTokenBudget {

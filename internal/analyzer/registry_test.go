@@ -15,8 +15,8 @@ func (m *mockReader) Validate(_ string) error {
 	return nil
 }
 
-func (m *mockReader) GetSourceInfo(_ string) (map[string]interface{}, error) {
-	return map[string]interface{}{"size_bytes": int64(100)}, nil
+func (m *mockReader) GetSourceInfo(_ string) (map[string]any, error) {
+	return map[string]any{"size_bytes": int64(100)}, nil
 }
 
 // mockPreprocessor implements Preprocessor for testing

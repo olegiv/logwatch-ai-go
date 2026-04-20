@@ -31,14 +31,14 @@ func (p *testPromptBuilder) GetLogType() string {
 
 type mockProvider struct {
 	providerName string
-	modelInfo    map[string]interface{}
+	modelInfo    map[string]any
 }
 
 func (m *mockProvider) Analyze(_ context.Context, _, _ string) (*ai.Analysis, *ai.Stats, error) {
 	return nil, nil, fmt.Errorf("not implemented")
 }
 
-func (m *mockProvider) GetModelInfo() map[string]interface{} {
+func (m *mockProvider) GetModelInfo() map[string]any {
 	return m.modelInfo
 }
 
@@ -70,10 +70,7 @@ func (p *scalingBudgetPreprocessor) Process(content string) (string, error) {
 
 func (p *scalingBudgetPreprocessor) ProcessWithBudget(content string, maxTokens int) (string, error) {
 	p.processCalls++
-	actualSize := int(math.Ceil(float64(maxTokens) * p.multiplier))
-	if actualSize > len(content) {
-		actualSize = len(content)
-	}
+	actualSize := min(int(math.Ceil(float64(maxTokens)*p.multiplier)), len(content))
 	if actualSize < 0 {
 		actualSize = 0
 	}
@@ -113,7 +110,7 @@ func TestPreparePromptForAnalysisAnthropicAlreadyFits(t *testing.T) {
 	provider := &mockPromptTokenCounter{
 		mockProvider: &mockProvider{
 			providerName: "Anthropic",
-			modelInfo: map[string]interface{}{
+			modelInfo: map[string]any{
 				"context_limit": 4200,
 			},
 		},
@@ -158,7 +155,7 @@ func TestPreparePromptForAnalysisAnthropicFitsAfterOneRecompression(t *testing.T
 	provider := &mockPromptTokenCounter{
 		mockProvider: &mockProvider{
 			providerName: "Anthropic",
-			modelInfo: map[string]interface{}{
+			modelInfo: map[string]any{
 				"context_limit": 4200,
 			},
 		},
@@ -204,7 +201,7 @@ func TestPreparePromptForAnalysisAnthropicNeedsMultipleRecompressions(t *testing
 	provider := &mockPromptTokenCounter{
 		mockProvider: &mockProvider{
 			providerName: "Anthropic",
-			modelInfo: map[string]interface{}{
+			modelInfo: map[string]any{
 				"context_limit": 4700,
 			},
 		},
@@ -249,7 +246,7 @@ func TestPreparePromptForAnalysisAnthropicCountFailureFallsBackToHeuristic(t *te
 	provider := &mockPromptTokenCounter{
 		mockProvider: &mockProvider{
 			providerName: "Anthropic",
-			modelInfo: map[string]interface{}{
+			modelInfo: map[string]any{
 				"context_limit": 4200,
 			},
 		},
@@ -290,7 +287,7 @@ func TestPreparePromptForAnalysisAnthropicCountFailureDuringFitting(t *testing.T
 	provider := &mockPromptTokenCounter{
 		mockProvider: &mockProvider{
 			providerName: "Anthropic",
-			modelInfo: map[string]interface{}{
+			modelInfo: map[string]any{
 				"context_limit": 4200,
 			},
 		},
@@ -337,7 +334,7 @@ func TestPreparePromptForAnalysisAnthropicStillTooLargeAfterRetries(t *testing.T
 	provider := &mockPromptTokenCounter{
 		mockProvider: &mockProvider{
 			providerName: "Anthropic",
-			modelInfo: map[string]interface{}{
+			modelInfo: map[string]any{
 				"context_limit": 4200,
 			},
 		},
@@ -381,7 +378,7 @@ func TestPreparePromptForAnalysisNonAnthropicUsesHeuristicPath(t *testing.T) {
 	}
 	provider := &mockProvider{
 		providerName: "Ollama",
-		modelInfo: map[string]interface{}{
+		modelInfo: map[string]any{
 			"context_limit": 4000,
 		},
 	}

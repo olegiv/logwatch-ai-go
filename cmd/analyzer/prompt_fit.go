@@ -74,10 +74,7 @@ func prepareAnthropicPromptForAnalysis(
 	log *logging.SecureLogger,
 ) (*promptPreparationResult, error) {
 	contextLimit := analyzer.ContextLimitFromModelInfo(llmClient.GetModelInfo())
-	targetInputTokens := contextLimit - cfg.AIMaxTokens - anthropicPromptSafetyMarginTokens
-	if targetInputTokens < 1 {
-		targetInputTokens = 1
-	}
+	targetInputTokens := max(contextLimit-cfg.AIMaxTokens-anthropicPromptSafetyMarginTokens, 1)
 
 	baseUserPrompt := logSource.PromptBuilder.GetUserPrompt("", historicalContext)
 	exactBasePromptTokens, err := counter.CountPromptTokens(ctx, systemPrompt, baseUserPrompt)
@@ -89,10 +86,7 @@ func prepareAnthropicPromptForAnalysis(
 		return prepareHeuristicPromptForAnalysis(cfg, llmClient, logSource, systemPrompt, rawLogContent, historicalContext, log)
 	}
 
-	targetLogTokensExact := targetInputTokens - exactBasePromptTokens
-	if targetLogTokensExact < minPromptFitLogBudget {
-		targetLogTokensExact = minPromptFitLogBudget
-	}
+	targetLogTokensExact := max(targetInputTokens-exactBasePromptTokens, minPromptFitLogBudget)
 
 	if log != nil {
 		log.Info().
@@ -162,10 +156,7 @@ func prepareAnthropicPromptForAnalysis(
 			break
 		}
 
-		actualLogTokens := exactPromptTokens - exactBasePromptTokens
-		if actualLogTokens < 1 {
-			actualLogTokens = 1
-		}
+		actualLogTokens := max(exactPromptTokens-exactBasePromptTokens, 1)
 
 		nextBudget := int(math.Floor(
 			float64(currentBudget) *

@@ -8,7 +8,7 @@ import "testing"
 func TestContextLimitFromModelInfo(t *testing.T) {
 	tests := []struct {
 		name  string
-		input map[string]interface{}
+		input map[string]any
 		want  int
 	}{
 		{
@@ -18,22 +18,22 @@ func TestContextLimitFromModelInfo(t *testing.T) {
 		},
 		{
 			name:  "int value",
-			input: map[string]interface{}{"context_limit": 200000},
+			input: map[string]any{"context_limit": 200000},
 			want:  200000,
 		},
 		{
 			name:  "float value",
-			input: map[string]interface{}{"context_limit": 128000.0},
+			input: map[string]any{"context_limit": 128000.0},
 			want:  128000,
 		},
 		{
 			name:  "missing value uses default",
-			input: map[string]interface{}{"model": "test"},
+			input: map[string]any{"model": "test"},
 			want:  DefaultContextLimit,
 		},
 		{
 			name:  "invalid value uses default",
-			input: map[string]interface{}{"context_limit": -1},
+			input: map[string]any{"context_limit": -1},
 			want:  DefaultContextLimit,
 		},
 	}

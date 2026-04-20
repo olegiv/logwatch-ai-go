@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -31,7 +32,7 @@ type Summary struct {
 	CriticalIssues  []string
 	Warnings        []string
 	Recommendations []string
-	Metrics         map[string]interface{}
+	Metrics         map[string]any
 	InputTokens     int
 	OutputTokens    int
 	CostUSD         float64
@@ -226,7 +227,7 @@ func (s *Storage) migrateV2() error {
 		var cid int
 		var name, colType string
 		var notNull, pk int
-		var dfltValue interface{}
+		var dfltValue any
 		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
 			_ = rows.Close()
 			return fmt.Errorf("failed to scan column info: %w", err)
@@ -328,7 +329,7 @@ func (s *Storage) GetRecentSummaries(days int, filter *SourceFilter) ([]*Summary
 	cutoffDate := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
 
 	var query string
-	var args []interface{}
+	var args []any
 
 	// Build complete query based on filter to avoid SQL fragment concatenation
 	if filter != nil && filter.LogSourceType != "" {
@@ -340,7 +341,7 @@ func (s *Storage) GetRecentSummaries(days int, filter *SourceFilter) ([]*Summary
 			WHERE timestamp >= ? AND log_source_type = ? AND site_name = ?
 			ORDER BY timestamp DESC
 		`
-		args = []interface{}{cutoffDate, filter.LogSourceType, filter.SiteName}
+		args = []any{cutoffDate, filter.LogSourceType, filter.SiteName}
 	} else {
 		query = `
 			SELECT id, timestamp, log_source_type, site_name, system_status, summary,
@@ -350,7 +351,7 @@ func (s *Storage) GetRecentSummaries(days int, filter *SourceFilter) ([]*Summary
 			WHERE timestamp >= ?
 			ORDER BY timestamp DESC
 		`
-		args = []interface{}{cutoffDate}
+		args = []any{cutoffDate}
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -388,26 +389,26 @@ func (s *Storage) GetHistoricalContext(days int, filter *SourceFilter) (string, 
 		return "", nil
 	}
 
-	var context string
-	context += fmt.Sprintf("Previous %d analysis summaries:\n\n", len(summaries))
+	var context strings.Builder
+	context.WriteString(fmt.Sprintf("Previous %d analysis summaries:\n\n", len(summaries)))
 
 	for i, sum := range summaries {
-		context += fmt.Sprintf("%d. %s - Status: %s\n",
+		context.WriteString(fmt.Sprintf("%d. %s - Status: %s\n",
 			i+1,
 			sum.Timestamp.Format("2006-01-02 15:04"),
 			sum.SystemStatus,
-		)
-		context += fmt.Sprintf("   Summary: %s\n", sum.Summary)
+		))
+		context.WriteString(fmt.Sprintf("   Summary: %s\n", sum.Summary))
 		if len(sum.CriticalIssues) > 0 {
-			context += fmt.Sprintf("   Critical Issues: %d\n", len(sum.CriticalIssues))
+			context.WriteString(fmt.Sprintf("   Critical Issues: %d\n", len(sum.CriticalIssues)))
 		}
 		if len(sum.Warnings) > 0 {
-			context += fmt.Sprintf("   Warnings: %d\n", len(sum.Warnings))
+			context.WriteString(fmt.Sprintf("   Warnings: %d\n", len(sum.Warnings)))
 		}
-		context += "\n"
+		context.WriteString("\n")
 	}
 
-	return context, nil
+	return context.String(), nil
 }
 
 // CleanupOldSummaries deletes summaries older than N days
@@ -429,15 +430,15 @@ func (s *Storage) CleanupOldSummaries(days int) (int64, error) {
 }
 
 // GetStatistics returns database statistics, optionally filtered by source and site
-func (s *Storage) GetStatistics(filter *SourceFilter) (map[string]interface{}, error) {
-	stats := make(map[string]interface{})
+func (s *Storage) GetStatistics(filter *SourceFilter) (map[string]any, error) {
+	stats := make(map[string]any)
 
 	var countQuery, statusQuery, costQuery string
-	var args []interface{}
+	var args []any
 
 	// Build complete queries based on filter to avoid SQL fragment concatenation
 	if filter != nil && filter.LogSourceType != "" {
-		args = []interface{}{filter.LogSourceType, filter.SiteName}
+		args = []any{filter.LogSourceType, filter.SiteName}
 		countQuery = `SELECT COUNT(*) FROM summaries WHERE log_source_type = ? AND site_name = ?`
 		statusQuery = `SELECT system_status, COUNT(*) FROM summaries WHERE log_source_type = ? AND site_name = ? GROUP BY system_status`
 		costQuery = `SELECT COALESCE(SUM(cost_usd), 0) FROM summaries WHERE log_source_type = ? AND site_name = ?`
@@ -519,7 +520,7 @@ func (s *Storage) scanSummary(rows *sql.Rows) (*Summary, error) {
 
 	// Unmarshal JSON fields
 	var criticalIssues, warnings, recommendations []string
-	var metrics map[string]interface{}
+	var metrics map[string]any
 
 	if err := json.Unmarshal([]byte(criticalIssuesJSON), &criticalIssues); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal critical issues: %w", err)

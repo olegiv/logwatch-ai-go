@@ -11,7 +11,7 @@ type Provider interface {
 	Analyze(ctx context.Context, systemPrompt, userPrompt string) (*Analysis, *Stats, error)
 
 	// GetModelInfo returns information about the configured model
-	GetModelInfo() map[string]interface{}
+	GetModelInfo() map[string]any
 
 	// GetProviderName returns the name of the provider (e.g., "Anthropic", "Ollama")
 	GetProviderName() string

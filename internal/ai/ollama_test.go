@@ -111,15 +111,15 @@ func TestOllamaClient_CheckConnection(t *testing.T) {
 	tests := []struct {
 		name       string
 		model      string
-		response   interface{}
+		response   any
 		statusCode int
 		wantErr    bool
 	}{
 		{
 			name:  "model found",
 			model: "llama3.3:latest",
-			response: map[string]interface{}{
-				"models": []map[string]interface{}{
+			response: map[string]any{
+				"models": []map[string]any{
 					{"name": "llama3.3:latest"},
 					{"name": "mistral:latest"},
 				},
@@ -130,8 +130,8 @@ func TestOllamaClient_CheckConnection(t *testing.T) {
 		{
 			name:  "model not found",
 			model: "nonexistent:model",
-			response: map[string]interface{}{
-				"models": []map[string]interface{}{
+			response: map[string]any{
+				"models": []map[string]any{
 					{"name": "llama3.3:latest"},
 				},
 			},
@@ -148,8 +148,8 @@ func TestOllamaClient_CheckConnection(t *testing.T) {
 		{
 			name:  "partial model name match",
 			model: "llama3.3:latest",
-			response: map[string]interface{}{
-				"models": []map[string]interface{}{
+			response: map[string]any{
+				"models": []map[string]any{
 					{"name": "llama3.3:latest"},
 				},
 			},

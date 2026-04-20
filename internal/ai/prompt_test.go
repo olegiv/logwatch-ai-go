@@ -269,7 +269,7 @@ func TestValidateAnalysis(t *testing.T) {
 				CriticalIssues:  []string{},
 				Warnings:        []string{},
 				Recommendations: []string{},
-				Metrics:         map[string]interface{}{},
+				Metrics:         map[string]any{},
 			},
 			expectError: false,
 		},
@@ -626,7 +626,7 @@ func TestAnalysisJSONSerialization(t *testing.T) {
 			"Recommendation 2",
 			"Recommendation 3",
 		},
-		Metrics: map[string]interface{}{
+		Metrics: map[string]any{
 			"failedLogins": float64(10),
 			"diskUsage":    "85%",
 			"errorCount":   float64(0),
