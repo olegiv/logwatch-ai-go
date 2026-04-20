@@ -202,124 +202,34 @@ func TestCountPromptTokens(t *testing.T) {
 	})
 }
 
+// TestCalculateStats exercises the cost calculation via the real pricing
+// function (ModelPricing.Cost), not an inline copy of the pricing math, so
+// drift between production pricing and test expectations is caught.
 func TestCalculateStats(t *testing.T) {
-	// Create a mock anthropic response
+	sonnet, _ := ResolvePricing("claude-sonnet-4-6")
 
 	tests := []struct {
-		name            string
-		inputTokens     int
-		outputTokens    int
-		cacheCreate     int
-		cacheRead       int
-		durationSeconds float64
-		expectedCostMin float64
-		expectedCostMax float64
+		name         string
+		inputTokens  int
+		outputTokens int
+		cacheCreate  int
+		cacheRead    int
+		expectedCost float64 // Computed from Sonnet-tier rates ($3/$15/$3.75/$0.30 per MTok)
 	}{
-		{
-			name:            "Basic calculation without cache",
-			inputTokens:     1000,
-			outputTokens:    500,
-			cacheCreate:     0,
-			cacheRead:       0,
-			durationSeconds: 5.0,
-			expectedCostMin: 0.0105, // (1000*3 + 500*15)/1000000
-			expectedCostMax: 0.0105,
-		},
-		{
-			name:            "With cache creation",
-			inputTokens:     1000,
-			outputTokens:    500,
-			cacheCreate:     2000,
-			cacheRead:       0,
-			durationSeconds: 5.0,
-			expectedCostMin: 0.0179, // (1000*3 + 500*15 + 2000*3.75)/1000000
-			expectedCostMax: 0.0181,
-		},
-		{
-			name:            "With cache read",
-			inputTokens:     1000,
-			outputTokens:    500,
-			cacheCreate:     0,
-			cacheRead:       5000,
-			durationSeconds: 3.0,
-			expectedCostMin: 0.0120, // (1000*3 + 500*15 + 5000*0.30)/1000000
-			expectedCostMax: 0.0120,
-		},
-		{
-			name:            "Large tokens",
-			inputTokens:     100000,
-			outputTokens:    50000,
-			cacheCreate:     10000,
-			cacheRead:       80000,
-			durationSeconds: 15.0,
-			expectedCostMin: 1.08, // (100000*3 + 50000*15 + 10000*3.75 + 80000*0.30)/1000000
-			expectedCostMax: 1.12,
-		},
-		{
-			name:            "Zero tokens",
-			inputTokens:     0,
-			outputTokens:    0,
-			cacheCreate:     0,
-			cacheRead:       0,
-			durationSeconds: 1.0,
-			expectedCostMin: 0.0,
-			expectedCostMax: 0.0,
-		},
+		{"Basic calculation without cache", 1000, 500, 0, 0, 0.0105},
+		{"With cache creation", 1000, 500, 2000, 0, 0.0180},
+		{"With cache read", 1000, 500, 0, 5000, 0.0120},
+		{"Large tokens", 100000, 50000, 10000, 80000, 1.1115},
+		{"Zero tokens", 0, 0, 0, 0, 0.0},
 	}
 
+	const tolerance = 0.0001
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// For testing purposes, we'll simulate the calculation directly
-			// without needing a full client or anthropic response
-
-			// Simulate the calculation
-			inputCost := float64(tt.inputTokens) / 1000000 * 3.0
-			outputCost := float64(tt.outputTokens) / 1000000 * 15.0
-			cacheWriteCost := float64(tt.cacheCreate) / 1000000 * 3.75
-			cacheReadCost := float64(tt.cacheRead) / 1000000 * 0.30
-			expectedCost := inputCost + outputCost + cacheWriteCost + cacheReadCost
-
-			// Verify the calculation logic matches our expectations (with tolerance for floating-point precision)
-			const tolerance = 0.0001
-			if expectedCost < tt.expectedCostMin-tolerance || expectedCost > tt.expectedCostMax+tolerance {
-				t.Errorf("Expected cost between %.4f and %.4f, calculated %.4f",
-					tt.expectedCostMin, tt.expectedCostMax, expectedCost)
-			}
-
-			// Test that our cost calculation formula is correct
-			stats := &Stats{
-				InputTokens:         tt.inputTokens,
-				OutputTokens:        tt.outputTokens,
-				CacheCreationTokens: tt.cacheCreate,
-				CacheReadTokens:     tt.cacheRead,
-				CostUSD:             expectedCost,
-				DurationSeconds:     tt.durationSeconds,
-			}
-
-			if stats.InputTokens != tt.inputTokens {
-				t.Errorf("Expected InputTokens %d, got %d", tt.inputTokens, stats.InputTokens)
-			}
-
-			if stats.OutputTokens != tt.outputTokens {
-				t.Errorf("Expected OutputTokens %d, got %d", tt.outputTokens, stats.OutputTokens)
-			}
-
-			if stats.CacheCreationTokens != tt.cacheCreate {
-				t.Errorf("Expected CacheCreationTokens %d, got %d", tt.cacheCreate, stats.CacheCreationTokens)
-			}
-
-			if stats.CacheReadTokens != tt.cacheRead {
-				t.Errorf("Expected CacheReadTokens %d, got %d", tt.cacheRead, stats.CacheReadTokens)
-			}
-
-			if stats.DurationSeconds != tt.durationSeconds {
-				t.Errorf("Expected Duration %.2f, got %.2f", tt.durationSeconds, stats.DurationSeconds)
-			}
-
-			// Verify cost is within expected range
-			if stats.CostUSD < tt.expectedCostMin-0.0001 || stats.CostUSD > tt.expectedCostMax+0.0001 {
-				t.Errorf("Expected cost between %.4f and %.4f, got %.4f",
-					tt.expectedCostMin, tt.expectedCostMax, stats.CostUSD)
+			got := sonnet.Cost(tt.inputTokens, tt.outputTokens, tt.cacheCreate, tt.cacheRead)
+			if got < tt.expectedCost-tolerance || got > tt.expectedCost+tolerance {
+				t.Errorf("Cost(%d, %d, %d, %d) = %.4f, want %.4f",
+					tt.inputTokens, tt.outputTokens, tt.cacheCreate, tt.cacheRead, got, tt.expectedCost)
 			}
 		})
 	}

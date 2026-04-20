@@ -327,7 +327,7 @@ func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
 func setDefaults() {
 	// LLM Provider defaults
 	viper.SetDefault("LLM_PROVIDER", "anthropic")
-	viper.SetDefault("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+	viper.SetDefault("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 	viper.SetDefault("OLLAMA_BASE_URL", "http://localhost:11434")
 	viper.SetDefault("OLLAMA_MODEL", "llama3.3:latest")
 	viper.SetDefault("LMSTUDIO_BASE_URL", "http://localhost:1234")
@@ -464,6 +464,15 @@ func (c *Config) validateLLMProvider() error {
 		}
 		if c.ClaudeModel == "" {
 			return fmt.Errorf("CLAUDE_MODEL is required when LLM_PROVIDER=anthropic")
+		}
+		// Enforce a conservative model-ID shape so a mis-set credential
+		// (e.g. operator pastes an API key into CLAUDE_MODEL) cannot reach
+		// log output or the API. Dated snapshots like
+		// "claude-haiku-4-5-20251001" and aliases like "claude-sonnet-4-6"
+		// both fit this pattern.
+		claudeModelRegex := regexp.MustCompile(`^claude-[a-z0-9-]+$`)
+		if !claudeModelRegex.MatchString(c.ClaudeModel) {
+			return fmt.Errorf("CLAUDE_MODEL has invalid format (expected model ID like 'claude-haiku-4-5-20251001')")
 		}
 
 	case "ollama":
