@@ -29,6 +29,25 @@ DETAIL_LEVEL="${2:-0}"
 RANGE="${3:-yesterday}"
 SCRIPT_NAME="$(basename "$0")"
 
+# Validate OUTPUT_PATH: reject relative paths and '..' components so a crafted
+# argument in a cron entry cannot write the logwatch report to arbitrary
+# filesystem locations (this script is documented to run as root).
+if [[ "$OUTPUT_PATH" != /* ]]; then
+    echo "ERROR: OUTPUT_PATH must be an absolute path (got: $OUTPUT_PATH)"
+    exit 1
+fi
+if [[ "$OUTPUT_PATH" == *".."* ]]; then
+    echo "ERROR: OUTPUT_PATH must not contain '..' components (got: $OUTPUT_PATH)"
+    exit 1
+fi
+case "$OUTPUT_PATH" in
+    /tmp/*|/opt/logwatch-ai/*|/var/log/*) ;;
+    *)
+        echo "ERROR: OUTPUT_PATH must be under /tmp/, /opt/logwatch-ai/, or /var/log/ (got: $OUTPUT_PATH)"
+        exit 1
+        ;;
+esac
+
 # Validate detail level (must be 0-10)
 if ! [[ "$DETAIL_LEVEL" =~ ^[0-9]+$ ]] || [ "$DETAIL_LEVEL" -lt 0 ] || [ "$DETAIL_LEVEL" -gt 10 ]; then
     echo "ERROR: Detail level must be a number between 0 and 10 (got: $DETAIL_LEVEL)"

@@ -354,13 +354,17 @@ if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
 fi
 
 # Validate LOG_TYPE and SEVERITY shapes before forwarding to drush.
-# Real Drupal watchdog type names can contain spaces (e.g. "page not found",
-# "access denied"), and --severity accepts a comma-separated list (e.g.
-# "error,warning"), so both allow those characters. The leading-character
-# anchor blocks values that begin with '-', preventing a crafted argument
-# from being interpreted as an additional drush flag.
-if [ -n "$LOG_TYPE" ] && ! [[ "$LOG_TYPE" =~ ^[A-Za-z0-9_][A-Za-z0-9\ ._-]*$ ]]; then
-    log_error "Invalid --type '$LOG_TYPE'. Allowed: letters, digits, space, '_', '.', '-' (no leading '-')"
+# Spaces are intentionally excluded from LOG_TYPE: although real Drupal
+# watchdog type names in the database can contain spaces ("page not found",
+# "access denied"), allowing them here opens a theoretical argument-injection
+# path where a value like "php --count=99" becomes a single argv element
+# that some argparse implementations may re-split. Users who need the
+# space-containing types should filter those in SQL instead. --severity
+# accepts a comma-separated list (e.g. "error,warning"). The leading-
+# character anchor blocks values that begin with '-', preventing a crafted
+# argument from being interpreted as an additional drush flag.
+if [ -n "$LOG_TYPE" ] && ! [[ "$LOG_TYPE" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
+    log_error "Invalid --type '$LOG_TYPE'. Allowed: letters, digits, '_', '.', '-' (no spaces, no leading '-')"
     exit 1
 fi
 

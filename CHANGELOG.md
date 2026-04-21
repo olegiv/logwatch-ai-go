@@ -48,6 +48,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `internalerrors.SanitizeString` before logging, so future
   driver errors that include credentials cannot leak to the analyzer
   log.
+- **M-04 path traversal**: `scripts/generate-logwatch.sh` now rejects
+  non-absolute `OUTPUT_PATH`, `..` components, and paths outside a
+  `/tmp/`, `/opt/logwatch-ai/`, `/var/log/` allowlist, so a crafted
+  first argument can no longer direct logwatch output to arbitrary
+  system files when the script runs as root.
+- **L-01 arg injection**: `--type` regex in
+  `scripts/generate-drupal-watchdog.sh` no longer permits space
+  characters, closing a theoretical drush argparse re-split path
+  where a value like `php --count=99` could be interpreted as an
+  extra flag.
 
 ## [0.9.0] - 2026-04-20
 
