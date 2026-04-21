@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Analysis represents the structured analysis result from Claude
@@ -141,17 +143,33 @@ var promptInjectionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bSYSTEM\s*:`),
 }
 
+// zeroWidthChars matches Unicode zero-width and bidi-control characters that
+// an attacker could use to disguise injection payloads (e.g. "ign[ZWJ]ore")
+// so they slip past the ASCII-oriented promptInjectionPatterns.
+var zeroWidthChars = regexp.MustCompile(`[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{206F}\x{FEFF}]`)
+
 // SanitizeLogContent sanitizes log content to prevent prompt injection (L-03 fix).
 // This removes:
-// - Non-printable characters (except newlines, tabs, carriage returns)
-// - Common prompt injection patterns
-// - Excessive whitespace
+//   - Non-printable characters (except newlines, tabs, carriage returns)
+//   - Zero-width and bidi-control characters that can hide injection patterns
+//   - Common prompt injection patterns (matched after NFKC normalization so
+//     fullwidth Latin forms such as "ＩＧＮＯＲＥ" collapse to ASCII)
+//   - Excessive whitespace
 func SanitizeLogContent(content string) string {
+	// Normalize to NFKC first so visually-identical Unicode variants
+	// (fullwidth Latin, ligatures, etc.) collapse to the ASCII forms the
+	// injection patterns are written against.
+	normalized := norm.NFKC.String(content)
+
+	// Strip zero-width and bidi-control characters before anything else so
+	// patterns like "ign‌ore previous instructions" cannot evade match.
+	normalized = zeroWidthChars.ReplaceAllString(normalized, "")
+
 	// Remove non-printable characters except newlines, tabs, and carriage returns
 	var sanitized strings.Builder
-	sanitized.Grow(len(content))
+	sanitized.Grow(len(normalized))
 
-	for _, r := range content {
+	for _, r := range normalized {
 		if unicode.IsPrint(r) || r == '\n' || r == '\t' || r == '\r' {
 			sanitized.WriteRune(r)
 		}

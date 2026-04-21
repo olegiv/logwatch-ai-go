@@ -51,9 +51,9 @@ func TestCoerceStringArray(t *testing.T) {
 			want: []string{"from message"},
 		},
 		{
-			name: "object with unknown keys falls back to join",
+			name: "object with unknown keys is skipped",
 			raw:  `[{"alpha": "first", "beta": "second"}]`,
-			want: []string{"first — second"},
+			want: []string{},
 		},
 		{
 			name: "object with only nested objects is skipped",
@@ -167,22 +167,22 @@ func TestExtractDescriptiveField(t *testing.T) {
 			wantOk: true,
 		},
 		{
-			name:   "fallback joins sorted keys",
+			name:   "object with only unknown keys is skipped",
 			obj:    map[string]any{"zulu": "z", "alpha": "a"},
-			want:   "a — z",
-			wantOk: true,
+			want:   "",
+			wantOk: false,
 		},
 		{
-			name:   "no string values returns false",
+			name:   "no string values under known keys returns false",
 			obj:    map[string]any{"num": 1, "nested": map[string]any{"a": "b"}},
 			want:   "",
 			wantOk: false,
 		},
 		{
-			name:   "empty string values skipped in fallback",
-			obj:    map[string]any{"alpha": "", "beta": "b"},
-			want:   "b",
-			wantOk: true,
+			name:   "empty description with no other known keys is skipped",
+			obj:    map[string]any{"description": "", "beta": "b"},
+			want:   "",
+			wantOk: false,
 		},
 	}
 

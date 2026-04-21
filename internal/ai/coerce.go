@@ -5,7 +5,6 @@ package ai
 
 import (
 	"encoding/json"
-	"sort"
 	"strings"
 )
 
@@ -107,10 +106,11 @@ func coerceStringItem(item json.RawMessage) (string, bool) {
 }
 
 // extractDescriptiveField looks for a string under common descriptive keys
-// (descriptiveFieldKeys), falling back to joining all top-level non-empty
-// string values with " — ". Returns ok=false if the object contains no usable
-// string content. It does not recurse into nested objects - if the LLM drifts
-// that far, we prefer to skip the item rather than fabricate a summary.
+// (descriptiveFieldKeys). Returns ok=false if the object contains no match
+// under one of those keys. Previously this fell back to joining all
+// top-level string values - that was removed because a synthesized string
+// that never appeared in the LLM output can silently defeat operator-
+// configured exclusion substring patterns in internal/exclusions.
 func extractDescriptiveField(m map[string]any) (string, bool) {
 	for _, key := range descriptiveFieldKeys {
 		if v, present := m[key]; present {
@@ -119,21 +119,5 @@ func extractDescriptiveField(m map[string]any) (string, bool) {
 			}
 		}
 	}
-
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		if s, ok := m[k].(string); ok && s != "" {
-			parts = append(parts, s)
-		}
-	}
-	if len(parts) == 0 {
-		return "", false
-	}
-	return strings.Join(parts, " — "), true
+	return "", false
 }

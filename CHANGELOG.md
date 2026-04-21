@@ -14,10 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Array fields now flow through a tolerant coercion step
   (`internal/ai/coerce.go`) that extracts `description`/`message`/`text`/
   `issue`/`recommendation`/`warning`/`summary`/`detail`/`title`/`name`
-  in priority order, joins unknown-key objects on `" — "`, skips numbers
-  and nulls, and wraps scalars into a single-item slice. The downstream
-  `[]string` contract consumed by storage, Telegram rendering, and the
-  exclusions filter is unchanged.
+  in priority order, skips objects with no recognized descriptive key,
+  skips numbers and nulls, and wraps scalars into a single-item slice.
+  The downstream `[]string` contract consumed by storage, Telegram
+  rendering, and the exclusions filter is unchanged.
 - Previously the failure surfaced as
   `json: cannot unmarshal object into Go struct field
   Analysis.recommendations of type string` and left the operator with
@@ -58,6 +58,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   characters, closing a theoretical drush argparse re-split path
   where a value like `php --count=99` could be interpreted as an
   extra flag.
+- **M-05 exclusions bypass**: the coerce path no longer synthesizes a
+  joined string from objects with unknown keys. Previously, an object
+  like `{"category":"TLS","detail":"certificate validation failures"}`
+  became `"TLS — certificate validation failures"` - text that never
+  appeared verbatim in the LLM output and could silently defeat
+  operator-configured substring patterns in the exclusions filter.
+  Unknown-key objects are now skipped.
+- **L-02 UTF-8 safety**: Telegram `splitMessage` now splits long lines
+  on rune boundaries via `utf8.RuneLen`, so MarkdownV2 never receives
+  a message that ends mid-multi-byte-rune (invalid UTF-8 breaks the
+  MarkdownV2 parser).
+- **L-03 Unicode injection evasion**: `SanitizeLogContent` now NFKC-
+  normalizes input and strips zero-width / bidi-control characters
+  (U+200B-U+200F, U+202A-U+202E, U+2060-U+206F, U+FEFF) before the
+  prompt-injection regexes run, closing evasion via fullwidth Latin
+  (`ＩＧＮＯＲＥ`) or hidden-character payloads (`ign[ZWJ]ore...`).
 
 ## [0.9.0] - 2026-04-20
 
