@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-21
+
 ### Fixed
 - `ParseAnalysis` no longer fails the whole run when the LLM returns an
   object (e.g. `{"description": "..."}`) where the prompt specifies a
@@ -574,7 +576,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.6.0...v0.7.0
