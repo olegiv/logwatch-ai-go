@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` uses `http://` with a non-
   loopback host, so operators notice that log content (which may
   contain PII) is flowing unencrypted.
+- **M-02 DoS**: `LMStudioClient.CheckConnection` now reads its
+  `/v1/models` response through `readResponseBodyLimited` with the same
+  10 MiB cap as every other HTTP read in the package, closing the
+  memory-exhaustion vector from a malicious/malfunctioning LM Studio
+  server.
+- **M-03 log hygiene**: storage row-close error messages are now passed
+  through `internalerrors.SanitizeString` before logging, so future
+  driver errors that include credentials cannot leak to the analyzer
+  log.
 
 ## [0.9.0] - 2026-04-20
 
