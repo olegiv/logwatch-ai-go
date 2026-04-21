@@ -56,11 +56,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/tmp/`, `/opt/logwatch-ai/`, `/var/log/` allowlist, so a crafted
   first argument can no longer direct logwatch output to arbitrary
   system files when the script runs as root.
-- **L-01 arg injection**: `--type` regex in
-  `scripts/generate-drupal-watchdog.sh` no longer permits space
-  characters, closing a theoretical drush argparse re-split path
-  where a value like `php --count=99` could be interpreted as an
-  extra flag.
+- **L-01 arg injection**: `--type` and `--severity` values in
+  `scripts/generate-drupal-watchdog.sh` are now explicitly rejected
+  when they contain `--`, closing the theoretical drush argparse
+  re-split path where a value like `php --count=99` could be
+  interpreted as an extra flag. Multi-word watchdog type names like
+  `page not found` and `access denied` are still accepted - the
+  defense is now the explicit `--` guard rather than a blanket
+  space ban.
 - **M-05 exclusions bypass**: the coerce path no longer synthesizes a
   joined string from objects with unknown keys. Previously, an object
   like `{"category":"TLS","detail":"certificate validation failures"}`
