@@ -74,6 +74,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (U+200B-U+200F, U+202A-U+202E, U+2060-U+206F, U+FEFF) before the
   prompt-injection regexes run, closing evasion via fullwidth Latin
   (`ＩＧＮＯＲＥ`) or hidden-character payloads (`ign[ZWJ]ore...`).
+- **L-05 error chain leak**: `sanitizedError.Unwrap()` now returns
+  `nil` and forwards `errors.Is` / `errors.As` via dedicated methods,
+  so a caller that logs `errors.Unwrap(...)` can no longer re-expose
+  the pre-sanitization original error message. Sentinel comparisons
+  and typed extractions continue to work against the hidden original
+  chain.
+- **L-07 config hygiene**: `configs/.env.example` placeholders no
+  longer match real credential formats - they now fail every startup
+  validator and won't be mis-flagged by secret scanners.
 
 ## [0.9.0] - 2026-04-20
 

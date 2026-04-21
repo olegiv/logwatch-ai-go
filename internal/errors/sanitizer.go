@@ -5,6 +5,7 @@
 package errors
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -81,8 +82,25 @@ func (e *sanitizedError) Error() string {
 	return e.sanitized
 }
 
+// Unwrap intentionally returns nil to prevent re-exposure of the pre-
+// sanitization original error via errors.Unwrap (a caller who logs the
+// unwrap result directly would bypass credential redaction). Sentinel
+// comparisons and type assertions still work via Is/As below, which
+// forward the check into the original chain without exposing its text.
 func (e *sanitizedError) Unwrap() error {
-	return e.original
+	return nil
+}
+
+// Is forwards sentinel-error comparisons to the hidden original chain so
+// errors.Is(sanitizedErr, target) keeps working despite Unwrap returning nil.
+func (e *sanitizedError) Is(target error) bool {
+	return errors.Is(e.original, target)
+}
+
+// As forwards typed-error extraction to the hidden original chain so
+// errors.As(sanitizedErr, &typed) keeps working despite Unwrap returning nil.
+func (e *sanitizedError) As(target any) bool {
+	return errors.As(e.original, target)
 }
 
 // ContainsCredentials checks if a string appears to contain credentials.
