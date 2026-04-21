@@ -34,7 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected when they resolve to loopback, link-local (including
   `169.254.169.254/latest/meta-data/`), RFC-1918 private, or unspecified
   IP literals. Loopback is always allowed; other local ranges require
-  `ALLOW_LOCAL_LLM=true` as an explicit opt-in.
+  `ALLOW_LOCAL_LLM=true` as an explicit opt-in. The validator also
+  strips IPv6 zone identifiers (e.g. `fe80::1%eth0`) before parsing,
+  so scoped IPv6 link-local URLs like `http://[fe80::1%25eth0]:11434`
+  cannot slip past the guard.
 - **L-04 cleartext warning**: a warning is now logged when
   `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` uses `http://` with a non-
   loopback host, so operators notice that log content (which may

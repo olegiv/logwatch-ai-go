@@ -1116,6 +1116,14 @@ func TestValidateOllamaProvider(t *testing.T) {
 			expectError:   true,
 			errorContains: "private/link-local address",
 		},
+		{
+			name: "Scoped IPv6 link-local rejected (zone identifier stripped)",
+			setup: func(c *Config) {
+				c.OllamaBaseURL = "http://[fe80::1%25eth0]:11434"
+			},
+			expectError:   true,
+			errorContains: "private/link-local address",
+		},
 	}
 
 	for _, tt := range tests {

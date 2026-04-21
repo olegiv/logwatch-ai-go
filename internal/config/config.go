@@ -615,7 +615,17 @@ func validateLLMBaseURL(envName, raw string) error {
 	isLocalName := host == "localhost" || strings.EqualFold(host, "localhost.localdomain")
 	allowLocal := strings.EqualFold(os.Getenv("ALLOW_LOCAL_LLM"), "true")
 
-	if ip := net.ParseIP(host); ip != nil {
+	// Strip an IPv6 zone identifier ("fe80::1%eth0") before parsing. Without
+	// this, net.ParseIP returns nil for any scoped IPv6 literal and the
+	// loopback/link-local guard below is silently bypassed - a link-local
+	// endpoint could then be accepted even without ALLOW_LOCAL_LLM.
+	hostForIP := host
+	if i := strings.IndexByte(hostForIP, '%'); i != -1 {
+		hostForIP = hostForIP[:i]
+	}
+	ip := net.ParseIP(hostForIP)
+
+	if ip != nil {
 		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || ip.IsUnspecified() {
 			if !allowLocal && !ip.IsLoopback() {
 				return fmt.Errorf(
@@ -625,11 +635,12 @@ func validateLLMBaseURL(envName, raw string) error {
 		}
 	}
 
-	if u.Scheme == "http" && !isLocalName && net.ParseIP(host) == nil {
-		log.Printf("config: %s uses cleartext http:// to a remote host - log content will be transmitted unencrypted", envName)
-	} else if u.Scheme == "http" {
-		if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() {
+	if u.Scheme == "http" {
+		switch {
+		case ip != nil && !ip.IsLoopback():
 			log.Printf("config: %s uses cleartext http:// to %s - log content will be transmitted unencrypted", envName, host)
+		case ip == nil && !isLocalName:
+			log.Printf("config: %s uses cleartext http:// to a remote host - log content will be transmitted unencrypted", envName)
 		}
 	}
 
