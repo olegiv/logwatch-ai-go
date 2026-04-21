@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	internalerrors "github.com/olegiv/logwatch-ai-go/internal/errors"
 	_ "modernc.org/sqlite"
 )
 
@@ -362,7 +363,8 @@ func (s *Storage) GetRecentSummaries(days int, filter *SourceFilter) ([]*Summary
 	defer func(rows *sql.Rows) {
 		err = rows.Close()
 		if err != nil {
-			log.Printf("storage: failed to close database rows: %v", err)
+			log.Printf("storage: failed to close database rows: %s",
+				internalerrors.SanitizeString(err.Error()))
 		}
 	}(rows)
 
@@ -465,7 +467,8 @@ func (s *Storage) GetStatistics(filter *SourceFilter) (map[string]any, error) {
 	defer func(rows *sql.Rows) {
 		err = rows.Close()
 		if err != nil {
-			log.Printf("storage: failed to close database rows: %v", err)
+			log.Printf("storage: failed to close database rows: %s",
+				internalerrors.SanitizeString(err.Error()))
 		}
 	}(rows)
 

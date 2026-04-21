@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `ParseAnalysis` no longer fails the whole run when the LLM returns an
+  object (e.g. `{"description": "..."}`) where the prompt specifies a
+  plain string inside `criticalIssues`, `warnings`, or `recommendations`.
+  Array fields now flow through a tolerant coercion step
+  (`internal/ai/coerce.go`) that extracts `description`/`message`/`text`/
+  `issue`/`recommendation`/`warning`/`summary`/`detail`/`title`/`name`
+  in priority order, skips objects with no recognized descriptive key,
+  skips numbers and nulls, and wraps scalars into a single-item slice.
+  The downstream `[]string` contract consumed by storage, Telegram
+  rendering, and the exclusions filter is unchanged.
+- Previously the failure surfaced as
+  `json: cannot unmarshal object into Go struct field
+  Analysis.recommendations of type string` and left the operator with
+  no notification, no DB row, and no cost record.
+
+### Added
+- Exported `ai.StringArrayFormatReminder` constant appended to both the
+  logwatch and Drupal system prompts. Explicitly shows a CORRECT vs
+  INCORRECT example so the LLM is less likely to emit object-wrapped
+  findings that would otherwise trigger the coercion path.
+
+### Security
+- **M-01 SSRF**: `OLLAMA_BASE_URL` and `LMSTUDIO_BASE_URL` are now
+  rejected when they resolve to loopback, link-local (including
+  `169.254.169.254/latest/meta-data/`), RFC-1918 private, or unspecified
+  IP literals. Loopback is always allowed; other local ranges require
+  `ALLOW_LOCAL_LLM=true` as an explicit opt-in. The validator also
+  strips IPv6 zone identifiers (e.g. `fe80::1%eth0`) before parsing,
+  so scoped IPv6 link-local URLs like `http://[fe80::1%25eth0]:11434`
+  cannot slip past the guard.
+- **L-04 cleartext warning**: a warning is now logged when
+  `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` uses `http://` with a non-
+  loopback host, so operators notice that log content (which may
+  contain PII) is flowing unencrypted.
+- **M-02 DoS**: `LMStudioClient.CheckConnection` now reads its
+  `/v1/models` response through `readResponseBodyLimited` with the same
+  10 MiB cap as every other HTTP read in the package, closing the
+  memory-exhaustion vector from a malicious/malfunctioning LM Studio
+  server.
+- **M-03 log hygiene**: storage row-close error messages are now passed
+  through `internalerrors.SanitizeString` before logging, so future
+  driver errors that include credentials cannot leak to the analyzer
+  log.
+- **M-04 path traversal**: `scripts/generate-logwatch.sh` now rejects
+  non-absolute `OUTPUT_PATH`, `..` components, and paths outside a
+  `/tmp/`, `/opt/logwatch-ai/`, `/var/log/` allowlist, so a crafted
+  first argument can no longer direct logwatch output to arbitrary
+  system files when the script runs as root.
+- **L-01 arg injection**: `--type` and `--severity` values in
+  `scripts/generate-drupal-watchdog.sh` are now explicitly rejected
+  when they contain `--`, closing the theoretical drush argparse
+  re-split path where a value like `php --count=99` could be
+  interpreted as an extra flag. Multi-word watchdog type names like
+  `page not found` and `access denied` are still accepted - the
+  defense is now the explicit `--` guard rather than a blanket
+  space ban.
+- **M-05 exclusions bypass**: the coerce path no longer synthesizes a
+  joined string from objects with unknown keys. Previously, an object
+  like `{"category":"TLS","detail":"certificate validation failures"}`
+  became `"TLS — certificate validation failures"` - text that never
+  appeared verbatim in the LLM output and could silently defeat
+  operator-configured substring patterns in the exclusions filter.
+  Unknown-key objects are now skipped.
+- **L-02 UTF-8 safety**: Telegram `splitMessage` now splits long lines
+  on rune boundaries via `utf8.RuneLen`, so MarkdownV2 never receives
+  a message that ends mid-multi-byte-rune (invalid UTF-8 breaks the
+  MarkdownV2 parser).
+- **L-03 Unicode injection evasion**: `SanitizeLogContent` now NFKC-
+  normalizes input and strips zero-width / bidi-control characters
+  (U+200B-U+200F, U+202A-U+202E, U+2060-U+206F, U+FEFF) before the
+  prompt-injection regexes run, closing evasion via fullwidth Latin
+  (`ＩＧＮＯＲＥ`) or hidden-character payloads (`ign[ZWJ]ore...`).
+- **L-05 error chain leak**: `sanitizedError.Unwrap()` now returns
+  `nil` and forwards `errors.Is` / `errors.As` via dedicated methods,
+  so a caller that logs `errors.Unwrap(...)` can no longer re-expose
+  the pre-sanitization original error message. Sentinel comparisons
+  and typed extractions continue to work against the hidden original
+  chain.
+- **L-07 config hygiene**: `configs/.env.example` placeholders no
+  longer match real credential formats - they now fail every startup
+  validator and won't be mis-flagged by secret scanners.
+
 ## [0.9.0] - 2026-04-20
 
 ### Changed

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
@@ -269,11 +270,21 @@ func (t *TelegramClient) splitMessage(message string) []string {
 				currentMsg.Reset()
 			}
 
-			// If a single line is too long, split it
+			// If a single line is too long, split it on rune boundaries
+			// so we never emit a message that ends mid-UTF-8-sequence
+			// (invalid UTF-8 breaks Telegram MarkdownV2 parsing).
 			if len(line) > maxMessageLength {
-				for i := 0; i < len(line); i += maxMessageLength {
-					end := min(i+maxMessageLength, len(line))
-					messages = append(messages, line[i:end])
+				var chunk strings.Builder
+				chunk.Grow(maxMessageLength)
+				for _, r := range line {
+					if chunk.Len()+utf8.RuneLen(r) > maxMessageLength {
+						messages = append(messages, chunk.String())
+						chunk.Reset()
+					}
+					chunk.WriteRune(r)
+				}
+				if chunk.Len() > 0 {
+					messages = append(messages, chunk.String())
 				}
 				continue
 			}

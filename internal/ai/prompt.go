@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Analysis represents the structured analysis result from Claude
@@ -20,6 +22,20 @@ type Analysis struct {
 	Recommendations []string       `json:"recommendations"`
 	Metrics         map[string]any `json:"metrics"`
 }
+
+// StringArrayFormatReminder is appended verbatim to every PromptBuilder's
+// system prompt. It reinforces the string-array contract for criticalIssues,
+// warnings, and recommendations so the LLM is less likely to emit objects
+// such as {"description": "..."} that would otherwise trigger coercion.
+const StringArrayFormatReminder = `
+
+**CRITICAL FORMAT RULE (strict):**
+Each element of "criticalIssues", "warnings", and "recommendations" MUST be
+a plain JSON string. Never an object, number, or null.
+
+  CORRECT:   "recommendations": ["Configure certificate trust on smtprelay"]
+  INCORRECT: "recommendations": [{"description": "Configure certificate trust"}]
+`
 
 // GetSystemPrompt returns the system prompt with cache control
 func GetSystemPrompt() string {
@@ -127,17 +143,33 @@ var promptInjectionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bSYSTEM\s*:`),
 }
 
+// zeroWidthChars matches Unicode zero-width and bidi-control characters that
+// an attacker could use to disguise injection payloads (e.g. "ign[ZWJ]ore")
+// so they slip past the ASCII-oriented promptInjectionPatterns.
+var zeroWidthChars = regexp.MustCompile(`[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{206F}\x{FEFF}]`)
+
 // SanitizeLogContent sanitizes log content to prevent prompt injection (L-03 fix).
 // This removes:
-// - Non-printable characters (except newlines, tabs, carriage returns)
-// - Common prompt injection patterns
-// - Excessive whitespace
+//   - Non-printable characters (except newlines, tabs, carriage returns)
+//   - Zero-width and bidi-control characters that can hide injection patterns
+//   - Common prompt injection patterns (matched after NFKC normalization so
+//     fullwidth Latin forms such as "ＩＧＮＯＲＥ" collapse to ASCII)
+//   - Excessive whitespace
 func SanitizeLogContent(content string) string {
+	// Normalize to NFKC first so visually-identical Unicode variants
+	// (fullwidth Latin, ligatures, etc.) collapse to the ASCII forms the
+	// injection patterns are written against.
+	normalized := norm.NFKC.String(content)
+
+	// Strip zero-width and bidi-control characters before anything else so
+	// patterns like "ign‌ore previous instructions" cannot evade match.
+	normalized = zeroWidthChars.ReplaceAllString(normalized, "")
+
 	// Remove non-printable characters except newlines, tabs, and carriage returns
 	var sanitized strings.Builder
-	sanitized.Grow(len(content))
+	sanitized.Grow(len(normalized))
 
-	for _, r := range content {
+	for _, r := range normalized {
 		if unicode.IsPrint(r) || r == '\n' || r == '\t' || r == '\r' {
 			sanitized.WriteRune(r)
 		}
@@ -191,7 +223,10 @@ func sanitizeJSONEscapes(s string) string {
 	return result.String()
 }
 
-// ParseAnalysis extracts and parses the JSON analysis from Claude's response
+// ParseAnalysis extracts and parses the JSON analysis from Claude's response.
+// Array fields (criticalIssues/warnings/recommendations) are normalized via
+// coerceStringArray so object-valued items (e.g. {"description": "..."}) that
+// the LLM occasionally emits despite prompt instructions do not fail the run.
 func ParseAnalysis(response string) (*Analysis, error) {
 	// Extract JSON from response using balanced brace matching
 	jsonMatch := extractJSON(response)
@@ -208,18 +243,26 @@ func ParseAnalysis(response string) (*Analysis, error) {
 	// Sanitize invalid JSON escape sequences that LLMs sometimes produce
 	sanitizedJSON := sanitizeJSONEscapes(jsonMatch)
 
-	// Parse JSON
-	var analysis Analysis
-	if err := json.Unmarshal([]byte(sanitizedJSON), &analysis); err != nil {
+	var raw rawAnalysis
+	if err := json.Unmarshal([]byte(sanitizedJSON), &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 
+	analysis := &Analysis{
+		SystemStatus:    raw.SystemStatus,
+		Summary:         raw.Summary,
+		CriticalIssues:  coerceStringArray(raw.CriticalIssues),
+		Warnings:        coerceStringArray(raw.Warnings),
+		Recommendations: coerceStringArray(raw.Recommendations),
+		Metrics:         raw.Metrics,
+	}
+
 	// Validate required fields
-	if err := validateAnalysis(&analysis); err != nil {
+	if err := validateAnalysis(analysis); err != nil {
 		return nil, fmt.Errorf("analysis validation failed: %w", err)
 	}
 
-	return &analysis, nil
+	return analysis, nil
 }
 
 // validateAnalysis validates the analysis structure

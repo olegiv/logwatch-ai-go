@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -234,9 +233,11 @@ func (c *LMStudioClient) CheckConnection(ctx context.Context) error {
 		return fmt.Errorf("LM Studio returned status %d", resp.StatusCode)
 	}
 
-	// Parse response to check if any model is loaded
+	// Parse response to check if any model is loaded. Use the shared
+	// bounded reader so a malicious/malfunctioning LM Studio server cannot
+	// exhaust memory with an oversized /v1/models response.
 	var modelsResp openAIModelsResponse
-	body, err := io.ReadAll(resp.Body)
+	body, err := readResponseBodyLimited(resp.Body, maxAPIResponseBodyBytes)
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
 	}

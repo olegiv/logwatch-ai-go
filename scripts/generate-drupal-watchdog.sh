@@ -356,17 +356,33 @@ fi
 # Validate LOG_TYPE and SEVERITY shapes before forwarding to drush.
 # Real Drupal watchdog type names can contain spaces (e.g. "page not found",
 # "access denied"), and --severity accepts a comma-separated list (e.g.
-# "error,warning"), so both allow those characters. The leading-character
-# anchor blocks values that begin with '-', preventing a crafted argument
-# from being interpreted as an additional drush flag.
-if [ -n "$LOG_TYPE" ] && ! [[ "$LOG_TYPE" =~ ^[A-Za-z0-9_][A-Za-z0-9\ ._-]*$ ]]; then
-    log_error "Invalid --type '$LOG_TYPE'. Allowed: letters, digits, space, '_', '.', '-' (no leading '-')"
-    exit 1
+# "error,warning"), so both allow those characters. Defense in depth:
+#   1. The leading-character anchor blocks values that begin with '-', so
+#      a crafted argument cannot be interpreted as an additional drush flag.
+#   2. An explicit "--" check rejects values that contain a double-dash
+#      anywhere, closing the theoretical argparse re-split path on
+#      a value like "php --count=99" that some argparse implementations
+#      could interpret as an extra flag inside the --type payload.
+if [ -n "$LOG_TYPE" ]; then
+    if ! [[ "$LOG_TYPE" =~ ^[A-Za-z0-9_][A-Za-z0-9\ ._-]*$ ]]; then
+        log_error "Invalid --type '$LOG_TYPE'. Allowed: letters, digits, space, '_', '.', '-' (no leading '-')"
+        exit 1
+    fi
+    if [[ "$LOG_TYPE" == *"--"* ]]; then
+        log_error "Invalid --type '$LOG_TYPE'. Value must not contain '--' (would be re-interpreted as a drush flag)"
+        exit 1
+    fi
 fi
 
-if [ -n "$SEVERITY" ] && ! [[ "$SEVERITY" =~ ^[A-Za-z0-9_][A-Za-z0-9,_-]*$ ]]; then
-    log_error "Invalid --severity '$SEVERITY'. Allowed: letters, digits, ',', '_', '-' (no leading '-')"
-    exit 1
+if [ -n "$SEVERITY" ]; then
+    if ! [[ "$SEVERITY" =~ ^[A-Za-z0-9_][A-Za-z0-9,_-]*$ ]]; then
+        log_error "Invalid --severity '$SEVERITY'. Allowed: letters, digits, ',', '_', '-' (no leading '-')"
+        exit 1
+    fi
+    if [[ "$SEVERITY" == *"--"* ]]; then
+        log_error "Invalid --severity '$SEVERITY'. Value must not contain '--' (would be re-interpreted as a drush flag)"
+        exit 1
+    fi
 fi
 
 # Calculate yesterday's time boundaries (00:00:00 to 23:59:59)

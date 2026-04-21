@@ -149,7 +149,7 @@ You MUST respond with a valid JSON object (and ONLY JSON) in this exact format:
 - Distinguish between attack attempts and legitimate user errors
 - Be specific about affected modules/themes when identifiable
 - Use clear, concise language
-- Empty arrays are acceptable if no issues/warnings/recommendations exist`
+- Empty arrays are acceptable if no issues/warnings/recommendations exist` + ai.StringArrayFormatReminder
 }
 
 // GetUserPrompt constructs the user prompt with Drupal watchdog content and historical context.
