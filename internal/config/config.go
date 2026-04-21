@@ -9,6 +9,9 @@ import (
 	"crypto/subtle"
 	"flag"
 	"fmt"
+	"log"
+	"net"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -483,9 +486,8 @@ func (c *Config) validateLLMProvider() error {
 		if c.OllamaBaseURL == "" {
 			return fmt.Errorf("OLLAMA_BASE_URL is required when LLM_PROVIDER=ollama")
 		}
-		// Validate URL format (basic check)
-		if !strings.HasPrefix(c.OllamaBaseURL, "http://") && !strings.HasPrefix(c.OllamaBaseURL, "https://") {
-			return fmt.Errorf("OLLAMA_BASE_URL must start with 'http://' or 'https://'")
+		if err := validateLLMBaseURL("OLLAMA_BASE_URL", c.OllamaBaseURL); err != nil {
+			return err
 		}
 
 	case "lmstudio":
@@ -493,9 +495,8 @@ func (c *Config) validateLLMProvider() error {
 		if c.LMStudioBaseURL == "" {
 			return fmt.Errorf("LMSTUDIO_BASE_URL is required when LLM_PROVIDER=lmstudio")
 		}
-		// Validate URL format (basic check)
-		if !strings.HasPrefix(c.LMStudioBaseURL, "http://") && !strings.HasPrefix(c.LMStudioBaseURL, "https://") {
-			return fmt.Errorf("LMSTUDIO_BASE_URL must start with 'http://' or 'https://'")
+		if err := validateLLMBaseURL("LMSTUDIO_BASE_URL", c.LMStudioBaseURL); err != nil {
+			return err
 		}
 		// Model is optional for LM Studio (defaults to "local-model")
 	}
@@ -582,4 +583,55 @@ func (c *Config) GetLLMModel() string {
 	default:
 		return c.ClaudeModel
 	}
+}
+
+// validateLLMBaseURL parses the configured LLM endpoint and rejects obviously
+// unsafe shapes: non-http(s) schemes, and IP literals in loopback, link-local,
+// or RFC-1918 private ranges (prevents SSRF to cloud metadata endpoints such
+// as 169.254.169.254 or to internal services on the deployment network when
+// the operator intended a real remote inference host).
+//
+// The localhost case (Ollama/LM Studio on the same machine) is common and
+// legitimate; operators can opt in via ALLOW_LOCAL_LLM=true. Hostnames are
+// not resolved at config time - DNS rebinding is not addressed here, and the
+// common case is that operators configure either an explicit IP literal or a
+// hostname that resolves stably to a trusted host at request time.
+//
+// A cleartext-http warning is emitted for non-loopback http:// URLs so log
+// content (which may contain PII) is not silently transmitted unencrypted.
+func validateLLMBaseURL(envName, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s has invalid URL: %w", envName, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%s must use http:// or https:// scheme (got: %q)", envName, u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("%s must include a host", envName)
+	}
+
+	host := u.Hostname()
+	isLocalName := host == "localhost" || strings.EqualFold(host, "localhost.localdomain")
+	allowLocal := strings.EqualFold(os.Getenv("ALLOW_LOCAL_LLM"), "true")
+
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() || ip.IsUnspecified() {
+			if !allowLocal && !ip.IsLoopback() {
+				return fmt.Errorf(
+					"%s resolves to a private/link-local address (%s); set ALLOW_LOCAL_LLM=true to permit",
+					envName, ip.String())
+			}
+		}
+	}
+
+	if u.Scheme == "http" && !isLocalName && net.ParseIP(host) == nil {
+		log.Printf("config: %s uses cleartext http:// to a remote host - log content will be transmitted unencrypted", envName)
+	} else if u.Scheme == "http" {
+		if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() {
+			log.Printf("config: %s uses cleartext http:// to %s - log content will be transmitted unencrypted", envName, host)
+		}
+	}
+
+	return nil
 }

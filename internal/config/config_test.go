@@ -1091,7 +1091,7 @@ func TestValidateOllamaProvider(t *testing.T) {
 				c.OllamaBaseURL = "localhost:11434"
 			},
 			expectError:   true,
-			errorContains: "must start with 'http://' or 'https://'",
+			errorContains: "must use http:// or https:// scheme",
 		},
 		{
 			name: "Valid Ollama with HTTPS",
@@ -1099,6 +1099,22 @@ func TestValidateOllamaProvider(t *testing.T) {
 				c.OllamaBaseURL = "https://ollama.example.com"
 			},
 			expectError: false,
+		},
+		{
+			name: "Private IP rejected without ALLOW_LOCAL_LLM",
+			setup: func(c *Config) {
+				c.OllamaBaseURL = "http://10.0.0.5:11434"
+			},
+			expectError:   true,
+			errorContains: "private/link-local address",
+		},
+		{
+			name: "Link-local metadata endpoint rejected",
+			setup: func(c *Config) {
+				c.OllamaBaseURL = "http://169.254.169.254/latest/meta-data/"
+			},
+			expectError:   true,
+			errorContains: "private/link-local address",
 		},
 	}
 
@@ -1155,7 +1171,7 @@ func TestValidateLMStudioProvider(t *testing.T) {
 				c.LMStudioBaseURL = "localhost:1234"
 			},
 			expectError:   true,
-			errorContains: "must start with 'http://' or 'https://'",
+			errorContains: "must use http:// or https:// scheme",
 		},
 		{
 			name: "LM Studio model optional - empty is valid",
