@@ -93,7 +93,7 @@ You MUST respond with a valid JSON object (and ONLY JSON) in this exact format:
 - Be specific in recommendations (include commands, file paths, etc.)
 - Use clear, concise language
 - If uncertain, state assumptions clearly
-- Empty arrays are acceptable if no issues/warnings/recommendations exist`
+- Empty arrays are acceptable if no issues/warnings/recommendations exist` + ai.StringArrayFormatReminder
 }
 
 // GetUserPrompt constructs the user prompt with logwatch content and historical context.

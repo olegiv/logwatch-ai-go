@@ -21,6 +21,20 @@ type Analysis struct {
 	Metrics         map[string]any `json:"metrics"`
 }
 
+// StringArrayFormatReminder is appended verbatim to every PromptBuilder's
+// system prompt. It reinforces the string-array contract for criticalIssues,
+// warnings, and recommendations so the LLM is less likely to emit objects
+// such as {"description": "..."} that would otherwise trigger coercion.
+const StringArrayFormatReminder = `
+
+**CRITICAL FORMAT RULE (strict):**
+Each element of "criticalIssues", "warnings", and "recommendations" MUST be
+a plain JSON string. Never an object, number, or null.
+
+  CORRECT:   "recommendations": ["Configure certificate trust on smtprelay"]
+  INCORRECT: "recommendations": [{"description": "Configure certificate trust"}]
+`
+
 // GetSystemPrompt returns the system prompt with cache control
 func GetSystemPrompt() string {
 	return `You are a senior system administrator and security analyst with expertise in Linux system security and operations. Your role is to analyze logwatch reports and provide actionable insights.
@@ -191,7 +205,10 @@ func sanitizeJSONEscapes(s string) string {
 	return result.String()
 }
 
-// ParseAnalysis extracts and parses the JSON analysis from Claude's response
+// ParseAnalysis extracts and parses the JSON analysis from Claude's response.
+// Array fields (criticalIssues/warnings/recommendations) are normalized via
+// coerceStringArray so object-valued items (e.g. {"description": "..."}) that
+// the LLM occasionally emits despite prompt instructions do not fail the run.
 func ParseAnalysis(response string) (*Analysis, error) {
 	// Extract JSON from response using balanced brace matching
 	jsonMatch := extractJSON(response)
@@ -208,18 +225,26 @@ func ParseAnalysis(response string) (*Analysis, error) {
 	// Sanitize invalid JSON escape sequences that LLMs sometimes produce
 	sanitizedJSON := sanitizeJSONEscapes(jsonMatch)
 
-	// Parse JSON
-	var analysis Analysis
-	if err := json.Unmarshal([]byte(sanitizedJSON), &analysis); err != nil {
+	var raw rawAnalysis
+	if err := json.Unmarshal([]byte(sanitizedJSON), &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
 
+	analysis := &Analysis{
+		SystemStatus:    raw.SystemStatus,
+		Summary:         raw.Summary,
+		CriticalIssues:  coerceStringArray(raw.CriticalIssues),
+		Warnings:        coerceStringArray(raw.Warnings),
+		Recommendations: coerceStringArray(raw.Recommendations),
+		Metrics:         raw.Metrics,
+	}
+
 	// Validate required fields
-	if err := validateAnalysis(&analysis); err != nil {
+	if err := validateAnalysis(analysis); err != nil {
 		return nil, fmt.Errorf("analysis validation failed: %w", err)
 	}
 
-	return &analysis, nil
+	return analysis, nil
 }
 
 // validateAnalysis validates the analysis structure

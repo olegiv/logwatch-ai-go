@@ -255,6 +255,124 @@ func TestParseAnalysis(t *testing.T) {
 	}
 }
 
+// TestParseAnalysis_Coercion covers the tolerant parsing path for LLM
+// responses that emit object-wrapped, scalar, or null array fields where the
+// prompt specifies string arrays. All cases must succeed - failure would
+// leave operators without notifications or DB records.
+func TestParseAnalysis_Coercion(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     []string // expected Recommendations (or Warnings/CriticalIssues per pickField)
+		field    func(*Analysis) []string
+	}{
+		{
+			name: "Object item with description field is coerced to string",
+			response: `{
+				"systemStatus": "Good",
+				"summary": "Summary",
+				"criticalIssues": [],
+				"warnings": [],
+				"recommendations": [{"description": "Configure certificate trust"}],
+				"metrics": {}
+			}`,
+			want:  []string{"Configure certificate trust"},
+			field: func(a *Analysis) []string { return a.Recommendations },
+		},
+		{
+			name: "Mixed string and object items are coerced",
+			response: `{
+				"systemStatus": "Good",
+				"summary": "Summary",
+				"criticalIssues": [],
+				"warnings": ["plain", {"description": "from object"}],
+				"recommendations": [],
+				"metrics": {}
+			}`,
+			want:  []string{"plain", "from object"},
+			field: func(a *Analysis) []string { return a.Warnings },
+		},
+		{
+			name: "Object with message fallback is coerced",
+			response: `{
+				"systemStatus": "Good",
+				"summary": "Summary",
+				"criticalIssues": [{"message": "msg value"}],
+				"warnings": [],
+				"recommendations": [],
+				"metrics": {}
+			}`,
+			want:  []string{"msg value"},
+			field: func(a *Analysis) []string { return a.CriticalIssues },
+		},
+		{
+			name: "Scalar string instead of array is wrapped",
+			response: `{
+				"systemStatus": "Good",
+				"summary": "Summary",
+				"criticalIssues": [],
+				"warnings": [],
+				"recommendations": "restart nginx",
+				"metrics": {}
+			}`,
+			want:  []string{"restart nginx"},
+			field: func(a *Analysis) []string { return a.Recommendations },
+		},
+		{
+			name: "Null array field yields empty slice",
+			response: `{
+				"systemStatus": "Good",
+				"summary": "Summary",
+				"criticalIssues": [],
+				"warnings": [],
+				"recommendations": null,
+				"metrics": {}
+			}`,
+			want:  []string{},
+			field: func(a *Analysis) []string { return a.Recommendations },
+		},
+		{
+			name: "Nested-only object is skipped",
+			response: `{
+				"systemStatus": "Good",
+				"summary": "Summary",
+				"criticalIssues": [],
+				"warnings": [],
+				"recommendations": [{"nested": {"a": "b"}}],
+				"metrics": {}
+			}`,
+			want:  []string{},
+			field: func(a *Analysis) []string { return a.Recommendations },
+		},
+		{
+			name: "Number and null items are skipped",
+			response: `{
+				"systemStatus": "Good",
+				"summary": "Summary",
+				"criticalIssues": [],
+				"warnings": [],
+				"recommendations": [42, null, "keep"],
+				"metrics": {}
+			}`,
+			want:  []string{"keep"},
+			field: func(a *Analysis) []string { return a.Recommendations },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			analysis, err := ParseAnalysis(tt.response)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			got := tt.field(analysis)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("field = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateAnalysis(t *testing.T) {
 	tests := []struct {
 		name        string

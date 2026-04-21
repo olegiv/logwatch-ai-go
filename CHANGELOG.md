@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `ParseAnalysis` no longer fails the whole run when the LLM returns an
+  object (e.g. `{"description": "..."}`) where the prompt specifies a
+  plain string inside `criticalIssues`, `warnings`, or `recommendations`.
+  Array fields now flow through a tolerant coercion step
+  (`internal/ai/coerce.go`) that extracts `description`/`message`/`text`/
+  `issue`/`recommendation`/`warning`/`summary`/`detail`/`title`/`name`
+  in priority order, joins unknown-key objects on `" — "`, skips numbers
+  and nulls, and wraps scalars into a single-item slice. The downstream
+  `[]string` contract consumed by storage, Telegram rendering, and the
+  exclusions filter is unchanged.
+- Previously the failure surfaced as
+  `json: cannot unmarshal object into Go struct field
+  Analysis.recommendations of type string` and left the operator with
+  no notification, no DB row, and no cost record.
+
+### Added
+- Exported `ai.StringArrayFormatReminder` constant appended to both the
+  logwatch and Drupal system prompts. Explicitly shows a CORRECT vs
+  INCORRECT example so the LLM is less likely to emit object-wrapped
+  findings that would otherwise trigger the coercion path.
+
 ## [0.9.0] - 2026-04-20
 
 ### Changed
