@@ -168,25 +168,28 @@ func (c *Config) GlobalPatterns() []string {
 //
 // An empty or unknown siteID for drupal_watchdog returns just c.Drupal.
 // Other logTypes return nil (defensive).
+//
+// Each source list is sanitized independently before merging so that the
+// per-list maxPatternsPerList cap applies per scope rather than to the
+// merged slice — otherwise a full c.Drupal list (50) would silently drop
+// every c.Sites[siteID] pattern.
 func (c *Config) ContextualPatterns(logType analyzer.LogSourceType, siteID string) []string {
 	if c == nil {
 		return nil
 	}
 
-	var raw []string
 	switch logType {
 	case analyzer.LogSourceLogwatch:
-		raw = c.Logwatch
+		return sanitizePatternsForPrompt(c.Logwatch)
 	case analyzer.LogSourceDrupalWatchdog:
-		raw = append(raw, c.Drupal...)
+		out := sanitizePatternsForPrompt(c.Drupal)
 		if siteID != "" {
-			raw = append(raw, c.Sites[siteID]...)
+			out = append(out, sanitizePatternsForPrompt(c.Sites[siteID])...)
 		}
+		return out
 	default:
 		return nil
 	}
-
-	return sanitizePatternsForPrompt(raw)
 }
 
 // sanitizePatternsForPrompt maps sanitizePatternForPrompt across a slice,
@@ -216,15 +219,23 @@ func sanitizePatternsForPrompt(patterns []string) []string {
 const truncationSuffix = "..."
 
 // sanitizePatternForPrompt defends against patterns that would otherwise
-// break the prompt structure or carry an injection payload. Steps:
+// break the prompt structure. Steps:
 //
 //  1. TrimSpace
 //  2. Replace \r, \n, \t with a single space (prevents bullet-list breakout)
 //  3. Drop Unicode control characters
-//  4. Pass through ai.SanitizeLogContent (NFKC normalize, strip zero-width/
-//     bidi chars, replace known injection phrases with [FILTERED])
-//  5. TrimSpace again (the injection replacement can leave whitespace)
+//  4. Pass through ai.NormalizePromptContent (NFKC normalize, strip zero-
+//     width/bidi chars, drop non-printables). This matches how the LLM-
+//     facing log content is normalized so patterns still substring-match
+//     against finding text.
+//  5. TrimSpace again
 //  6. Truncate to maxPatternRunes with truncationSuffix on overflow
+//
+// It deliberately does NOT call ai.SanitizeLogContent: that function replaces
+// tokens like "USER:" / "SYSTEM:" and phrases like "ignore previous
+// instructions" with "[FILTERED]", which is correct for untrusted log
+// content but would rewrite operator-authored exclusion strings and break
+// the intended substring match.
 func sanitizePatternForPrompt(p string) string {
 	p = strings.TrimSpace(p)
 	if p == "" {
@@ -246,7 +257,7 @@ func sanitizePatternForPrompt(p string) string {
 	}
 	p = b.String()
 
-	p = ai.SanitizeLogContent(p)
+	p = ai.NormalizePromptContent(p)
 	p = strings.TrimSpace(p)
 
 	runes := []rune(p)

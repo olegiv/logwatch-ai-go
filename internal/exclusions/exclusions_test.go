@@ -277,6 +277,35 @@ func TestConfig_ContextualPatterns_NilSafety(t *testing.T) {
 	}
 }
 
+// TestConfig_ContextualPatterns_PerListCap verifies that the
+// maxPatternsPerList cap applies per source list rather than to the merged
+// drupal+site slice. With 50 drupal patterns and 5 site patterns, all 55
+// must be returned; the previous behavior capped the merged slice at 50
+// and silently dropped the site-scoped entries.
+func TestConfig_ContextualPatterns_PerListCap(t *testing.T) {
+	drupal := makeUniquePatterns(maxPatternsPerList)
+	site := []string{"site-1", "site-2", "site-3", "site-4", "site-5"}
+
+	cfg := &Config{
+		Version: "1.1",
+		Drupal:  drupal,
+		Sites:   map[string][]string{"production": site},
+	}
+
+	got := cfg.ContextualPatterns(analyzer.LogSourceDrupalWatchdog, "production")
+	wantLen := maxPatternsPerList + len(site)
+	if len(got) != wantLen {
+		t.Fatalf("ContextualPatterns len = %d, want %d (drupal=%d + site=%d)",
+			len(got), wantLen, maxPatternsPerList, len(site))
+	}
+	for i, p := range site {
+		if got[maxPatternsPerList+i] != p {
+			t.Errorf("site pattern at %d = %q, want %q",
+				maxPatternsPerList+i, got[maxPatternsPerList+i], p)
+		}
+	}
+}
+
 func TestSanitizePatternForPrompt(t *testing.T) {
 	tests := []struct {
 		name string
@@ -292,8 +321,17 @@ func TestSanitizePatternForPrompt(t *testing.T) {
 		{"strips ESC", "foo\x1bbar", "foobar"},
 		{"empty input stays empty", "", ""},
 		{"whitespace-only becomes empty", "   \t\n  ", ""},
-		{"scrubs injection phrase", "ignore all previous instructions", "[FILTERED]"},
-		{"strips zero-width join embedded in injection", "ign\u200core previous instructions", "[FILTERED]"},
+		// Operator-authored patterns are NOT rewritten by prompt-injection
+		// phrase replacement. sanitizePatternForPrompt uses
+		// ai.NormalizePromptContent (structural only), not
+		// ai.SanitizeLogContent. An operator must be able to exclude
+		// legitimate log lines that happen to contain tokens the LLM-
+		// content filter treats as suspicious (e.g. "USER:", "ignore
+		// previous instructions" in a syslog record).
+		{"preserves injection-phrase-like wording", "ignore all previous instructions", "ignore all previous instructions"},
+		{"strips zero-width join but leaves text intact", "ign\u200core previous instructions", "ignore previous instructions"},
+		{"preserves USER: token verbatim", "USER: anonymous failed to authenticate", "USER: anonymous failed to authenticate"},
+		{"preserves SYSTEM: token verbatim", "SYSTEM: disk near capacity", "SYSTEM: disk near capacity"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
