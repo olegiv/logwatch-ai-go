@@ -1,12 +1,18 @@
 # Finding Exclusions
 
-The analyzer can suppress individual findings returned by the LLM before
-they reach SQLite or Telegram. This is intended for known-and-accepted
-noise — for example, a benign "TLS certificate validation failures"
-message coming from an internal host that the team has already triaged.
+The analyzer can instruct the LLM to ignore specific conditions during
+analysis so they never appear as findings in the first place. This keeps
+`systemStatus`, `summary`, `metrics`, `criticalIssues`, `warnings`, and
+`recommendations` all coherent with each other — the excluded conditions
+do not inflate `failedLogins`, do not push status to `Bad`, and are not
+mentioned in the textual summary.
+
+Patterns are rendered directly into the prompt sent to the LLM, which is
+why they must not contain secrets.
 
 The feature is **opt-in**: if no `exclusions.json` file is present the
-analyzer behaves exactly as before.
+analyzer behaves exactly as before (byte-identical prompt output, so
+Anthropic prompt-cache hits are preserved).
 
 ## Quick Start
 
@@ -16,15 +22,16 @@ analyzer behaves exactly as before.
    cp configs/exclusions.json.example configs/exclusions.json
    ```
 
-2. Edit the file and list the descriptions you want suppressed.
+2. Edit the file and list the conditions you want the LLM to ignore.
 
 3. Run the analyzer. A log line like
 
    ```
-   Applied finding exclusions critical_excluded=1 warnings_excluded=0 recommendations_excluded=0
+   Injecting operator-defined exclusion patterns into prompt patterns_global=1 patterns_contextual=2
    ```
 
-   confirms the filter ran.
+   confirms the patterns were attached to the request. Pattern text is
+   never logged.
 
 If the file is absent the feature is a silent no-op.
 
@@ -32,9 +39,15 @@ If the file is absent the feature is a silent no-op.
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.1",
   "global": [
     "TLS certificate validation failures"
+  ],
+  "logwatch": [
+    "kernel: NETDEV WATCHDOG"
+  ],
+  "drupal": [
+    "Deprecated function"
   ],
   "sites": {
     "production": [
@@ -47,29 +60,45 @@ If the file is absent the feature is a silent no-op.
 }
 ```
 
-| Field     | Meaning                                                                                     |
-|-----------|---------------------------------------------------------------------------------------------|
-| `version` | Config format version. Must be exactly `"1.0"`; other values fail validation. Required.     |
-| `global`  | Patterns applied to every run, regardless of log source.                                    |
-| `sites`   | Optional map keyed by Drupal site ID (from `drupal-sites.json`). Stacked on top of `global`.|
+| Field      | Meaning                                                                                                  |
+|------------|----------------------------------------------------------------------------------------------------------|
+| `version`  | Config format version. `"1.1"` (recommended) or `"1.0"` (backward-compatible, no `logwatch`/`drupal`).   |
+| `global`   | Applies to every run. Rendered into the **system prompt** (stable, cache-friendly for Anthropic).        |
+| `logwatch` | Applies only to logwatch runs. Rendered into the **user prompt**. (v1.1 only.)                           |
+| `drupal`   | Applies only to Drupal watchdog runs, regardless of site. Rendered into the **user prompt**. (v1.1.)     |
+| `sites`    | Map keyed by Drupal site ID (from `drupal-sites.json`). Stacked on top of `drupal`. User-prompt section. |
 
-The `sites` map has no effect for the `logwatch` source type because it
-does not have a site ID.
+## Resolution
+
+| Run type         | System prompt gets | User prompt gets            |
+|------------------|--------------------|-----------------------------|
+| Logwatch         | `global`           | `logwatch`                  |
+| Drupal (site X)  | `global`           | `drupal` + `sites.X`        |
+
+`logwatch` patterns are ignored for Drupal runs. `drupal` and
+`sites.<id>` patterns are ignored for logwatch runs. Unknown site IDs
+fall back to just `drupal`.
 
 ## Match Semantics
 
-- **Case-insensitive substring**. A pattern matches a finding when it
-  appears anywhere in the finding text after both sides are lowercased.
-  `"tls certificate"` matches `"TLS certificate validation failures on
-  host alpha"`.
-- **Regex metacharacters are inert**. `.` only matches a literal dot,
-  `.*` only matches the literal characters `.*`, and so on. This is
-  deliberate: plain substring matching means operator-authored patterns
-  cannot cause catastrophic backtracking (no ReDoS).
-- **Scope**: applied uniformly to `criticalIssues`, `warnings`, and
-  `recommendations`. There is no per-pattern category targeting.
-- **Order does not matter**. Patterns are de-duplicated case-insensitively
-  and applied as a set.
+- The LLM is instructed to match **case-insensitively by substring**
+  against the finding text it would otherwise emit. Regex metacharacters
+  are treated as literal text.
+- Scope: the instruction applies uniformly to `criticalIssues`,
+  `warnings`, `recommendations`, and — crucially — to `systemStatus`,
+  `summary`, and `metrics`. A fully excluded run yields a coherent
+  "Good" analysis, not a "Bad" status with the findings silently removed.
+- Order within a list does not change behavior. Patterns are de-duplicated
+  case-insensitively at load time.
+
+### Best-effort guarantee
+
+Prompt-level exclusions are **advisory to the model**, not a hard filter.
+In practice, Claude follows the instruction reliably, but there is no
+deterministic guarantee that every excluded condition will be suppressed
+on every run. Local (Ollama, LM Studio) models may be less consistent.
+For regulatory or compliance contexts that require guaranteed suppression,
+this feature is not the right tool.
 
 ## CLI Options
 
@@ -89,36 +118,50 @@ When `-exclusions-config` is not given, the analyzer searches, in order:
 The first file that exists is used. If none exist, the feature is
 disabled for that run.
 
-## Behavior When All Findings Are Excluded
-
-The analysis is still stored and still sent to Telegram. The only change
-is that the matching bullets are missing from the message. The overall
-`systemStatus`, `summary`, and metrics are **not** re-evaluated — the
-LLM's original verdict stands, so an operator can still see that the run
-saw issues, even if all of them were suppressed.
-
 ## Validation
 
 `exclusions.json` is validated on load. The analyzer refuses to start if:
 
-- `version` is missing or is anything other than `"1.0"`.
+- `version` is missing or is anything other than `"1.0"` or `"1.1"`.
 - Any pattern is blank or whitespace-only.
 - The same pattern appears twice (case-insensitively) in the same list.
 - Any site key is empty.
+- Any single list contains more than 50 patterns.
 - The file is larger than 1 MiB (sanity limit).
 
-Errors point to the offending entry (e.g., `global[3]: pattern is blank`).
+Errors point to the offending entry (e.g., `global[3]: pattern is blank`
+or `logwatch: too many patterns`).
+
+## Security Considerations
+
+- **Do not put secrets into patterns.** Patterns are sent verbatim to the
+  LLM provider (Anthropic, Ollama, LM Studio). Treat them as public.
+- Patterns are sanitized before injection. Control characters (newlines,
+  tabs, DEL, ESC) are stripped or replaced with spaces so an operator
+  typo cannot break the prompt structure. Known prompt-injection phrases
+  (`ignore previous instructions`, …) are replaced with `[FILTERED]` via
+  `ai.SanitizeLogContent`, and zero-width / bidi characters are removed.
+- Patterns are capped at 200 runes each (longer are truncated with `...`)
+  and at 50 entries per list, so a misconfigured or hostile file cannot
+  inflate every prompt.
+- `exclusions.json` is read once at startup from operator-controlled
+  disk, with a 1 MiB size cap.
+- Pattern text is never logged at info level; only counts are reported.
 
 ## Operational Notes
 
-- Pattern text is **not** logged at info level to avoid leaking
-  operator-authored strings into log aggregation. The log line only
-  reports numeric counts.
-- `exclusions.json` has the same trust level as `.env`: operator-
-  authored, on-disk, loaded once per run. Do not fetch patterns from the
-  network or from environment variables at runtime.
+- Keep `global` stable across runs — it lives in the system prompt and
+  is included in the Anthropic prompt-cache prefix. Modifying it
+  invalidates the cache.
 - Unknown site IDs in `sites` do not fail the run; patterns for sites
   that do not exist simply have no effect.
+- Historical context retrieved from the summaries database may still
+  mention findings that are now excluded, for up to 90 days (the
+  retention window). New analyses will not reintroduce them, because the
+  LLM is instructed to ignore them regardless of where they appear.
+- `exclusions.json.v1.0` files continue to work unchanged. Add `logwatch`
+  and `drupal` fields and bump the version to `"1.1"` to use the new
+  source-wide scopes.
 
 ## When _Not_ to Use This
 
@@ -127,3 +170,5 @@ Errors point to the offending entry (e.g., `global[3]: pattern is blank`).
 - To work around prompt issues. If the LLM repeatedly produces a wrong
   description, consider tightening the prompt or the log preprocessor
   first.
+- Where strict guaranteed suppression is required. This is a best-effort
+  feature by construction.

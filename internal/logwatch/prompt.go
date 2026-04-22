@@ -24,7 +24,7 @@ func (p *PromptBuilder) GetLogType() string {
 
 // GetSystemPrompt returns the system prompt for logwatch analysis.
 // This defines Claude's role as a Linux system administrator analyzing logwatch reports.
-func (p *PromptBuilder) GetSystemPrompt() string {
+func (p *PromptBuilder) GetSystemPrompt(globalExclusions []string) string {
 	return `You are a senior system administrator and security analyst with expertise in Linux system security and operations. Your role is to analyze logwatch reports and provide actionable insights.
 
 **Analysis Framework:**
@@ -93,11 +93,11 @@ You MUST respond with a valid JSON object (and ONLY JSON) in this exact format:
 - Be specific in recommendations (include commands, file paths, etc.)
 - Use clear, concise language
 - If uncertain, state assumptions clearly
-- Empty arrays are acceptable if no issues/warnings/recommendations exist` + ai.StringArrayFormatReminder
+- Empty arrays are acceptable if no issues/warnings/recommendations exist` + ai.GlobalExclusionsBlock(globalExclusions) + ai.StringArrayFormatReminder
 }
 
 // GetUserPrompt constructs the user prompt with logwatch content and historical context.
-func (p *PromptBuilder) GetUserPrompt(logContent, historicalContext string) string {
+func (p *PromptBuilder) GetUserPrompt(logContent, historicalContext string, contextualExclusions []string) string {
 	var prompt strings.Builder
 
 	prompt.WriteString("LOGWATCH OUTPUT:\n")
@@ -109,6 +109,8 @@ func (p *PromptBuilder) GetUserPrompt(logContent, historicalContext string) stri
 		prompt.WriteString(ai.SanitizeLogContent(historicalContext))
 		prompt.WriteString("\n\n")
 	}
+
+	prompt.WriteString(ai.ContextualExclusionsBlock(contextualExclusions))
 
 	prompt.WriteString("Please analyze the logwatch output above and provide your assessment in JSON format as specified.")
 

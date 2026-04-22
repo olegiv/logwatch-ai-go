@@ -37,6 +37,56 @@ a plain JSON string. Never an object, number, or null.
   INCORRECT: "recommendations": [{"description": "Configure certificate trust"}]
 `
 
+// GlobalExclusionsBlock renders operator-defined global exclusion patterns
+// as a system-prompt section. Returns an empty string when the list is
+// empty so the no-exclusions case produces byte-identical prompt output
+// (important for Anthropic prompt cache hit rate).
+//
+// The block instructs the LLM not only to omit matching findings but also
+// to avoid letting them influence systemStatus, summary, and metrics —
+// so the stored analysis is coherent with what reaches Telegram.
+func GlobalExclusionsBlock(patterns []string) string {
+	if len(patterns) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n**OPERATOR-DEFINED EXCLUSIONS (global):**\n")
+	b.WriteString("The operator has classified the following conditions as known and accepted.\n")
+	b.WriteString("You MUST NOT report them as criticalIssues, warnings, or recommendations.\n")
+	b.WriteString("You MUST NOT let them influence systemStatus, summary, or any numeric metric\n")
+	b.WriteString("(failedLogins, errorCount, etc.). Treat matching log lines as if absent.\n")
+	b.WriteString("Match case-insensitively by substring against the finding text you would\n")
+	b.WriteString("otherwise emit. Excluded patterns:\n")
+	for _, p := range patterns {
+		b.WriteString("- ")
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// ContextualExclusionsBlock renders run-scoped exclusion patterns (source-
+// wide and/or site-specific) as a user-prompt section. Returns an empty
+// string when the list is empty.
+//
+// Placed immediately before the closing "Please analyze..." directive in
+// the user prompt so recency reinforces the instruction.
+func ContextualExclusionsBlock(patterns []string) string {
+	if len(patterns) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("RUN-SCOPED EXCLUSIONS (apply in addition to any global exclusions in the\n")
+	b.WriteString("system prompt): do not report, and do not let affect status/summary/metrics:\n")
+	for _, p := range patterns {
+		b.WriteString("- ")
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 // GetSystemPrompt returns the system prompt with cache control
 func GetSystemPrompt() string {
 	return `You are a senior system administrator and security analyst with expertise in Linux system security and operations. Your role is to analyze logwatch reports and provide actionable insights.

@@ -39,11 +39,11 @@ type mockPromptBuilder struct {
 	logType string
 }
 
-func (m *mockPromptBuilder) GetSystemPrompt() string {
+func (m *mockPromptBuilder) GetSystemPrompt(_ []string) string {
 	return "test system prompt"
 }
 
-func (m *mockPromptBuilder) GetUserPrompt(logContent, _ string) string {
+func (m *mockPromptBuilder) GetUserPrompt(logContent, _ string, _ []string) string {
 	return "test user prompt: " + logContent
 }
 

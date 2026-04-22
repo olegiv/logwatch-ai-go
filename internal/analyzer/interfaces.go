@@ -66,11 +66,21 @@ type BudgetPreprocessor interface {
 type PromptBuilder interface {
 	// GetSystemPrompt returns the system prompt for this log type.
 	// This prompt defines Claude's role and analysis framework.
-	GetSystemPrompt() string
+	//
+	// globalExclusions, if non-empty, are rendered as an operator-scoped
+	// instruction block telling the LLM to ignore matching findings and
+	// their influence on systemStatus, summary, and metrics. Pass nil for
+	// no exclusions; the resulting prompt is byte-identical to the
+	// pre-exclusion output, which preserves Anthropic prompt-cache hits.
+	GetSystemPrompt(globalExclusions []string) string
 
 	// GetUserPrompt constructs the user prompt with log content and history.
 	// The logContent should already be sanitized before passing.
-	GetUserPrompt(logContent, historicalContext string) string
+	//
+	// contextualExclusions, if non-empty, are rendered as a run-scoped
+	// instruction block (source-wide and/or site-specific patterns). Pass
+	// nil for no exclusions.
+	GetUserPrompt(logContent, historicalContext string, contextualExclusions []string) string
 
 	// GetLogType returns the type identifier (e.g., "logwatch", "drupal_watchdog").
 	GetLogType() string
