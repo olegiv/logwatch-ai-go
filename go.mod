@@ -1,13 +1,13 @@
 module github.com/olegiv/logwatch-ai-go
 
-go 1.26.0
+go 1.26.2
 
 require (
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/joho/godotenv v1.5.1
 	github.com/liushuangls/go-anthropic/v2 v2.18.0
 	github.com/olegiv/go-logger v0.2.2
-	github.com/rs/zerolog v1.35.0
+	github.com/rs/zerolog v1.35.1
 	github.com/spf13/viper v1.21.0
 	golang.org/x/text v0.36.0
 	modernc.org/sqlite v1.49.1

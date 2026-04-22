@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-22
+
 ### Changed
 - **Finding exclusions now operate at prompt level, not as a post-filter.**
   Operator-defined patterns in `exclusions.json` are rendered into the
@@ -76,6 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deterministic. This is a behavior change from the previous post-filter
   (which was deterministic but incoherent). Documented in
   `docs/EXCLUSIONS.md`.
+
+### Dependencies
+- Bump Go toolchain 1.26.0 → 1.26.2 in `go.mod`. Picks up upstream
+  security and bug fixes at the patch level; no language or stdlib
+  changes relevant to this project.
+- Update `github.com/rs/zerolog` v1.35.0 → v1.35.1 (non-security
+  patch release).
+- CI (`.github/workflows/go.yml`) now reads the Go version from
+  `go.mod` via `go-version-file` instead of the previously-pinned
+  `'1.25'`. Also bumps `actions/setup-go` v4 → v5. Previously CI
+  relied on `GOTOOLCHAIN=auto` to fetch the version declared in
+  `go.mod` at build time; this makes the alignment explicit.
 
 ## [0.10.0] - 2026-04-21
 
@@ -646,7 +660,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.7.0...v0.8.0
