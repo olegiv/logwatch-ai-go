@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -130,12 +131,7 @@ func validatePatternList(name string, patterns []string) error {
 }
 
 func isSupportedVersion(v string) bool {
-	for _, s := range supportedVersions {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(supportedVersions, v)
 }
 
 // ListSites returns the site IDs that have at least one pattern, sorted.
@@ -255,10 +251,7 @@ func sanitizePatternForPrompt(p string) string {
 
 	runes := []rune(p)
 	if len(runes) > maxPatternRunes {
-		keep := maxPatternRunes - len([]rune(truncationSuffix))
-		if keep < 0 {
-			keep = 0
-		}
+		keep := max(maxPatternRunes-len([]rune(truncationSuffix)), 0)
 		p = string(runes[:keep]) + truncationSuffix
 	}
 	return p
