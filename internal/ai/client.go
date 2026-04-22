@@ -6,9 +6,9 @@ package ai
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -79,7 +79,10 @@ func NewClient(apiKey, model, proxyURL string, timeoutSeconds, maxTokens int) (*
 
 	pricing, known := ResolvePricing(model)
 	if !known {
-		log.Printf("ai: unknown model %q — cost will be estimated using fallback pricing (%.2f/%.2f per MTok input/output); update modelPricingTable in internal/ai/pricing.go",
+		// NewClient runs before the SecureLogger is wired to the anthropic
+		// Client struct, so emit to stderr instead of the stdlib log package.
+		// model has already passed the CLAUDE_MODEL regex in config.Validate.
+		fmt.Fprintf(os.Stderr, "ai: unknown model %q - cost will be estimated using fallback pricing (%.2f/%.2f per MTok input/output); update modelPricingTable in internal/ai/pricing.go\n",
 			model, pricing.Input, pricing.Output)
 	}
 
