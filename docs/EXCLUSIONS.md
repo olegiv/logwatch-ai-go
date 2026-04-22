@@ -136,14 +136,25 @@ or `logwatch: too many patterns`).
 
 - **Do not put secrets into patterns.** Patterns are sent verbatim to the
   LLM provider (Anthropic, Ollama, LM Studio). Treat them as public.
-- Patterns are sanitized before injection. Control characters (newlines,
-  tabs, DEL, ESC) are stripped or replaced with spaces so an operator
-  typo cannot break the prompt structure. Known prompt-injection phrases
-  (`ignore previous instructions`, …) are replaced with `[FILTERED]` via
-  `ai.SanitizeLogContent`, and zero-width / bidi characters are removed.
+- Patterns are structurally sanitized before injection via
+  `ai.NormalizePromptContent`: control characters (newlines, tabs, DEL,
+  ESC) are stripped or replaced with spaces so an operator typo cannot
+  break the bullet-list structure, NFKC normalization collapses
+  fullwidth / ligature variants to their ASCII forms, and zero-width /
+  bidi characters are removed. This matches how the LLM-facing log
+  content is normalized so patterns still substring-match finding text.
+- Prompt-injection phrase replacement (the `[FILTERED]` behavior of
+  `ai.SanitizeLogContent`) is **not** applied to operator patterns.
+  Operators must be able to exclude legitimate log lines containing
+  tokens like `USER:`, `SYSTEM:`, or wording such as "ignore previous
+  instructions" that appear in real syslog / watchdog records. The
+  containment boundary for operator patterns is the rendered bullet-list
+  framing plus the "MUST NOT / treat as absent" instruction, not text
+  rewriting.
 - Patterns are capped at 200 runes each (longer are truncated with `...`)
-  and at 50 entries per list, so a misconfigured or hostile file cannot
-  inflate every prompt.
+  and at 50 entries per scope. The per-scope cap applies independently,
+  so a Drupal run with 50 `drupal` patterns + 50 `sites.<id>` patterns
+  can reach 100 contextual patterns total.
 - `exclusions.json` is read once at startup from operator-controlled
   disk, with a 1 MiB size cap.
 - Pattern text is never logged at info level; only counts are reported.

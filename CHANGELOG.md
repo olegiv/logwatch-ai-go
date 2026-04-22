@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to load without modification. `global` now feeds the system prompt
   (cache-friendly for Anthropic); `logwatch`/`drupal`/`sites.<id>` feed
   the user prompt (per-run variable).
+- `exclusions.Config.ContextualPatterns` now applies the 50-pattern cap
+  to each source list independently rather than to the merged slice. A
+  valid config with 50 drupal-wide patterns plus any site-scoped
+  patterns previously dropped every site entry silently; merged
+  drupal + site lists can now reach up to 100 patterns.
 
 ### Added
 - `exclusions.Config.GlobalPatterns()` and
@@ -35,9 +40,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case produces byte-identical prompt output (preserves Anthropic
   prompt-cache hits).
 - Pattern sanitization: strips control chars, collapses newlines/tabs to
-  spaces, truncates at 200 runes, runs each pattern through
-  `ai.SanitizeLogContent` as defense-in-depth against accidental
-  injection payloads. 50-pattern cap per list rejected at load time.
+  spaces, runs each pattern through `ai.NormalizePromptContent` (NFKC
+  normalization + zero-width / bidi strip + non-printable drop — the
+  same structural normalization applied to LLM-facing log content, so
+  operator patterns still substring-match the normalized finding text),
+  then truncates at 200 runes. The LLM-content-only phrase replacement
+  behavior of `ai.SanitizeLogContent` is deliberately not applied to
+  operator patterns — operators must be able to exclude real log lines
+  containing tokens like `USER:` or wording like "ignore previous
+  instructions". 50-pattern cap per scope, applied independently so a
+  Drupal run can reach up to 50 (`drupal`) + 50 (`sites.<id>`) = 100
+  contextual patterns.
+- `ai.NormalizePromptContent` — new public helper exposing the
+  structural portion of `SanitizeLogContent` (NFKC + zero-width strip +
+  non-printable removal). `SanitizeLogContent` now composes
+  `NormalizePromptContent` + prompt-injection phrase replacement +
+  excessive-newline collapsing, so untrusted log content still gets the
+  full hardening pipeline.
 
 ### Removed
 - **BREAKING (internal API):** `exclusions.Filter`, `exclusions.FilterStats`

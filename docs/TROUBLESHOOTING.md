@@ -166,7 +166,12 @@ Configuration error: TELEGRAM_CHANNEL_ARCHIVE_ID must be less than -100 (supergr
 
 2. **Pattern does not appear in the finding text.** Match is case-insensitive *substring*, not semantic. Check what the LLM actually produced — e.g. via `sqlite3 /opt/logwatch-ai/data/summaries.db 'select critical_issues from summaries order by id desc limit 1;'` — then refine the pattern.
 
-3. **Site-scoped pattern but no `-drupal-site`.** Patterns under `sites.<id>` only apply when the analyzer is invoked with the matching `-drupal-site <id>`. For logwatch runs, only `global` applies.
+3. **Pattern under the wrong scope.** v1.1 has four scopes and each only applies to specific run types:
+   - `global` — applies to every run (logwatch and Drupal).
+   - `logwatch` — applies only when `LOG_SOURCE_TYPE=logwatch`.
+   - `drupal` — applies to every Drupal run (`LOG_SOURCE_TYPE=drupal_watchdog`), regardless of `-drupal-site`.
+   - `sites.<id>` — applies only when the analyzer is invoked with `-drupal-site <id>`.
+   A pattern placed under `logwatch` will NOT apply to Drupal runs, and vice versa. Move the pattern to `global` if you need it on every run.
 
 4. **Config failed to load.** The startup log prints `Loaded finding exclusions` with the path when the file is active. If that line is missing, check the analyzer's log for a `failed to load exclusions config` error.
 

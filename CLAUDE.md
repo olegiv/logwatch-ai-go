@@ -71,8 +71,16 @@ type BudgetPreprocessor interface {
 }
 
 type PromptBuilder interface {
-    GetSystemPrompt() string
-    GetUserPrompt(logContent, historicalContext string) string
+    // globalExclusions: operator-scoped patterns rendered into the system
+    // prompt. Pass nil for byte-identical output vs the no-exclusions case
+    // (preserves Anthropic prompt-cache hits).
+    GetSystemPrompt(globalExclusions []string) string
+
+    // contextualExclusions: run-scoped patterns (source-wide and/or
+    // site-specific) rendered into the user prompt. Pass nil for no
+    // exclusions. logContent should already be sanitized before passing.
+    GetUserPrompt(logContent, historicalContext string, contextualExclusions []string) string
+
     GetLogType() string
 }
 ```

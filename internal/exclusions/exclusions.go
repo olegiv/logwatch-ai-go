@@ -14,10 +14,17 @@
 //
 // The matching is nominally case-insensitive plain substring (the LLM is
 // instructed to treat regex metacharacters as literal text), so the
-// configuration file is not a ReDoS vector. Patterns are additionally run
-// through `ai.SanitizeLogContent` before being injected into the prompt so
-// that a typo like `"ignore previous instructions"` cannot itself become
-// an injection payload.
+// configuration file is not a ReDoS vector. Patterns are run through
+// `ai.NormalizePromptContent` before injection so they normalize the same
+// way the LLM-facing log content does (NFKC, zero-width / bidi strip,
+// non-printable drop) — this is required so operator patterns still
+// substring-match the normalized finding text. The LLM-content-only
+// `ai.SanitizeLogContent` (which rewrites phrases like "ignore previous
+// instructions" to `[FILTERED]`) is deliberately NOT applied here, because
+// operator patterns must match real log lines that can legitimately
+// contain such tokens. The containment boundary for exclusion patterns is
+// the rendered bullet-list framing plus the "MUST NOT / treat as absent"
+// instruction, not text rewriting.
 //
 // Because the exclusions now reach the LLM as plain text, the operator
 // MUST NOT place secrets (API keys, passwords, PII) into patterns.
@@ -215,7 +222,7 @@ func sanitizePatternsForPrompt(patterns []string) []string {
 // truncationSuffix is appended to patterns that exceed maxPatternRunes.
 // Three ASCII dots are stable under NFKC normalization (unlike U+2026 "…"
 // which decomposes to "..."), so truncation length is predictable even
-// after ai.SanitizeLogContent runs its normalization pass.
+// after ai.NormalizePromptContent runs its NFKC pass.
 const truncationSuffix = "..."
 
 // sanitizePatternForPrompt defends against patterns that would otherwise
