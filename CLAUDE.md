@@ -210,3 +210,4 @@ Specialized agents and slash commands are defined in `.claude/agents/` and `.cla
 - `/cost-report` - Cost analysis
 - `/security-audit` - Security scan
 - `/code-quality` - Code quality scan
+- `/release-gh-prepare` - Cut a new version and create a GitHub draft release (mandatory version approval)
