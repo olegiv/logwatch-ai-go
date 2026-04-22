@@ -9,7 +9,6 @@ import (
 	"crypto/subtle"
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"net/url"
 	"os"
@@ -638,9 +637,9 @@ func validateLLMBaseURL(envName, raw string) error {
 	if u.Scheme == "http" {
 		switch {
 		case ip != nil && !ip.IsLoopback():
-			log.Printf("config: %s uses cleartext http:// to %s - log content will be transmitted unencrypted", envName, host)
+			fmt.Fprintf(os.Stderr, "config: %s uses cleartext http:// to %s - log content will be transmitted unencrypted\n", envName, host)
 		case ip == nil && !isLocalName:
-			log.Printf("config: %s uses cleartext http:// to a remote host - log content will be transmitted unencrypted", envName)
+			fmt.Fprintf(os.Stderr, "config: %s uses cleartext http:// to a remote host - log content will be transmitted unencrypted\n", envName)
 		}
 	}
 

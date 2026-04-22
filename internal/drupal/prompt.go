@@ -168,6 +168,9 @@ func (p *PromptBuilder) GetUserPrompt(logContent, historicalContext string, cont
 	prompt.WriteString("\n\n")
 
 	if historicalContext != "" {
+		// historicalContext was validated by ai.ParseAnalysis and persisted to
+		// SQLite before reaching here; SanitizeLogContent is defense-in-depth
+		// against a tampered DB row being re-interpreted by the LLM.
 		prompt.WriteString("HISTORICAL CONTEXT:\n")
 		prompt.WriteString(ai.SanitizeLogContent(historicalContext))
 		prompt.WriteString("\n\n")
