@@ -2,13 +2,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package exclusions loads operator-defined finding exclusion patterns and
-// applies them to an ai.Analysis, removing findings whose text contains any
-// configured pattern as a case-insensitive substring.
+// makes them available for injection into the LLM prompt.
 //
-// The matching is intentionally plain substring (strings.Contains on
-// lowercased text): regex metacharacters are inert, so the configuration
-// file is not a ReDoS vector. A future "add regex" change must be a
-// conscious decision that re-evaluates that trade-off.
+// Exclusions are NOT applied as a post-filter on the model output. Instead,
+// patterns are rendered into the system prompt (for `global`) and the user
+// prompt (for source-wide and per-site scopes) with an explicit instruction
+// telling the LLM to ignore matching findings AND to ignore their influence
+// on `systemStatus`, `summary`, and `metrics`. This keeps the stored
+// summary, the message sent to Telegram, and the KPIs coherent with what
+// the operator considers actionable.
+//
+// The matching is nominally case-insensitive plain substring (the LLM is
+// instructed to treat regex metacharacters as literal text), so the
+// configuration file is not a ReDoS vector. Patterns are run through
+// `ai.NormalizePromptContent` before injection so they normalize the same
+// way the LLM-facing log content does (NFKC, zero-width / bidi strip,
+// non-printable drop) — this is required so operator patterns still
+// substring-match the normalized finding text. The LLM-content-only
+// `ai.SanitizeLogContent` (which rewrites phrases like "ignore previous
+// instructions" to `[FILTERED]`) is deliberately NOT applied here, because
+// operator patterns must match real log lines that can legitimately
+// contain such tokens. The containment boundary for exclusion patterns is
+// the rendered bullet-list framing plus the "MUST NOT / treat as absent"
+// instruction, not text rewriting.
+//
+// Because the exclusions now reach the LLM as plain text, the operator
+// MUST NOT place secrets (API keys, passwords, PII) into patterns.
 package exclusions
 
 import (
@@ -16,10 +35,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
+	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
 
 // maxConfigFileSize caps the size of exclusions.json read from disk to
@@ -28,32 +50,36 @@ import (
 // realistic use.
 const maxConfigFileSize = 1 << 20 // 1 MiB
 
-// supportedVersion is the only exclusions.json schema version this build
-// understands. Introducing a new version bumps this and adds a migration
-// path, so that a v2 file is not silently processed with v1 semantics.
-const supportedVersion = "1.0"
+// supportedVersions lists the exclusions.json schema versions this build
+// understands. "1.0" is accepted for backward compatibility; "1.1" adds the
+// optional `logwatch` and `drupal` scope lists.
+var supportedVersions = []string{"1.0", "1.1"}
+
+// maxPatternsPerList caps the number of patterns allowed in any single list
+// (global, logwatch, drupal, or a single sites entry). Set to a value that
+// comfortably covers real operator use while preventing a misconfigured file
+// from inflating every prompt by thousands of tokens.
+const maxPatternsPerList = 50
+
+// maxPatternRunes caps the rune length of a single pattern after
+// sanitization. Longer patterns are truncated with an ellipsis suffix.
+const maxPatternRunes = 200
 
 // Config represents the parsed exclusions.json file.
 //
-// Global patterns apply to every analysis. Per-site patterns apply only
-// when the analyzer runs against the corresponding Drupal site ID. The
-// siteID is empty for logwatch runs, so those only use Global.
+// Global patterns apply to every analysis and are injected into the system
+// prompt (stable, cache-friendly for Anthropic). Logwatch, Drupal, and
+// Sites[id] patterns are injected into the user prompt (per-run variable).
+//
+// Resolution:
+//   - logwatch runs: global (system) + logwatch (user)
+//   - drupal runs:   global (system) + drupal + sites[siteID] (both user)
 type Config struct {
-	Version string              `json:"version"`
-	Global  []string            `json:"global"`
-	Sites   map[string][]string `json:"sites"`
-}
-
-// FilterStats reports how many findings were removed per category.
-type FilterStats struct {
-	CriticalExcluded        int
-	WarningsExcluded        int
-	RecommendationsExcluded int
-}
-
-// Total returns the sum of all excluded-finding counts.
-func (s FilterStats) Total() int {
-	return s.CriticalExcluded + s.WarningsExcluded + s.RecommendationsExcluded
+	Version  string              `json:"version"`
+	Global   []string            `json:"global,omitempty"`
+	Logwatch []string            `json:"logwatch,omitempty"`
+	Drupal   []string            `json:"drupal,omitempty"`
+	Sites    map[string][]string `json:"sites,omitempty"`
 }
 
 // Validate checks the configuration for structural errors. It is called
@@ -64,46 +90,64 @@ func (c *Config) Validate() error {
 	if version == "" {
 		return fmt.Errorf("version is required")
 	}
-	if version != supportedVersion {
-		return fmt.Errorf("unsupported version %q: this build only supports %q", c.Version, supportedVersion)
+	if !isSupportedVersion(version) {
+		return fmt.Errorf("unsupported version %q: this build supports %v", c.Version, supportedVersions)
 	}
 
-	seen := make(map[string]struct{}, len(c.Global))
-	for i, p := range c.Global {
-		if strings.TrimSpace(p) == "" {
-			return fmt.Errorf("global[%d]: pattern is blank", i)
-		}
-		key := strings.ToLower(strings.TrimSpace(p))
-		if _, dup := seen[key]; dup {
-			return fmt.Errorf("global[%d]: duplicate pattern %q", i, p)
-		}
-		seen[key] = struct{}{}
+	if err := validatePatternList("global", c.Global); err != nil {
+		return err
+	}
+	if err := validatePatternList("logwatch", c.Logwatch); err != nil {
+		return err
+	}
+	if err := validatePatternList("drupal", c.Drupal); err != nil {
+		return err
 	}
 
 	for siteID, patterns := range c.Sites {
 		if strings.TrimSpace(siteID) == "" {
 			return fmt.Errorf("sites: empty site ID")
 		}
-		siteSeen := make(map[string]struct{}, len(patterns))
-		for i, p := range patterns {
-			if strings.TrimSpace(p) == "" {
-				return fmt.Errorf("sites[%q][%d]: pattern is blank", siteID, i)
-			}
-			key := strings.ToLower(strings.TrimSpace(p))
-			if _, dup := siteSeen[key]; dup {
-				return fmt.Errorf("sites[%q][%d]: duplicate pattern %q", siteID, i, p)
-			}
-			siteSeen[key] = struct{}{}
+		if err := validatePatternList(fmt.Sprintf("sites[%q]", siteID), patterns); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
+// validatePatternList enforces the common blank/duplicate/overflow rules on
+// a single list. Callers provide a label used in error messages so the
+// operator can locate the offending entry.
+func validatePatternList(name string, patterns []string) error {
+	if len(patterns) > maxPatternsPerList {
+		return fmt.Errorf("%s: too many patterns (%d); maximum allowed is %d", name, len(patterns), maxPatternsPerList)
+	}
+	seen := make(map[string]struct{}, len(patterns))
+	for i, p := range patterns {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("%s[%d]: pattern is blank", name, i)
+		}
+		key := strings.ToLower(strings.TrimSpace(p))
+		if _, dup := seen[key]; dup {
+			return fmt.Errorf("%s[%d]: duplicate pattern %q", name, i, p)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+func isSupportedVersion(v string) bool {
+	return slices.Contains(supportedVersions, v)
+}
+
 // ListSites returns the site IDs that have at least one pattern, sorted.
 // Used by the config layer to warn when a site ID in exclusions.json does
 // not appear in drupal-sites.json.
 func (c *Config) ListSites() []string {
+	if c == nil {
+		return nil
+	}
 	sites := make([]string, 0, len(c.Sites))
 	for id := range c.Sites {
 		sites = append(sites, id)
@@ -112,91 +156,123 @@ func (c *Config) ListSites() []string {
 	return sites
 }
 
-// Filter removes findings from a that match any effective exclusion
-// pattern and returns stats about what was removed.
-//
-// The effective pattern list is Global ++ Sites[siteID]. An empty siteID
-// (logwatch runs) or an unknown siteID falls back to Global only. Each
-// category slice is shortened in place via append(dst[:0], ...), reusing
-// the backing array; nil slices stay nil. Input patterns are not mutated.
-func (c *Config) Filter(a *ai.Analysis, siteID string) FilterStats {
-	if a == nil || c == nil {
-		return FilterStats{}
-	}
-
-	lowered := c.loweredPatterns(siteID)
-	if len(lowered) == 0 {
-		return FilterStats{}
-	}
-
-	var stats FilterStats
-	a.CriticalIssues, stats.CriticalExcluded = filterSlice(a.CriticalIssues, lowered)
-	a.Warnings, stats.WarningsExcluded = filterSlice(a.Warnings, lowered)
-	a.Recommendations, stats.RecommendationsExcluded = filterSlice(a.Recommendations, lowered)
-	return stats
-}
-
-// loweredPatterns builds the lowercase pattern list for a given siteID.
-// It allocates once per Filter call rather than inside the inner loop.
-func (c *Config) loweredPatterns(siteID string) []string {
-	total := len(c.Global)
-	var sitePatterns []string
-	if siteID != "" {
-		sitePatterns = c.Sites[siteID]
-		total += len(sitePatterns)
-	}
-	if total == 0 {
+// GlobalPatterns returns sanitized global patterns ready for injection into
+// the system prompt. Empty/whitespace-only inputs are dropped; long
+// patterns are truncated. The result is safe to embed verbatim in a
+// markdown bullet list.
+func (c *Config) GlobalPatterns() []string {
+	if c == nil {
 		return nil
 	}
-	out := make([]string, 0, total)
-	for _, p := range c.Global {
-		out = appendLoweredTrimmed(out, p)
+	return sanitizePatternsForPrompt(c.Global)
+}
+
+// ContextualPatterns returns sanitized source-scoped and site-scoped
+// patterns ready for injection into the user prompt. Resolution rules:
+//
+//   - logType == analyzer.LogSourceLogwatch:       c.Logwatch
+//   - logType == analyzer.LogSourceDrupalWatchdog: c.Drupal + c.Sites[siteID]
+//
+// An empty or unknown siteID for drupal_watchdog returns just c.Drupal.
+// Other logTypes return nil (defensive).
+//
+// Each source list is sanitized independently before merging so that the
+// per-list maxPatternsPerList cap applies per scope rather than to the
+// merged slice — otherwise a full c.Drupal list (50) would silently drop
+// every c.Sites[siteID] pattern.
+func (c *Config) ContextualPatterns(logType analyzer.LogSourceType, siteID string) []string {
+	if c == nil {
+		return nil
 	}
-	for _, p := range sitePatterns {
-		out = appendLoweredTrimmed(out, p)
+
+	switch logType {
+	case analyzer.LogSourceLogwatch:
+		return sanitizePatternsForPrompt(c.Logwatch)
+	case analyzer.LogSourceDrupalWatchdog:
+		out := sanitizePatternsForPrompt(c.Drupal)
+		if siteID != "" {
+			out = append(out, sanitizePatternsForPrompt(c.Sites[siteID])...)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// sanitizePatternsForPrompt maps sanitizePatternForPrompt across a slice,
+// dropping empty results. The output is capped at maxPatternsPerList.
+func sanitizePatternsForPrompt(patterns []string) []string {
+	if len(patterns) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		if len(out) >= maxPatternsPerList {
+			break
+		}
+		s := sanitizePatternForPrompt(p)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
 	}
 	return out
 }
 
-func appendLoweredTrimmed(dst []string, p string) []string {
+// truncationSuffix is appended to patterns that exceed maxPatternRunes.
+// Three ASCII dots are stable under NFKC normalization (unlike U+2026 "…"
+// which decomposes to "..."), so truncation length is predictable even
+// after ai.NormalizePromptContent runs its NFKC pass.
+const truncationSuffix = "..."
+
+// sanitizePatternForPrompt defends against patterns that would otherwise
+// break the prompt structure. Steps:
+//
+//  1. TrimSpace
+//  2. Replace \r, \n, \t with a single space (prevents bullet-list breakout)
+//  3. Drop Unicode control characters
+//  4. Pass through ai.NormalizePromptContent (NFKC normalize, strip zero-
+//     width/bidi chars, drop non-printables). This matches how the LLM-
+//     facing log content is normalized so patterns still substring-match
+//     against finding text.
+//  5. TrimSpace again
+//  6. Truncate to maxPatternRunes with truncationSuffix on overflow
+//
+// It deliberately does NOT call ai.SanitizeLogContent: that function replaces
+// tokens like "USER:" / "SYSTEM:" and phrases like "ignore previous
+// instructions" with "[FILTERED]", which is correct for untrusted log
+// content but would rewrite operator-authored exclusion strings and break
+// the intended substring match.
+func sanitizePatternForPrompt(p string) string {
 	p = strings.TrimSpace(p)
 	if p == "" {
-		return dst
+		return ""
 	}
-	return append(dst, strings.ToLower(p))
-}
 
-// filterSlice removes entries from in whose lowercased form contains any
-// pattern in loweredPatterns. It reuses in's backing array and returns
-// the shortened slice plus the number of removed entries.
-func filterSlice(in []string, loweredPatterns []string) ([]string, int) {
-	if len(in) == 0 {
-		return in, 0
-	}
-	out := in[:0]
-	removed := 0
-	for _, item := range in {
-		if matchesAny(item, loweredPatterns) {
-			removed++
-			continue
-		}
-		out = append(out, item)
-	}
-	// Zero out the tail so removed strings are eligible for GC.
-	for i := len(out); i < len(in); i++ {
-		in[i] = ""
-	}
-	return out, removed
-}
-
-func matchesAny(item string, loweredPatterns []string) bool {
-	lowered := strings.ToLower(item)
-	for _, p := range loweredPatterns {
-		if strings.Contains(lowered, p) {
-			return true
+	var b strings.Builder
+	b.Grow(len(p))
+	for _, r := range p {
+		switch r {
+		case '\r', '\n', '\t':
+			b.WriteRune(' ')
+		default:
+			if unicode.IsControl(r) {
+				continue
+			}
+			b.WriteRune(r)
 		}
 	}
-	return false
+	p = b.String()
+
+	p = ai.NormalizePromptContent(p)
+	p = strings.TrimSpace(p)
+
+	runes := []rune(p)
+	if len(runes) > maxPatternRunes {
+		keep := max(maxPatternRunes-len([]rune(truncationSuffix)), 0)
+		p = string(runes[:keep]) + truncationSuffix
+	}
+	return p
 }
 
 // Load reads and parses exclusions.json.

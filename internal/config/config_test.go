@@ -1434,6 +1434,12 @@ func TestApplyExclusionsConfig(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
+	v11Path := filepath.Join(tmpDir, "exclusions-v11.json")
+	v11Content := `{"version":"1.1","global":["TLS cert"],"logwatch":["kernel watchdog"],"drupal":["deprecated function"]}`
+	if err := os.WriteFile(v11Path, []byte(v11Content), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
 	t.Run("loads config when CLI path provided", func(t *testing.T) {
 		cfg := &Config{}
 		if err := cfg.applyExclusionsConfig(&CLIOptions{ExclusionsConfig: goodPath}); err != nil {
@@ -1447,6 +1453,25 @@ func TestApplyExclusionsConfig(t *testing.T) {
 		}
 		if len(cfg.Exclusions.Global) != 1 {
 			t.Errorf("len(Global) = %d, want 1", len(cfg.Exclusions.Global))
+		}
+	})
+
+	t.Run("loads v1.1 config with logwatch and drupal scopes", func(t *testing.T) {
+		cfg := &Config{}
+		if err := cfg.applyExclusionsConfig(&CLIOptions{ExclusionsConfig: v11Path}); err != nil {
+			t.Fatalf("applyExclusionsConfig: %v", err)
+		}
+		if cfg.Exclusions == nil {
+			t.Fatal("Exclusions = nil, want non-nil")
+		}
+		if cfg.Exclusions.Version != "1.1" {
+			t.Errorf("Version = %q, want 1.1", cfg.Exclusions.Version)
+		}
+		if len(cfg.Exclusions.Logwatch) != 1 {
+			t.Errorf("len(Logwatch) = %d, want 1", len(cfg.Exclusions.Logwatch))
+		}
+		if len(cfg.Exclusions.Drupal) != 1 {
+			t.Errorf("len(Drupal) = %d, want 1", len(cfg.Exclusions.Drupal))
 		}
 	})
 

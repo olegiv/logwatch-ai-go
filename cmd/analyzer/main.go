@@ -249,8 +249,27 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		}
 	}
 
+	// Resolve operator-defined exclusions (optional feature). Patterns are
+	// injected into the prompts below so the LLM avoids matching findings
+	// and their influence on systemStatus, summary, and metrics. Pattern
+	// text is deliberately not logged; only counts are reported.
+	var globalExclusions, contextualExclusions []string
+	if cfg.Exclusions != nil {
+		globalExclusions = cfg.Exclusions.GlobalPatterns()
+		logType, err := analyzer.ParseSourceType(logSource.PromptBuilder.GetLogType())
+		if err == nil {
+			contextualExclusions = cfg.Exclusions.ContextualPatterns(logType, cfg.DrupalSiteID)
+		}
+		if len(globalExclusions)+len(contextualExclusions) > 0 {
+			log.Info().
+				Int("patterns_global", len(globalExclusions)).
+				Int("patterns_contextual", len(contextualExclusions)).
+				Msg("Injecting operator-defined exclusion patterns into prompt")
+		}
+	}
+
 	// Build prompts using the log source's prompt builder
-	systemPrompt := logSource.PromptBuilder.GetSystemPrompt()
+	systemPrompt := logSource.PromptBuilder.GetSystemPrompt(globalExclusions)
 
 	promptResult, err := preparePromptForAnalysis(
 		ctx,
@@ -260,6 +279,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		systemPrompt,
 		logContent,
 		historicalContext,
+		contextualExclusions,
 		log,
 	)
 	if err != nil {
@@ -275,20 +295,6 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 	analysis, stats, err := llmClient.Analyze(ctx, systemPrompt, userPrompt)
 	if err != nil {
 		return fmt.Errorf("LLM analysis failed: %w", err)
-	}
-
-	// Apply operator-defined finding exclusions (optional feature).
-	// Pattern text is intentionally not logged to avoid leaking operator
-	// config into log aggregation at info level.
-	if cfg.Exclusions != nil {
-		fs := cfg.Exclusions.Filter(analysis, cfg.DrupalSiteID)
-		if fs.Total() > 0 {
-			log.Info().
-				Int("critical_excluded", fs.CriticalExcluded).
-				Int("warnings_excluded", fs.WarningsExcluded).
-				Int("recommendations_excluded", fs.RecommendationsExcluded).
-				Msg("Applied finding exclusions")
-		}
 	}
 
 	log.Info().

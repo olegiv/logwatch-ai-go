@@ -140,8 +140,8 @@ See `configs/drupal-sites.json.example` for configuration format.
 ## Optional: Finding Exclusions
 
 To suppress known-acceptable findings (e.g., "TLS certificate validation
-failures" on internal hosts) before they reach SQLite or Telegram, copy
-the template into the installation directory and edit the patterns:
+failures" on internal hosts), copy the template into the installation
+directory and edit the patterns:
 
 ```bash
 cp /opt/logwatch-ai/exclusions.json.example /opt/logwatch-ai/exclusions.json
@@ -149,10 +149,21 @@ chmod 640 /opt/logwatch-ai/exclusions.json
 # edit patterns as needed
 ```
 
+Patterns are rendered into the LLM prompt with an instruction to ignore
+matching conditions AND to not let them influence `systemStatus`,
+`summary`, or `metrics`. Because excluded findings are never generated
+by the LLM in the first place, SQLite and Telegram receive a
+pre-filtered view by construction — no post-processing step is
+involved. LLM compliance is best-effort, not a deterministic hard
+filter.
+
 The feature is opt-in: if `exclusions.json` is absent the analyzer
-behaves unchanged. Global patterns apply to every run; per-site patterns
-stack on top for matching `-drupal-site` IDs. See `docs/EXCLUSIONS.md`
-for file format, match semantics, and operational notes.
+behaves unchanged. Schema v1.1 supports four scopes: `global` (every
+run), `logwatch` (logwatch runs), `drupal` (every Drupal run), and
+`sites.<drupal-site>` (Drupal runs for a specific site). v1.0 files
+(with only `global` and `sites`) continue to load. See
+`docs/EXCLUSIONS.md` for file format, match semantics, and operational
+notes.
 
 ## Ollama Server Deployment
 

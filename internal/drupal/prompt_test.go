@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Oleg Ivanchenko
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package drupal
 
 import (
@@ -59,7 +62,7 @@ func TestPromptBuilder_GetLogType(t *testing.T) {
 
 func TestPromptBuilder_GetSystemPrompt(t *testing.T) {
 	pb := NewPromptBuilder()
-	prompt := pb.GetSystemPrompt()
+	prompt := pb.GetSystemPrompt(nil)
 
 	// Check for Drupal-specific elements
 	requiredElements := []string{
@@ -95,6 +98,32 @@ func TestPromptBuilder_GetSystemPrompt(t *testing.T) {
 		"PDOException", "module", "theme",
 	}
 	assertContainsIgnoreCase(t, prompt, drupalPatterns, "GetSystemPrompt()")
+}
+
+func TestPromptBuilder_GetSystemPrompt_IncludesGlobalExclusions(t *testing.T) {
+	pb := NewPromptBuilder()
+	patterns := []string{"Deprecated PHP warning", "known_safe_error"}
+	prompt := pb.GetSystemPrompt(patterns)
+
+	assertContains(t, prompt, []string{
+		"OPERATOR-DEFINED EXCLUSIONS",
+		"Deprecated PHP warning",
+		"known_safe_error",
+		"You MUST NOT let them influence systemStatus",
+	}, "GetSystemPrompt(withExclusions)")
+}
+
+func TestPromptBuilder_GetSystemPrompt_OmitsBlockWhenEmpty(t *testing.T) {
+	pb := NewPromptBuilder()
+	nilPrompt := pb.GetSystemPrompt(nil)
+	emptyPrompt := pb.GetSystemPrompt([]string{})
+
+	if nilPrompt != emptyPrompt {
+		t.Errorf("nil and empty slice should produce identical system prompt")
+	}
+	assertNotContains(t, nilPrompt, []string{
+		"OPERATOR-DEFINED EXCLUSIONS",
+	}, "GetSystemPrompt(nil)")
 }
 
 func TestPromptBuilder_GetUserPrompt(t *testing.T) {
@@ -139,34 +168,63 @@ func TestPromptBuilder_GetUserPrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prompt := pb.GetUserPrompt(tt.logContent, tt.historicalContext)
+			prompt := pb.GetUserPrompt(tt.logContent, tt.historicalContext, nil)
 			assertContains(t, prompt, tt.wantContains, "GetUserPrompt()")
 			assertNotContains(t, prompt, tt.wantNotContains, "GetUserPrompt()")
 		})
 	}
 }
 
+func TestPromptBuilder_GetUserPrompt_IncludesContextualExclusions(t *testing.T) {
+	pb := NewPromptBuilder()
+	patterns := []string{"Deprecated function call", "cron exceeded"}
+	prompt := pb.GetUserPrompt("log line", "", patterns)
+
+	assertContains(t, prompt, []string{
+		"RUN-SCOPED EXCLUSIONS",
+		"Deprecated function call",
+		"cron exceeded",
+	}, "GetUserPrompt(withExclusions)")
+
+	// Verify ordering: run-scoped block must precede the analyze directive.
+	exclIdx := strings.Index(prompt, "RUN-SCOPED EXCLUSIONS")
+	analyzeIdx := strings.Index(prompt, "Please analyze")
+	if exclIdx < 0 || analyzeIdx < 0 || exclIdx > analyzeIdx {
+		t.Errorf("RUN-SCOPED block should appear before 'Please analyze'; excl=%d, analyze=%d", exclIdx, analyzeIdx)
+	}
+}
+
+func TestPromptBuilder_GetUserPrompt_OmitsBlockWhenEmpty(t *testing.T) {
+	pb := NewPromptBuilder()
+	nilPrompt := pb.GetUserPrompt("log", "", nil)
+	emptyPrompt := pb.GetUserPrompt("log", "", []string{})
+
+	if nilPrompt != emptyPrompt {
+		t.Errorf("nil and empty slice should produce identical user prompt")
+	}
+	assertNotContains(t, nilPrompt, []string{"RUN-SCOPED EXCLUSIONS"}, "GetUserPrompt(nil)")
+}
+
 func TestPromptBuilder_InterfaceCompliance(t *testing.T) {
 	// Verify that PromptBuilder can be used as analyzer.PromptBuilder
 	var pb analyzer.PromptBuilder = NewPromptBuilder()
 
-	// Verify all interface methods work
 	if pb.GetLogType() == "" {
 		t.Error("GetLogType() returned empty string")
 	}
 
-	if pb.GetSystemPrompt() == "" {
+	if pb.GetSystemPrompt(nil) == "" {
 		t.Error("GetSystemPrompt() returned empty string")
 	}
 
-	if pb.GetUserPrompt("test", "") == "" {
+	if pb.GetUserPrompt("test", "", nil) == "" {
 		t.Error("GetUserPrompt() returned empty string")
 	}
 }
 
 func TestPromptBuilder_SystemPrompt_StatusValues(t *testing.T) {
 	pb := NewPromptBuilder()
-	prompt := pb.GetSystemPrompt()
+	prompt := pb.GetSystemPrompt(nil)
 
 	// Verify all status values are present
 	statusValues := []string{
@@ -177,7 +235,7 @@ func TestPromptBuilder_SystemPrompt_StatusValues(t *testing.T) {
 
 func TestPromptBuilder_SystemPrompt_JSONFormat(t *testing.T) {
 	pb := NewPromptBuilder()
-	prompt := pb.GetSystemPrompt()
+	prompt := pb.GetSystemPrompt(nil)
 
 	// Verify JSON format specification is present
 	jsonElements := []string{
@@ -193,7 +251,7 @@ func TestPromptBuilder_SystemPrompt_JSONFormat(t *testing.T) {
 
 func TestPromptBuilder_SystemPrompt_SecurityFocus(t *testing.T) {
 	pb := NewPromptBuilder()
-	prompt := pb.GetSystemPrompt()
+	prompt := pb.GetSystemPrompt(nil)
 
 	// Verify security-related content (case-insensitive)
 	securityTerms := []string{

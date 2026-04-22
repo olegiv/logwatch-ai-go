@@ -33,6 +33,7 @@ func preparePromptForAnalysis(
 	llmClient ai.Provider,
 	logSource *analyzer.LogSource,
 	systemPrompt, rawLogContent, historicalContext string,
+	contextualExclusions []string,
 	log *logging.SecureLogger,
 ) (*promptPreparationResult, error) {
 	if llmClient.GetProviderName() == "Anthropic" {
@@ -50,6 +51,7 @@ func preparePromptForAnalysis(
 			systemPrompt,
 			rawLogContent,
 			historicalContext,
+			contextualExclusions,
 			log,
 		)
 	}
@@ -61,6 +63,7 @@ func preparePromptForAnalysis(
 		systemPrompt,
 		rawLogContent,
 		historicalContext,
+		contextualExclusions,
 		log,
 	)
 }
@@ -72,19 +75,20 @@ func prepareAnthropicPromptForAnalysis(
 	counter ai.PromptTokenCounter,
 	logSource *analyzer.LogSource,
 	systemPrompt, rawLogContent, historicalContext string,
+	contextualExclusions []string,
 	log *logging.SecureLogger,
 ) (*promptPreparationResult, error) {
 	contextLimit := analyzer.ContextLimitFromModelInfo(llmClient.GetModelInfo())
 	targetInputTokens := max(contextLimit-cfg.AIMaxTokens-anthropicPromptSafetyMarginTokens, 1)
 
-	baseUserPrompt := logSource.PromptBuilder.GetUserPrompt("", historicalContext)
+	baseUserPrompt := logSource.PromptBuilder.GetUserPrompt("", historicalContext, contextualExclusions)
 	exactBasePromptTokens, err := counter.CountPromptTokens(ctx, systemPrompt, baseUserPrompt)
 	if err != nil {
 		if log != nil {
 			log.Warn().Err(err).Msg("Anthropic token counting failed, falling back to heuristic sizing")
 		}
 
-		return prepareHeuristicPromptForAnalysis(cfg, llmClient, logSource, systemPrompt, rawLogContent, historicalContext, log)
+		return prepareHeuristicPromptForAnalysis(cfg, llmClient, logSource, systemPrompt, rawLogContent, historicalContext, contextualExclusions, log)
 	}
 
 	targetLogTokensExact := max(targetInputTokens-exactBasePromptTokens, minPromptFitLogBudget)
@@ -115,7 +119,7 @@ func prepareAnthropicPromptForAnalysis(
 			return nil, internalerrors.Wrapf(err, "preprocessing failed")
 		}
 
-		userPrompt = logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext)
+		userPrompt = logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext, contextualExclusions)
 		exactPromptTokens, err = counter.CountPromptTokens(ctx, systemPrompt, userPrompt)
 		if err != nil {
 			if log != nil {
@@ -184,6 +188,7 @@ func prepareHeuristicPromptForAnalysis(
 	llmClient ai.Provider,
 	logSource *analyzer.LogSource,
 	systemPrompt, rawLogContent, historicalContext string,
+	contextualExclusions []string,
 	log *logging.SecureLogger,
 ) (*promptPreparationResult, error) {
 	logContent := rawLogContent
@@ -193,7 +198,7 @@ func prepareHeuristicPromptForAnalysis(
 		contextLimit := analyzer.ContextLimitFromModelInfo(modelInfo)
 		systemPromptTokens := analyzer.EstimateTokens(systemPrompt)
 		userPromptOverheadTokens := analyzer.EstimateTokens(
-			logSource.PromptBuilder.GetUserPrompt("", historicalContext),
+			logSource.PromptBuilder.GetUserPrompt("", historicalContext, contextualExclusions),
 		)
 		logTokenBudget := analyzer.CalculateLogTokenBudget(
 			contextLimit,
@@ -235,7 +240,7 @@ func prepareHeuristicPromptForAnalysis(
 
 	return &promptPreparationResult{
 		LogContent: logContent,
-		UserPrompt: logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext),
+		UserPrompt: logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext, contextualExclusions),
 	}, nil
 }
 

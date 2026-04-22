@@ -17,12 +17,19 @@ import (
 
 type testPromptBuilder struct{}
 
-func (p *testPromptBuilder) GetSystemPrompt() string {
-	return "system"
+func (p *testPromptBuilder) GetSystemPrompt(globalExclusions []string) string {
+	if len(globalExclusions) == 0 {
+		return "system"
+	}
+	return "system|GLOBAL-EXCL:" + strings.Join(globalExclusions, ",")
 }
 
-func (p *testPromptBuilder) GetUserPrompt(logContent, historicalContext string) string {
-	return "LOG|" + logContent + "|HIST|" + historicalContext
+func (p *testPromptBuilder) GetUserPrompt(logContent, historicalContext string, contextualExclusions []string) string {
+	base := "LOG|" + logContent + "|HIST|" + historicalContext
+	if len(contextualExclusions) > 0 {
+		base += "|CTX-EXCL:" + strings.Join(contextualExclusions, ",")
+	}
+	return base
 }
 
 func (p *testPromptBuilder) GetLogType() string {
@@ -131,6 +138,7 @@ func TestPreparePromptForAnalysisAnthropicAlreadyFits(t *testing.T) {
 		strings.Repeat("x", 200),
 		"",
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("preparePromptForAnalysis() error = %v", err)
@@ -177,6 +185,7 @@ func TestPreparePromptForAnalysisAnthropicFitsAfterOneRecompression(t *testing.T
 		rawLogContent,
 		"",
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("preparePromptForAnalysis() error = %v", err)
@@ -222,6 +231,7 @@ func TestPreparePromptForAnalysisAnthropicNeedsMultipleRecompressions(t *testing
 		strings.Repeat("x", 5000),
 		"",
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("preparePromptForAnalysis() error = %v", err)
@@ -265,6 +275,7 @@ func TestPreparePromptForAnalysisAnthropicCountFailureFallsBackToHeuristic(t *te
 		"system",
 		strings.Repeat("x", 1000),
 		"",
+		nil,
 		nil,
 	)
 	if err != nil {
@@ -314,6 +325,7 @@ func TestPreparePromptForAnalysisAnthropicCountFailureDuringFitting(t *testing.T
 		strings.Repeat("x", 3500),
 		"",
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("expected graceful fallback, got error: %v", err)
@@ -354,6 +366,7 @@ func TestPreparePromptForAnalysisAnthropicStillTooLargeAfterRetries(t *testing.T
 		"system",
 		strings.Repeat("x", 4000),
 		"",
+		nil,
 		nil,
 	)
 	if err == nil {
@@ -396,6 +409,7 @@ func TestPreparePromptForAnalysisNonAnthropicUsesHeuristicPath(t *testing.T) {
 		rawLogContent,
 		"",
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("preparePromptForAnalysis() error = %v", err)
@@ -407,5 +421,68 @@ func TestPreparePromptForAnalysisNonAnthropicUsesHeuristicPath(t *testing.T) {
 
 	if len(result.LogContent) >= len(rawLogContent) {
 		t.Fatalf("expected compressed content for heuristic path, got %d >= %d", len(result.LogContent), len(rawLogContent))
+	}
+}
+
+// TestPreparePromptForAnalysisAnthropicCountsContextualExclusions verifies
+// that contextual exclusion patterns are counted toward the Anthropic token
+// budget. Without threading them into the base prompt used for sizing, the
+// actual prompt could exceed the budget and require an extra retry.
+func TestPreparePromptForAnalysisAnthropicCountsContextualExclusions(t *testing.T) {
+	cfg := &config.Config{
+		EnablePreprocessing: true,
+		AIMaxTokens:         100,
+	}
+
+	var observedBaseCount int
+	provider := &mockPromptTokenCounter{
+		mockProvider: &mockProvider{
+			providerName: "Anthropic",
+			modelInfo: map[string]any{
+				"context_limit": 4200,
+			},
+		},
+		countFunc: func(systemPrompt, userPrompt string) (int, error) {
+			count := len(systemPrompt) + len(userPrompt)
+			if observedBaseCount == 0 {
+				observedBaseCount = count
+			}
+			return count, nil
+		},
+	}
+	preprocessor := &scalingBudgetPreprocessor{multiplier: 1.9}
+	logSource := &analyzer.LogSource{
+		Preprocessor:  preprocessor,
+		PromptBuilder: &testPromptBuilder{},
+	}
+
+	contextualExclusions := []string{
+		"pattern one that adds some bytes to the base prompt",
+		"pattern two that adds some bytes to the base prompt",
+	}
+
+	result, err := preparePromptForAnalysis(
+		context.Background(),
+		cfg,
+		provider,
+		logSource,
+		"system",
+		strings.Repeat("x", 200),
+		"",
+		contextualExclusions,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("preparePromptForAnalysis() error = %v", err)
+	}
+	if !strings.Contains(result.UserPrompt, "CTX-EXCL:") {
+		t.Errorf("expected contextual exclusions in final user prompt, got %q", result.UserPrompt)
+	}
+	// The base prompt count must have included the exclusion text, not just
+	// the bare LOG|...|HIST| skeleton. We encoded it via the testPromptBuilder
+	// so it's visible in the length.
+	minExpected := len("system") + len("LOG||HIST|") + len("CTX-EXCL:") + len(contextualExclusions[0]) + len(contextualExclusions[1])
+	if observedBaseCount < minExpected {
+		t.Errorf("base prompt token count = %d, want >= %d (exclusions must be in the base)", observedBaseCount, minExpected)
 	}
 }

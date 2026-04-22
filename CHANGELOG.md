@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Finding exclusions now operate at prompt level, not as a post-filter.**
+  Operator-defined patterns in `exclusions.json` are rendered into the
+  LLM prompt with an explicit instruction to ignore matching conditions
+  AND to avoid letting them influence `systemStatus`, `summary`, and
+  `metrics`. This fixes a long-standing incoherence where an excluded
+  "TLS certificate validation failures" condition could still push status
+  to `Bad`, inflate `failedLogins`, and populate the textual summary
+  while being stripped from `criticalIssues`. Now all six output fields
+  are coherent with each other.
+- `exclusions.json` schema bumped to `"1.1"` with two new optional
+  fields: `logwatch` (applies to every logwatch run) and `drupal`
+  (applies to every Drupal run regardless of site). v1.0 files continue
+  to load without modification. `global` now feeds the system prompt
+  (cache-friendly for Anthropic); `logwatch`/`drupal`/`sites.<id>` feed
+  the user prompt (per-run variable).
+- `exclusions.Config.ContextualPatterns` now applies the 50-pattern cap
+  to each source list independently rather than to the merged slice. A
+  valid config with 50 drupal-wide patterns plus any site-scoped
+  patterns previously dropped every site entry silently; merged
+  drupal + site lists can now reach up to 100 patterns.
+
+### Added
+- `exclusions.Config.GlobalPatterns()` and
+  `exclusions.Config.ContextualPatterns(logType, siteID)` — sanitized
+  pattern lists ready for direct injection into prompts.
+- `ai.GlobalExclusionsBlock(patterns)` and
+  `ai.ContextualExclusionsBlock(patterns)` — shared prompt-rendering
+  helpers used by both the logwatch and Drupal `PromptBuilder`
+  implementations. Emit nothing for nil/empty input so the no-exclusions
+  case produces byte-identical prompt output (preserves Anthropic
+  prompt-cache hits).
+- Pattern sanitization: strips control chars, collapses newlines/tabs to
+  spaces, runs each pattern through `ai.NormalizePromptContent` (NFKC
+  normalization + zero-width / bidi strip + non-printable drop — the
+  same structural normalization applied to LLM-facing log content, so
+  operator patterns still substring-match the normalized finding text),
+  then truncates at 200 runes. The LLM-content-only phrase replacement
+  behavior of `ai.SanitizeLogContent` is deliberately not applied to
+  operator patterns — operators must be able to exclude real log lines
+  containing tokens like `USER:` or wording like "ignore previous
+  instructions". 50-pattern cap per scope, applied independently so a
+  Drupal run can reach up to 50 (`drupal`) + 50 (`sites.<id>`) = 100
+  contextual patterns.
+- `ai.NormalizePromptContent` — new public helper exposing the
+  structural portion of `SanitizeLogContent` (NFKC + zero-width strip +
+  non-printable removal). `SanitizeLogContent` now composes
+  `NormalizePromptContent` + prompt-injection phrase replacement +
+  excessive-newline collapsing, so untrusted log content still gets the
+  full hardening pipeline.
+
+### Removed
+- **BREAKING (internal API):** `exclusions.Filter`, `exclusions.FilterStats`
+  and the post-filter call site in `cmd/analyzer/main.go`. Downstream
+  code that imported these will not compile.
+- `PromptBuilder.GetSystemPrompt()` and `PromptBuilder.GetUserPrompt()`
+  now take additional `[]string` parameters for global and contextual
+  exclusion patterns, respectively. External implementations of this
+  interface (if any) must be updated.
+
+### Security
+- Pattern text is never logged; only aggregated counts
+  (`patterns_global`, `patterns_contextual`) appear in info logs.
+- Patterns are transmitted verbatim to the LLM provider. Documentation
+  now explicitly warns against placing secrets into patterns.
+- LLM enforcement of prompt-level exclusions is best-effort, not
+  deterministic. This is a behavior change from the previous post-filter
+  (which was deterministic but incoherent). Documented in
+  `docs/EXCLUSIONS.md`.
+
 ## [0.10.0] - 2026-04-21
 
 ### Fixed

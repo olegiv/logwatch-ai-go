@@ -37,6 +37,56 @@ a plain JSON string. Never an object, number, or null.
   INCORRECT: "recommendations": [{"description": "Configure certificate trust"}]
 `
 
+// GlobalExclusionsBlock renders operator-defined global exclusion patterns
+// as a system-prompt section. Returns an empty string when the list is
+// empty so the no-exclusions case produces byte-identical prompt output
+// (important for Anthropic prompt cache hit rate).
+//
+// The block instructs the LLM not only to omit matching findings but also
+// to avoid letting them influence systemStatus, summary, and metrics —
+// so the stored analysis is coherent with what reaches Telegram.
+func GlobalExclusionsBlock(patterns []string) string {
+	if len(patterns) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n**OPERATOR-DEFINED EXCLUSIONS (global):**\n")
+	b.WriteString("The operator has classified the following conditions as known and accepted.\n")
+	b.WriteString("You MUST NOT report them as criticalIssues, warnings, or recommendations.\n")
+	b.WriteString("You MUST NOT let them influence systemStatus, summary, or any numeric metric\n")
+	b.WriteString("(failedLogins, errorCount, etc.). Treat matching log lines as if absent.\n")
+	b.WriteString("Match case-insensitively by substring against the finding text you would\n")
+	b.WriteString("otherwise emit. Excluded patterns:\n")
+	for _, p := range patterns {
+		b.WriteString("- ")
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// ContextualExclusionsBlock renders run-scoped exclusion patterns (source-
+// wide and/or site-specific) as a user-prompt section. Returns an empty
+// string when the list is empty.
+//
+// Placed immediately before the closing "Please analyze..." directive in
+// the user prompt so recency reinforces the instruction.
+func ContextualExclusionsBlock(patterns []string) string {
+	if len(patterns) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("RUN-SCOPED EXCLUSIONS (apply in addition to any global exclusions in the\n")
+	b.WriteString("system prompt): do not report, and do not let affect status/summary/metrics:\n")
+	for _, p := range patterns {
+		b.WriteString("- ")
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 // GetSystemPrompt returns the system prompt with cache control
 func GetSystemPrompt() string {
 	return `You are a senior system administrator and security analyst with expertise in Linux system security and operations. Your role is to analyze logwatch reports and provide actionable insights.
@@ -148,42 +198,50 @@ var promptInjectionPatterns = []*regexp.Regexp{
 // so they slip past the ASCII-oriented promptInjectionPatterns.
 var zeroWidthChars = regexp.MustCompile(`[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{206F}\x{FEFF}]`)
 
-// SanitizeLogContent sanitizes log content to prevent prompt injection (L-03 fix).
-// This removes:
-//   - Non-printable characters (except newlines, tabs, carriage returns)
-//   - Zero-width and bidi-control characters that can hide injection patterns
-//   - Common prompt injection patterns (matched after NFKC normalization so
-//     fullwidth Latin forms such as "ＩＧＮＯＲＥ" collapse to ASCII)
-//   - Excessive whitespace
-func SanitizeLogContent(content string) string {
-	// Normalize to NFKC first so visually-identical Unicode variants
-	// (fullwidth Latin, ligatures, etc.) collapse to the ASCII forms the
-	// injection patterns are written against.
+// NormalizePromptContent applies the structural normalization steps shared
+// between SanitizeLogContent and operator-authored exclusion patterns:
+//
+//   - NFKC normalization (collapses fullwidth/ligature forms to ASCII so
+//     "ＩＧＮＯＲＥ" folds to "IGNORE")
+//   - Zero-width and bidi-control character stripping (prevents
+//     "ign[ZWJ]ore" from evading ASCII-oriented checks)
+//   - Non-printable character removal (preserves \n \t \r)
+//
+// It does NOT apply prompt-injection phrase replacement. Callers that need
+// that behavior layer it on top (see SanitizeLogContent). Splitting the
+// passes lets exclusion patterns share the unicode-normalization defense
+// without having their legitimate text rewritten to "[FILTERED]" by the
+// phrase matcher — which was an issue when a pattern contained tokens like
+// "USER:" that the LLM-facing phrase rules target.
+func NormalizePromptContent(content string) string {
 	normalized := norm.NFKC.String(content)
-
-	// Strip zero-width and bidi-control characters before anything else so
-	// patterns like "ign‌ore previous instructions" cannot evade match.
 	normalized = zeroWidthChars.ReplaceAllString(normalized, "")
 
-	// Remove non-printable characters except newlines, tabs, and carriage returns
 	var sanitized strings.Builder
 	sanitized.Grow(len(normalized))
-
 	for _, r := range normalized {
 		if unicode.IsPrint(r) || r == '\n' || r == '\t' || r == '\r' {
 			sanitized.WriteRune(r)
 		}
 	}
+	return sanitized.String()
+}
 
-	result := sanitized.String()
+// excessiveNewlines collapses runs of 4+ newlines to 3 inside SanitizeLogContent.
+var excessiveNewlines = regexp.MustCompile(`\n{4,}`)
 
-	// Remove common prompt injection patterns
+// SanitizeLogContent sanitizes untrusted log content to prevent prompt injection
+// (L-03 fix). This runs NormalizePromptContent first, then applies prompt-injection
+// phrase replacement and newline collapsing. Use NormalizePromptContent directly
+// for operator-authored strings where phrase replacement would corrupt intended
+// matching text.
+func SanitizeLogContent(content string) string {
+	result := NormalizePromptContent(content)
+
 	for _, pattern := range promptInjectionPatterns {
 		result = pattern.ReplaceAllString(result, "[FILTERED]")
 	}
 
-	// Normalize excessive newlines (more than 3 consecutive)
-	excessiveNewlines := regexp.MustCompile(`\n{4,}`)
 	result = excessiveNewlines.ReplaceAllString(result, "\n\n\n")
 
 	return result

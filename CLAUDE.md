@@ -38,7 +38,7 @@ internal/
   ├── config/      - Configuration loading (viper + .env)
   ├── drupal/      - Drupal watchdog reader, preprocessor, prompts
   ├── errors/      - Error sanitization (credential redaction)
-  ├── exclusions/  - Finding exclusion config loader and filter
+  ├── exclusions/  - Finding exclusion config loader and prompt-injection renderer
   ├── logging/     - Secure logger wrapper (credential filtering)
   ├── logwatch/    - Logwatch reader, preprocessing, token estimation
   ├── notification/- Telegram client and message formatting
@@ -71,8 +71,16 @@ type BudgetPreprocessor interface {
 }
 
 type PromptBuilder interface {
-    GetSystemPrompt() string
-    GetUserPrompt(logContent, historicalContext string) string
+    // globalExclusions: operator-scoped patterns rendered into the system
+    // prompt. Pass nil for byte-identical output vs the no-exclusions case
+    // (preserves Anthropic prompt-cache hits).
+    GetSystemPrompt(globalExclusions []string) string
+
+    // contextualExclusions: run-scoped patterns (source-wide and/or
+    // site-specific) rendered into the user prompt. Pass nil for no
+    // exclusions. logContent should already be sanitized before passing.
+    GetUserPrompt(logContent, historicalContext string, contextualExclusions []string) string
+
     GetLogType() string
 }
 ```
@@ -96,11 +104,11 @@ type PromptBuilder interface {
 - CLI: `-drupal-site <id>`, `-drupal-sites-config <path>`, `-list-drupal-sites`
 - Search locations: `./`, `./configs/`, `/opt/logwatch-ai/`, `~/.config/logwatch-ai/`
 
-**Finding Exclusions (optional):** `exclusions.json` suppresses known/acceptable findings (e.g., "TLS certificate validation failures") before storage and Telegram notification.
+**Finding Exclusions (optional):** `exclusions.json` instructs the LLM to ignore specific conditions so they never appear as findings and do not influence `systemStatus`, `summary`, or `metrics`. Patterns are injected into the prompt, not post-filtered.
 - CLI: `-exclusions-config <path>` (auto-discovery uses the same search locations as `drupal-sites.json`)
-- Match is case-insensitive substring; regex metacharacters are inert
-- Applied uniformly to `criticalIssues`, `warnings`, `recommendations`
-- `global` patterns apply to every run; per-Drupal-site patterns stack on top when `-drupal-site` matches
+- Schema v1.1: `global` (system prompt, cache-friendly), `logwatch` (logwatch user prompts), `drupal` (all Drupal user prompts), `sites.<id>` (per-Drupal-site, stacked on top of `drupal`). v1.0 files without `logwatch`/`drupal` continue to load.
+- Resolution: logwatch runs use `global` + `logwatch`; Drupal site X uses `global` + `drupal` + `sites.X`.
+- LLM enforcement is best-effort, not a hard filter. Patterns are sent verbatim to the provider — do not put secrets in them.
 - Template: `configs/exclusions.json.example`; full docs: `docs/EXCLUSIONS.md`
 
 ## Preprocessing & Prompt Fitting

@@ -7,14 +7,11 @@
     "kernel: NETDEV WATCHDOG"
   ],
   "drupal": [
-    "Deprecated function"
+    "Deprecated PHP warning"
   ],
   "sites": {
     "production": [
       "cron run exceeded the time limit"
-    ],
-    "staging": [
-      "Email delivery delayed"
     ]
   }
 }

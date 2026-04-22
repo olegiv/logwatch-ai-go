@@ -5,12 +5,13 @@ package exclusions
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/olegiv/logwatch-ai-go/internal/ai"
+	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
 
 func TestConfig_Validate(t *testing.T) {
@@ -25,6 +26,16 @@ func TestConfig_Validate(t *testing.T) {
 				Version: "1.0",
 				Global:  []string{"TLS cert"},
 				Sites:   map[string][]string{"prod": {"cron limit"}},
+			},
+		},
+		{
+			name: "valid v1.1 with logwatch and drupal scopes",
+			cfg: Config{
+				Version:  "1.1",
+				Global:   []string{"TLS cert"},
+				Logwatch: []string{"kernel: NETDEV WATCHDOG"},
+				Drupal:   []string{"deprecated function"},
+				Sites:    map[string][]string{"prod": {"cron limit"}},
 			},
 		},
 		{
@@ -63,6 +74,26 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: "duplicate pattern",
 		},
 		{
+			name:    "blank logwatch pattern",
+			cfg:     Config{Version: "1.1", Logwatch: []string{""}},
+			wantErr: "logwatch[0]: pattern is blank",
+		},
+		{
+			name:    "duplicate logwatch (case-insensitive)",
+			cfg:     Config{Version: "1.1", Logwatch: []string{"NETDEV", "netdev"}},
+			wantErr: "logwatch[1]: duplicate pattern",
+		},
+		{
+			name:    "blank drupal pattern",
+			cfg:     Config{Version: "1.1", Drupal: []string{"  "}},
+			wantErr: "drupal[0]: pattern is blank",
+		},
+		{
+			name:    "duplicate drupal (case-insensitive)",
+			cfg:     Config{Version: "1.1", Drupal: []string{"deprecated", "Deprecated"}},
+			wantErr: "drupal[1]: duplicate pattern",
+		},
+		{
 			name: "blank site pattern",
 			cfg: Config{
 				Version: "1.0",
@@ -86,6 +117,22 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			wantErr: "empty site ID",
 		},
+		{
+			name: "too many patterns in global",
+			cfg: Config{
+				Version: "1.1",
+				Global:  makeUniquePatterns(maxPatternsPerList + 1),
+			},
+			wantErr: "too many patterns",
+		},
+		{
+			name: "too many patterns in logwatch",
+			cfg: Config{
+				Version:  "1.1",
+				Logwatch: makeUniquePatterns(maxPatternsPerList + 1),
+			},
+			wantErr: "too many patterns",
+		},
 	}
 
 	for _, tt := range tests {
@@ -107,182 +154,221 @@ func TestConfig_Validate(t *testing.T) {
 	}
 }
 
-func TestConfig_Filter(t *testing.T) {
-	baseCfg := &Config{
-		Version: "1.0",
-		Global:  []string{"TLS certificate validation failures", "Deprecated PHP warning"},
-		Sites: map[string][]string{
-			"production": {"cron run exceeded the time limit"},
-			"staging":    {"Email delivery delayed"},
-		},
-	}
-
+func TestConfig_GlobalPatterns(t *testing.T) {
 	tests := []struct {
-		name                 string
-		cfg                  *Config
-		siteID               string
-		in                   ai.Analysis
-		wantCritical         []string
-		wantWarnings         []string
-		wantRecommendations  []string
-		wantCriticalDropped  int
-		wantWarningsDropped  int
-		wantRecommendDropped int
+		name string
+		cfg  *Config
+		want []string
 	}{
 		{
-			name:   "case-insensitive substring match across all categories",
-			cfg:    baseCfg,
-			siteID: "",
-			in: ai.Analysis{
-				CriticalIssues:  []string{"tls CERTIFICATE validation failures on host alpha", "SSH brute force"},
-				Warnings:        []string{"Some Deprecated PHP Warning appeared", "Disk almost full"},
-				Recommendations: []string{"Rotate TLS certificate validation failures report", "Keep watching"},
-			},
-			wantCritical:         []string{"SSH brute force"},
-			wantWarnings:         []string{"Disk almost full"},
-			wantRecommendations:  []string{"Keep watching"},
-			wantCriticalDropped:  1,
-			wantWarningsDropped:  1,
-			wantRecommendDropped: 1,
+			name: "nil config is safe",
+			cfg:  nil,
+			want: nil,
 		},
 		{
-			name:   "no match passthrough",
-			cfg:    baseCfg,
-			siteID: "production",
-			in: ai.Analysis{
-				CriticalIssues: []string{"Kernel panic"},
-				Warnings:       []string{"High load average"},
-			},
-			wantCritical: []string{"Kernel panic"},
-			wantWarnings: []string{"High load average"},
+			name: "no globals",
+			cfg:  &Config{Version: "1.1"},
+			want: nil,
 		},
 		{
-			name:   "per-site pattern combines with global",
-			cfg:    baseCfg,
-			siteID: "production",
-			in: ai.Analysis{
-				CriticalIssues: []string{
-					"Cron run exceeded the time limit on node_1",
-					"TLS certificate validation failures",
-					"Real issue",
-				},
-			},
-			wantCritical:        []string{"Real issue"},
-			wantCriticalDropped: 2,
-		},
-		{
-			name:   "unknown siteID falls back to global only",
-			cfg:    baseCfg,
-			siteID: "nonexistent",
-			in: ai.Analysis{
-				CriticalIssues: []string{
-					"cron run exceeded the time limit",
-					"TLS certificate validation failures",
-				},
-			},
-			wantCritical:        []string{"cron run exceeded the time limit"},
-			wantCriticalDropped: 1,
-		},
-		{
-			name:   "empty siteID uses global only (logwatch case)",
-			cfg:    baseCfg,
-			siteID: "",
-			in: ai.Analysis{
-				CriticalIssues: []string{
-					"Email delivery delayed notice",
-					"Deprecated PHP warning again",
-				},
-			},
-			wantCritical:        []string{"Email delivery delayed notice"},
-			wantCriticalDropped: 1,
-		},
-		{
-			name:   "empty pattern list is a no-op",
-			cfg:    &Config{Version: "1.0"},
-			siteID: "production",
-			in: ai.Analysis{
-				CriticalIssues: []string{"anything"},
-			},
-			wantCritical: []string{"anything"},
-		},
-		{
-			name:   "all findings removed yields empty (non-nil) slices",
-			cfg:    baseCfg,
-			siteID: "",
-			in: ai.Analysis{
-				CriticalIssues:  []string{"TLS certificate validation failures"},
-				Warnings:        []string{"Deprecated PHP warning"},
-				Recommendations: []string{},
-			},
-			wantCritical:         []string{},
-			wantWarnings:         []string{},
-			wantRecommendations:  []string{},
-			wantCriticalDropped:  1,
-			wantWarningsDropped:  1,
-			wantRecommendDropped: 0,
+			name: "sanitizes and preserves order",
+			cfg:  &Config{Version: "1.1", Global: []string{"Foo", "  Bar  "}},
+			want: []string{"Foo", "Bar"},
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := tt.in // copy
-			stats := tt.cfg.Filter(&a, tt.siteID)
-
-			if !equalStringSlice(a.CriticalIssues, tt.wantCritical) {
-				t.Errorf("CriticalIssues = %#v, want %#v", a.CriticalIssues, tt.wantCritical)
-			}
-			if tt.wantWarnings != nil && !equalStringSlice(a.Warnings, tt.wantWarnings) {
-				t.Errorf("Warnings = %#v, want %#v", a.Warnings, tt.wantWarnings)
-			}
-			if tt.wantRecommendations != nil && !equalStringSlice(a.Recommendations, tt.wantRecommendations) {
-				t.Errorf("Recommendations = %#v, want %#v", a.Recommendations, tt.wantRecommendations)
-			}
-			if stats.CriticalExcluded != tt.wantCriticalDropped {
-				t.Errorf("CriticalExcluded = %d, want %d", stats.CriticalExcluded, tt.wantCriticalDropped)
-			}
-			if stats.WarningsExcluded != tt.wantWarningsDropped {
-				t.Errorf("WarningsExcluded = %d, want %d", stats.WarningsExcluded, tt.wantWarningsDropped)
-			}
-			if stats.RecommendationsExcluded != tt.wantRecommendDropped {
-				t.Errorf("RecommendationsExcluded = %d, want %d", stats.RecommendationsExcluded, tt.wantRecommendDropped)
-			}
-			if got, want := stats.Total(), tt.wantCriticalDropped+tt.wantWarningsDropped+tt.wantRecommendDropped; got != want {
-				t.Errorf("Total() = %d, want %d", got, want)
+			got := tt.cfg.GlobalPatterns()
+			if !equalStringSlice(got, tt.want) {
+				t.Errorf("GlobalPatterns() = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestConfig_Filter_NilSafety(t *testing.T) {
-	var cfg *Config
-	got := cfg.Filter(&ai.Analysis{CriticalIssues: []string{"x"}}, "")
-	if got.Total() != 0 {
-		t.Errorf("nil Config Filter should be no-op, got %+v", got)
+func TestConfig_GlobalPatterns_ReturnsCopyNotReference(t *testing.T) {
+	cfg := &Config{Version: "1.1", Global: []string{"alpha", "beta"}}
+	got := cfg.GlobalPatterns()
+	if len(got) == 0 {
+		t.Fatal("expected patterns")
 	}
-
-	cfg = &Config{Version: "1.0", Global: []string{"x"}}
-	if stats := cfg.Filter(nil, ""); stats.Total() != 0 {
-		t.Errorf("nil Analysis Filter should be no-op, got %+v", stats)
+	got[0] = "MUTATED"
+	if cfg.Global[0] != "alpha" {
+		t.Errorf("underlying config mutated via returned slice: %q", cfg.Global[0])
 	}
 }
 
-func TestConfig_Filter_DoesNotMutatePatterns(t *testing.T) {
-	globalPatterns := []string{"TLS"}
-	sitePatterns := []string{"cron limit"}
+func TestConfig_ContextualPatterns(t *testing.T) {
 	cfg := &Config{
-		Version: "1.0",
-		Global:  globalPatterns,
-		Sites:   map[string][]string{"prod": sitePatterns},
+		Version:  "1.1",
+		Global:   []string{"must-not-appear-in-contextual"},
+		Logwatch: []string{"kernel watchdog"},
+		Drupal:   []string{"deprecated function"},
+		Sites: map[string][]string{
+			"production": {"cron exceeded"},
+			"staging":    {"email delayed"},
+		},
 	}
 
-	a := &ai.Analysis{CriticalIssues: []string{"TLS cert", "cron limit reached"}}
-	cfg.Filter(a, "prod")
-
-	if globalPatterns[0] != "TLS" {
-		t.Errorf("Global pattern mutated: %q", globalPatterns[0])
+	tests := []struct {
+		name    string
+		logType analyzer.LogSourceType
+		siteID  string
+		want    []string
+	}{
+		{
+			name:    "logwatch returns logwatch only",
+			logType: analyzer.LogSourceLogwatch,
+			siteID:  "",
+			want:    []string{"kernel watchdog"},
+		},
+		{
+			name:    "logwatch ignores siteID",
+			logType: analyzer.LogSourceLogwatch,
+			siteID:  "production",
+			want:    []string{"kernel watchdog"},
+		},
+		{
+			name:    "drupal without siteID returns drupal only",
+			logType: analyzer.LogSourceDrupalWatchdog,
+			siteID:  "",
+			want:    []string{"deprecated function"},
+		},
+		{
+			name:    "drupal with known siteID returns drupal + site in order",
+			logType: analyzer.LogSourceDrupalWatchdog,
+			siteID:  "production",
+			want:    []string{"deprecated function", "cron exceeded"},
+		},
+		{
+			name:    "drupal with unknown siteID returns drupal only",
+			logType: analyzer.LogSourceDrupalWatchdog,
+			siteID:  "nonexistent",
+			want:    []string{"deprecated function"},
+		},
+		{
+			name:    "drupal with different known siteID returns its patterns",
+			logType: analyzer.LogSourceDrupalWatchdog,
+			siteID:  "staging",
+			want:    []string{"deprecated function", "email delayed"},
+		},
+		{
+			name:    "unknown logType returns nil",
+			logType: analyzer.LogSourceType("unknown"),
+			siteID:  "production",
+			want:    nil,
+		},
 	}
-	if sitePatterns[0] != "cron limit" {
-		t.Errorf("Site pattern mutated: %q", sitePatterns[0])
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cfg.ContextualPatterns(tt.logType, tt.siteID)
+			if !equalStringSlice(got, tt.want) {
+				t.Errorf("ContextualPatterns(%q, %q) = %#v, want %#v", tt.logType, tt.siteID, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfig_ContextualPatterns_NilSafety(t *testing.T) {
+	var cfg *Config
+	if got := cfg.ContextualPatterns(analyzer.LogSourceLogwatch, ""); got != nil {
+		t.Errorf("nil Config ContextualPatterns = %v, want nil", got)
+	}
+}
+
+// TestConfig_ContextualPatterns_PerListCap verifies that the
+// maxPatternsPerList cap applies per source list rather than to the merged
+// drupal+site slice. With 50 drupal patterns and 5 site patterns, all 55
+// must be returned; the previous behavior capped the merged slice at 50
+// and silently dropped the site-scoped entries.
+func TestConfig_ContextualPatterns_PerListCap(t *testing.T) {
+	drupal := makeUniquePatterns(maxPatternsPerList)
+	site := []string{"site-1", "site-2", "site-3", "site-4", "site-5"}
+
+	cfg := &Config{
+		Version: "1.1",
+		Drupal:  drupal,
+		Sites:   map[string][]string{"production": site},
+	}
+
+	got := cfg.ContextualPatterns(analyzer.LogSourceDrupalWatchdog, "production")
+	wantLen := maxPatternsPerList + len(site)
+	if len(got) != wantLen {
+		t.Fatalf("ContextualPatterns len = %d, want %d (drupal=%d + site=%d)",
+			len(got), wantLen, maxPatternsPerList, len(site))
+	}
+	for i, p := range site {
+		if got[maxPatternsPerList+i] != p {
+			t.Errorf("site pattern at %d = %q, want %q",
+				maxPatternsPerList+i, got[maxPatternsPerList+i], p)
+		}
+	}
+}
+
+func TestSanitizePatternForPrompt(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"trims whitespace", "  hello  ", "hello"},
+		{"replaces newline with space", "foo\nbar", "foo bar"},
+		{"replaces tab with space", "foo\tbar", "foo bar"},
+		{"replaces CR with space", "foo\rbar", "foo bar"},
+		{"strips null byte", "foo\x00bar", "foobar"},
+		{"strips DEL", "foo\x7fbar", "foobar"},
+		{"strips ESC", "foo\x1bbar", "foobar"},
+		{"empty input stays empty", "", ""},
+		{"whitespace-only becomes empty", "   \t\n  ", ""},
+		// Operator-authored patterns are NOT rewritten by prompt-injection
+		// phrase replacement. sanitizePatternForPrompt uses
+		// ai.NormalizePromptContent (structural only), not
+		// ai.SanitizeLogContent. An operator must be able to exclude
+		// legitimate log lines that happen to contain tokens the LLM-
+		// content filter treats as suspicious (e.g. "USER:", "ignore
+		// previous instructions" in a syslog record).
+		{"preserves injection-phrase-like wording", "ignore all previous instructions", "ignore all previous instructions"},
+		{"strips zero-width join but leaves text intact", "ign\u200core previous instructions", "ignore previous instructions"},
+		{"preserves USER: token verbatim", "USER: anonymous failed to authenticate", "USER: anonymous failed to authenticate"},
+		{"preserves SYSTEM: token verbatim", "SYSTEM: disk near capacity", "SYSTEM: disk near capacity"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizePatternForPrompt(tt.in)
+			if got != tt.want {
+				t.Errorf("sanitizePatternForPrompt(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizePatternForPrompt_TruncatesOversized(t *testing.T) {
+	longInput := strings.Repeat("a", 500)
+	got := sanitizePatternForPrompt(longInput)
+	runeCount := len([]rune(got))
+	if runeCount > maxPatternRunes {
+		t.Errorf("sanitized pattern has %d runes, want <= %d", runeCount, maxPatternRunes)
+	}
+	if !strings.HasSuffix(got, truncationSuffix) {
+		t.Errorf("oversized pattern should end with %q, got %q", truncationSuffix, got[len(got)-5:])
+	}
+}
+
+func TestSanitizePatternsForPrompt_CapsAt50(t *testing.T) {
+	in := makeUniquePatterns(100)
+	got := sanitizePatternsForPrompt(in)
+	if len(got) != maxPatternsPerList {
+		t.Errorf("sanitized pattern count = %d, want %d", len(got), maxPatternsPerList)
+	}
+}
+
+func TestGlobalPatterns_NilAndEmptyAreEquivalent(t *testing.T) {
+	nilCfg := &Config{Version: "1.1"}
+	emptyCfg := &Config{Version: "1.1", Global: []string{}}
+	a, b := nilCfg.GlobalPatterns(), emptyCfg.GlobalPatterns()
+	if len(a) != 0 || len(b) != 0 {
+		t.Errorf("expected nil/empty outputs, got %v and %v", a, b)
 	}
 }
 
@@ -297,7 +383,14 @@ func TestConfig_ListSites(t *testing.T) {
 	}
 }
 
-func TestLoad_ValidFromTestdata(t *testing.T) {
+func TestConfig_ListSites_NilSafety(t *testing.T) {
+	var cfg *Config
+	if got := cfg.ListSites(); got != nil {
+		t.Errorf("nil Config ListSites = %v, want nil", got)
+	}
+}
+
+func TestLoad_AcceptsV10(t *testing.T) {
 	cfg, path, err := Load(filepath.Join("testdata", "valid.json"))
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -316,6 +409,32 @@ func TestLoad_ValidFromTestdata(t *testing.T) {
 	}
 	if len(cfg.Sites["production"]) != 1 {
 		t.Errorf("len(Sites[production]) = %d, want 1", len(cfg.Sites["production"]))
+	}
+	// v1.0 files carry no Logwatch/Drupal fields
+	if len(cfg.Logwatch) != 0 {
+		t.Errorf("v1.0 Logwatch should be empty, got %v", cfg.Logwatch)
+	}
+	if len(cfg.Drupal) != 0 {
+		t.Errorf("v1.0 Drupal should be empty, got %v", cfg.Drupal)
+	}
+}
+
+func TestLoad_AcceptsV11(t *testing.T) {
+	cfg, _, err := Load(filepath.Join("testdata", "valid-v1.1.json"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("Load() returned nil config")
+	}
+	if cfg.Version != "1.1" {
+		t.Errorf("Version = %q, want 1.1", cfg.Version)
+	}
+	if len(cfg.Logwatch) != 1 {
+		t.Errorf("len(Logwatch) = %d, want 1", len(cfg.Logwatch))
+	}
+	if len(cfg.Drupal) != 1 {
+		t.Errorf("len(Drupal) = %d, want 1", len(cfg.Drupal))
 	}
 }
 
@@ -430,6 +549,14 @@ func TestLoad_SearchPathsDiscovery(t *testing.T) {
 	if !strings.HasSuffix(foundPath, filepath.Join("configs", "exclusions.json")) {
 		t.Errorf("foundPath = %q, want suffix configs/exclusions.json", foundPath)
 	}
+}
+
+func makeUniquePatterns(n int) []string {
+	out := make([]string, n)
+	for i := range n {
+		out[i] = fmt.Sprintf("pattern-%03d", i)
+	}
+	return out
 }
 
 func equalStringSlice(a, b []string) bool {

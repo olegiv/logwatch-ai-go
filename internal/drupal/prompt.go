@@ -40,7 +40,7 @@ func (p *PromptBuilder) GetLogType() string {
 }
 
 // GetSystemPrompt returns the system prompt for Drupal watchdog analysis.
-func (p *PromptBuilder) GetSystemPrompt() string {
+func (p *PromptBuilder) GetSystemPrompt(globalExclusions []string) string {
 	return `You are a senior Drupal developer and security analyst with expertise in Drupal application security, performance, and operations. Your role is to analyze Drupal watchdog logs and provide actionable insights.
 
 **Drupal Watchdog Severity Levels (RFC 5424):**
@@ -149,11 +149,11 @@ You MUST respond with a valid JSON object (and ONLY JSON) in this exact format:
 - Distinguish between attack attempts and legitimate user errors
 - Be specific about affected modules/themes when identifiable
 - Use clear, concise language
-- Empty arrays are acceptable if no issues/warnings/recommendations exist` + ai.StringArrayFormatReminder
+- Empty arrays are acceptable if no issues/warnings/recommendations exist` + ai.GlobalExclusionsBlock(globalExclusions) + ai.StringArrayFormatReminder
 }
 
 // GetUserPrompt constructs the user prompt with Drupal watchdog content and historical context.
-func (p *PromptBuilder) GetUserPrompt(logContent, historicalContext string) string {
+func (p *PromptBuilder) GetUserPrompt(logContent, historicalContext string, contextualExclusions []string) string {
 	var prompt strings.Builder
 
 	// Include site name if configured (multi-site deployment)
@@ -168,10 +168,15 @@ func (p *PromptBuilder) GetUserPrompt(logContent, historicalContext string) stri
 	prompt.WriteString("\n\n")
 
 	if historicalContext != "" {
+		// historicalContext was validated by ai.ParseAnalysis and persisted to
+		// SQLite before reaching here; SanitizeLogContent is defense-in-depth
+		// against a tampered DB row being re-interpreted by the LLM.
 		prompt.WriteString("HISTORICAL CONTEXT:\n")
 		prompt.WriteString(ai.SanitizeLogContent(historicalContext))
 		prompt.WriteString("\n\n")
 	}
+
+	prompt.WriteString(ai.ContextualExclusionsBlock(contextualExclusions))
 
 	prompt.WriteString("Please analyze the Drupal watchdog logs above and provide your assessment in JSON format as specified.")
 
