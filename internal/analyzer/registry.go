@@ -15,6 +15,7 @@ type LogSourceType string
 const (
 	LogSourceLogwatch       LogSourceType = "logwatch"
 	LogSourceDrupalWatchdog LogSourceType = "drupal_watchdog"
+	LogSourceOCMS           LogSourceType = "ocms"
 )
 
 // LogSource bundles all components needed to analyze a specific log type.
@@ -112,6 +113,7 @@ func ValidSourceTypes() []string {
 	return []string{
 		string(LogSourceLogwatch),
 		string(LogSourceDrupalWatchdog),
+		string(LogSourceOCMS),
 	}
 }
 
@@ -123,6 +125,8 @@ func ParseSourceType(s string) (LogSourceType, error) {
 		return LogSourceLogwatch, nil
 	case string(LogSourceDrupalWatchdog):
 		return LogSourceDrupalWatchdog, nil
+	case string(LogSourceOCMS):
+		return LogSourceOCMS, nil
 	default:
 		return "", fmt.Errorf("invalid log source type: %q (valid types: %v)", s, ValidSourceTypes())
 	}

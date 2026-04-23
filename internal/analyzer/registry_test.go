@@ -215,13 +215,20 @@ func TestRegistry_List(t *testing.T) {
 		Preprocessor:  &mockPreprocessor{},
 		PromptBuilder: &mockPromptBuilder{logType: "drupal_watchdog"},
 	}
+	source3 := &LogSource{
+		Type:          LogSourceOCMS,
+		Reader:        &mockReader{},
+		Preprocessor:  &mockPreprocessor{},
+		PromptBuilder: &mockPromptBuilder{logType: "ocms"},
+	}
 
 	_ = r.Register(source1)
 	_ = r.Register(source2)
+	_ = r.Register(source3)
 
 	list := r.List()
-	if len(list) != 2 {
-		t.Errorf("List() returned %d items, want 2", len(list))
+	if len(list) != 3 {
+		t.Errorf("List() returned %d items, want 3", len(list))
 	}
 }
 
@@ -246,13 +253,14 @@ func TestRegistry_Has(t *testing.T) {
 
 func TestValidSourceTypes(t *testing.T) {
 	types := ValidSourceTypes()
-	if len(types) != 2 {
-		t.Errorf("ValidSourceTypes() returned %d items, want 2", len(types))
+	if len(types) != 3 {
+		t.Errorf("ValidSourceTypes() returned %d items, want 3", len(types))
 	}
 
 	expected := map[string]bool{
 		"logwatch":        true,
 		"drupal_watchdog": true,
+		"ocms":            true,
 	}
 
 	for _, typ := range types {
@@ -270,9 +278,11 @@ func TestParseSourceType(t *testing.T) {
 	}{
 		{"logwatch", LogSourceLogwatch, false},
 		{"drupal_watchdog", LogSourceDrupalWatchdog, false},
+		{"ocms", LogSourceOCMS, false},
 		{"invalid", "", true},
 		{"", "", true},
 		{"LOGWATCH", "", true}, // case sensitive
+		{"OCMS", "", true},     // case sensitive
 	}
 
 	for _, tt := range tests {
