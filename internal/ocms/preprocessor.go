@@ -13,8 +13,10 @@ type Preprocessor struct {
 	inner *logwatch.Preprocessor
 }
 
-var _ analyzer.Preprocessor = (*Preprocessor)(nil)
-var _ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+var (
+	_ analyzer.Preprocessor       = (*Preprocessor)(nil)
+	_ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+)
 
 // NewPreprocessor creates a new OCMS preprocessor.
 func NewPreprocessor(maxTokens int) *Preprocessor {

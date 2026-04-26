@@ -36,7 +36,7 @@ func ReadSourceFileWithGuards(
 		return "", fmt.Errorf("failed to stat %s file: %w", opts.SourceLabel, err)
 	}
 
-	if fileInfo.Mode().Perm()&0400 == 0 {
+	if fileInfo.Mode().Perm()&0o400 == 0 {
 		return "", fmt.Errorf("%s file is not readable: %s", opts.SourceLabel, sourcePath)
 	}
 

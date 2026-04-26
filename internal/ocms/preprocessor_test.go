@@ -10,8 +10,10 @@ import (
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
 
-var _ analyzer.Preprocessor = (*Preprocessor)(nil)
-var _ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+var (
+	_ analyzer.Preprocessor       = (*Preprocessor)(nil)
+	_ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+)
 
 func TestPreprocessor_Basic(t *testing.T) {
 	t.Parallel()

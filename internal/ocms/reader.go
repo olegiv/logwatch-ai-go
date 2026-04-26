@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Oleg Ivanchenko
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// Package ocms reads and preprocesses OCMS logs for LLM analysis.
 package ocms
 
 import (
@@ -67,10 +68,6 @@ func (r *Reader) Validate(content string) error {
 func (r *Reader) validateContent(content string) error {
 	if len(content) == 0 {
 		return fmt.Errorf("ocms log file is empty")
-	}
-
-	if len(content) < 100 {
-		return fmt.Errorf("ocms log file seems too small to be valid (only %d bytes)", len(content))
 	}
 
 	return nil

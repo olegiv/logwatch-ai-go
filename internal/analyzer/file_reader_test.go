@@ -17,7 +17,7 @@ func TestReadSourceFileWithGuards_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	f := filepath.Join(tmpDir, "sample.log")
 	content := strings.Repeat("line with enough content\n", 8)
-	if err := os.WriteFile(f, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(f, []byte(content), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func TestReadSourceFileWithGuards_TooOld(t *testing.T) {
 	tmpDir := t.TempDir()
 	f := filepath.Join(tmpDir, "sample.log")
 	content := strings.Repeat("line with enough content\n", 8)
-	if err := os.WriteFile(f, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(f, []byte(content), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 	old := time.Now().Add(-25 * time.Hour)

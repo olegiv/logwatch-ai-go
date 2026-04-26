@@ -21,7 +21,27 @@ func TestReader_Read_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "ocms.log")
 	content := strings.Repeat("2026-04-26T02:15:00Z INFO request processed successfully\n", 4)
-	if err := os.WriteFile(testFile, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(testFile, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	reader := NewReader(10, false, 1000)
+	got, err := reader.Read(testFile)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if got != content {
+		t.Errorf("Read() content mismatch")
+	}
+}
+
+func TestReader_Read_ShortNonEmptyLog(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "ocms.log")
+	content := "WARN short OCMS event\n"
+	if err := os.WriteFile(testFile, []byte(content), 0o600); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
@@ -51,7 +71,7 @@ func TestReader_Read_TooOld(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "ocms.log")
 	content := strings.Repeat("2026-04-26T02:15:00Z WARN high latency\n", 4)
-	if err := os.WriteFile(testFile, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(testFile, []byte(content), 0o600); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 	old := time.Now().Add(-25 * time.Hour)
@@ -73,8 +93,8 @@ func TestReader_Validate(t *testing.T) {
 	if err := reader.Validate(""); err == nil {
 		t.Fatal("expected validation error for empty content")
 	}
-	if err := reader.Validate(strings.Repeat("x", 99)); err == nil {
-		t.Fatal("expected validation error for small content")
+	if err := reader.Validate("x"); err != nil {
+		t.Fatalf("unexpected validation error for short content: %v", err)
 	}
 	if err := reader.Validate(strings.Repeat("x", 120)); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
