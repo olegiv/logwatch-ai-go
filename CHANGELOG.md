@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-27
+
+### Added
+#### OCMS log source
+- **First-class OCMS log analysis.** New `ocms` log source joins
+  `logwatch` and `drupal_watchdog`. Set `LOG_SOURCE_TYPE=ocms` to
+  enable. The new `internal/ocms` package implements `LogReader`,
+  `Preprocessor`, and `PromptBuilder` end-to-end so OCMS application
+  logs flow through the same pipeline as existing sources.
+- **OCMS multisite configuration.** Site IDs resolve through the
+  external OCMS registry at `/etc/ocms/sites.conf`
+  (`SITE_ID INSTANCE_DIR SYSTEM_USER PORT`) and layer with a
+  logwatch-ai-scoped `ocms-sites.json` for per-site overrides. Log
+  paths are derived from `INSTANCE_DIR` per kind: `main` →
+  `<INSTANCE_DIR>/logs/ocms.log`, `error` →
+  `<INSTANCE_DIR>/logs/error.log`, `all` reads both files in one
+  report. Log-kind precedence: CLI `-ocms-log-kind` >
+  `sites.<id>.log_kind` > `default_log_kind` > built-in `main`.
+- **OCMS CLI flags.** `-ocms-site <id>`, `-ocms-sites-config <path>`,
+  `-ocms-sites-registry <path>`, `-ocms-log-kind <main|error|all>`,
+  and `-list-ocms-sites`.
+- **OCMS environment variable.** `OCMS_LOGS_PATH` for single-site
+  setups bypasses the registry entirely. Explicit ad-hoc CLI source
+  paths also bypass the registry — no `ocms-sites.json` or
+  `/etc/ocms/sites.conf` is required for one-off analysis.
+- **OCMS exclusions scope.** `exclusions.json` schema bumped to
+  `"1.2"` with a new optional `ocms` scope list. v1.0 and v1.1
+  configs continue to load. Resolution: OCMS runs use `global` +
+  `ocms`. Per-site stacking remains Drupal-only.
+- **OCMS Telegram notifications.** `OCMS` source display name added;
+  site context surfaces in messages and stored history alongside
+  Drupal site metadata.
+- **Operator collateral.** `configs/ocms-sites.json.example`,
+  `configs/ocms-crontab.example`, install script support, and
+  README/DEPLOYMENT/CRON_SETUP documentation for OCMS.
+
+#### Shared analyzer utilities
+- New `internal/analyzer/file_reader.go` centralizes existence,
+  permission, size, age, and metadata checks shared across log
+  sources. Both the logwatch and OCMS readers consume it. Hardens
+  OCMS registry parsing by requiring absolute, clean `INSTANCE_DIR`
+  paths.
+
+### Changed
+#### Makefile and developer experience
+- Makefile targets aligned with the shared local/production/platform/
+  test/lint/coverage/dependency/tool-install conventions used across
+  related projects. New helper targets and standardized names; see
+  `make help`. README, CLAUDE.md, AGENTS.md, and DEPLOYMENT.md
+  updated to match. `gofumpt` formatting applied so `make fmt-check`
+  passes.
+
+### Fixed
+- OCMS preprocessor accepts short non-empty logs that previously
+  tripped the minimum-content validator. Stale read logic removed
+  from `internal/logwatch/reader.go` after the shared-guard refactor
+  so the package builds cleanly.
+- Honor explicit OCMS source path overrides: ad-hoc analysis with a
+  CLI source path no longer requires `ocms-sites.json` or the
+  external registry to resolve.
+
+### Dependencies
+- Bump `modernc.org/sqlite` v1.49.1 → v1.50.0. Transitive refresh of
+  the `modernc.org` chain (`libc` v1.72.0 → v1.72.1, plus `cc/v4`,
+  `ccgo/v4`, `opt`) via `go mod tidy`. No API changes.
+
 ## [0.11.0] - 2026-04-22
 
 ### Changed
@@ -660,7 +726,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.8.0...v0.9.0
