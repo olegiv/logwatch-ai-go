@@ -52,8 +52,8 @@ const maxConfigFileSize = 1 << 20 // 1 MiB
 
 // supportedVersions lists the exclusions.json schema versions this build
 // understands. "1.0" is accepted for backward compatibility; "1.1" adds the
-// optional `logwatch` and `drupal` scope lists.
-var supportedVersions = []string{"1.0", "1.1"}
+// optional `logwatch` and `drupal` scope lists; "1.2" adds optional `ocms`.
+var supportedVersions = []string{"1.0", "1.1", "1.2"}
 
 // maxPatternsPerList caps the number of patterns allowed in any single list
 // (global, logwatch, drupal, or a single sites entry). Set to a value that
@@ -79,6 +79,7 @@ type Config struct {
 	Global   []string            `json:"global,omitempty"`
 	Logwatch []string            `json:"logwatch,omitempty"`
 	Drupal   []string            `json:"drupal,omitempty"`
+	OCMS     []string            `json:"ocms,omitempty"`
 	Sites    map[string][]string `json:"sites,omitempty"`
 }
 
@@ -101,6 +102,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := validatePatternList("drupal", c.Drupal); err != nil {
+		return err
+	}
+	if err := validatePatternList("ocms", c.OCMS); err != nil {
 		return err
 	}
 
@@ -172,6 +176,7 @@ func (c *Config) GlobalPatterns() []string {
 //
 //   - logType == analyzer.LogSourceLogwatch:       c.Logwatch
 //   - logType == analyzer.LogSourceDrupalWatchdog: c.Drupal + c.Sites[siteID]
+//   - logType == analyzer.LogSourceOCMS:           c.OCMS
 //
 // An empty or unknown siteID for drupal_watchdog returns just c.Drupal.
 // Other logTypes return nil (defensive).
@@ -194,6 +199,8 @@ func (c *Config) ContextualPatterns(logType analyzer.LogSourceType, siteID strin
 			out = append(out, sanitizePatternsForPrompt(c.Sites[siteID])...)
 		}
 		return out
+	case analyzer.LogSourceOCMS:
+		return sanitizePatternsForPrompt(c.OCMS)
 	default:
 		return nil
 	}

@@ -469,6 +469,11 @@ func TestGetLogSourceDisplayName(t *testing.T) {
 			expectedResult: "Drupal Watchdog",
 		},
 		{
+			name:           "ocms source",
+			logSourceType:  "ocms",
+			expectedResult: "OCMS",
+		},
+		{
 			name:           "unknown source",
 			logSourceType:  "unknown",
 			expectedResult: "Log",
@@ -929,6 +934,8 @@ func TestFormatMessage_NoEntriesReport(t *testing.T) {
 				expectedDisplay = "Logwatch"
 			case "drupal_watchdog":
 				expectedDisplay = "Drupal Watchdog"
+			case "ocms":
+				expectedDisplay = "OCMS"
 			}
 			if displayName != expectedDisplay {
 				t.Errorf("Expected display name %q, got %q", expectedDisplay, displayName)

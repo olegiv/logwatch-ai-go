@@ -809,13 +809,21 @@ func TestValidateLogSource(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "Valid ocms config",
+			setup: func(c *Config) {
+				c.LogSourceType = "ocms"
+				c.OCMSLogsPath = "/var/log/ocms.log"
+			},
+			expectError: false,
+		},
+		{
 			name: "Invalid log source type",
 			setup: func(c *Config) {
 				c.LogSourceType = "invalid"
 				c.LogwatchOutputPath = "/tmp/logwatch.txt"
 			},
 			expectError:   true,
-			errorContains: "LOG_SOURCE_TYPE must be 'logwatch' or 'drupal_watchdog'",
+			errorContains: "LOG_SOURCE_TYPE must be 'logwatch', 'drupal_watchdog', or 'ocms'",
 		},
 		{
 			name: "Missing logwatch path when logwatch selected",
@@ -835,6 +843,15 @@ func TestValidateLogSource(t *testing.T) {
 			},
 			expectError:   true,
 			errorContains: "watchdog_path is required in drupal-sites.json",
+		},
+		{
+			name: "Missing ocms path when ocms selected",
+			setup: func(c *Config) {
+				c.LogSourceType = "ocms"
+				c.OCMSLogsPath = ""
+			},
+			expectError:   true,
+			errorContains: "OCMS_LOGS_PATH is required when LOG_SOURCE_TYPE=ocms",
 		},
 		{
 			name: "Invalid drupal watchdog format",
@@ -865,6 +882,7 @@ func TestGetLogSourcePath(t *testing.T) {
 		logSourceType  string
 		logwatchPath   string
 		drupalPath     string
+		ocmsPath       string
 		expectedResult string
 	}{
 		{
@@ -872,6 +890,7 @@ func TestGetLogSourcePath(t *testing.T) {
 			logSourceType:  "logwatch",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
+			ocmsPath:       "/var/log/ocms.log",
 			expectedResult: "/tmp/logwatch.txt",
 		},
 		{
@@ -879,13 +898,23 @@ func TestGetLogSourcePath(t *testing.T) {
 			logSourceType:  "drupal_watchdog",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
+			ocmsPath:       "/var/log/ocms.log",
 			expectedResult: "/var/log/drupal.json",
+		},
+		{
+			name:           "OCMS source type",
+			logSourceType:  "ocms",
+			logwatchPath:   "/tmp/logwatch.txt",
+			drupalPath:     "/var/log/drupal.json",
+			ocmsPath:       "/var/log/ocms.log",
+			expectedResult: "/var/log/ocms.log",
 		},
 		{
 			name:           "Unknown source type defaults to logwatch",
 			logSourceType:  "unknown",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
+			ocmsPath:       "/var/log/ocms.log",
 			expectedResult: "/tmp/logwatch.txt",
 		},
 	}
@@ -896,6 +925,7 @@ func TestGetLogSourcePath(t *testing.T) {
 				LogSourceType:      tt.logSourceType,
 				LogwatchOutputPath: tt.logwatchPath,
 				DrupalWatchdogPath: tt.drupalPath,
+				OCMSLogsPath:       tt.ocmsPath,
 			}
 
 			result := cfg.GetLogSourcePath()
@@ -936,6 +966,7 @@ func TestIsLogwatch(t *testing.T) {
 	}{
 		{"Logwatch", "logwatch", true},
 		{"Drupal watchdog", "drupal_watchdog", false},
+		{"OCMS", "ocms", false},
 		{"Unknown", "unknown", false},
 		{"Empty", "", false},
 	}
@@ -969,6 +1000,27 @@ func TestConfigStructure_WithDrupalFields(t *testing.T) {
 	}
 	if config.DrupalSiteName != "production" {
 		t.Errorf("DrupalSiteName not set correctly")
+	}
+}
+
+func TestIsOCMS(t *testing.T) {
+	tests := []struct {
+		name          string
+		logSourceType string
+		expected      bool
+	}{
+		{"OCMS", "ocms", true},
+		{"Logwatch", "logwatch", false},
+		{"Drupal watchdog", "drupal_watchdog", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{LogSourceType: tt.logSourceType}
+			if got := cfg.IsOCMS(); got != tt.expected {
+				t.Errorf("IsOCMS() = %v, want %v", got, tt.expected)
+			}
+		})
 	}
 }
 
