@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Oleg Ivanchenko
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package analyzer
 
 import (
@@ -70,6 +73,19 @@ func TestReadSourceFileWithGuards_TooOld(t *testing.T) {
 		MaxAge:      24 * time.Hour,
 	}, func(string) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "too old") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadSourceFileWithGuards_NilValidator(t *testing.T) {
+	t.Parallel()
+
+	_, err := ReadSourceFileWithGuards(
+		"/tmp/nonexistent.log",
+		FileReadOptions{SourceLabel: "sample", MaxSizeMB: 1, MaxAge: 1 * time.Hour},
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "content validator is required") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

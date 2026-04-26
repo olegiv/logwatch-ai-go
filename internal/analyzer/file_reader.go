@@ -24,6 +24,10 @@ func ReadSourceFileWithGuards(
 	opts FileReadOptions,
 	validateContent func(content string) error,
 ) (string, error) {
+	if validateContent == nil {
+		return "", fmt.Errorf("content validator is required")
+	}
+
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		if os.IsNotExist(err) {
