@@ -233,7 +233,7 @@ func TestReader_Read(t *testing.T) {
 		{"wid": 2, "type": "access", "message": "Access denied for user", "severity": 4, "timestamp": 1699900801, "hostname": "192.168.1.1", "location": "/admin/config"}
 	]`
 
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0o644); err != nil {
 		t.Fatalf("Failed to write temp file: %v", err)
 	}
 
@@ -268,7 +268,7 @@ func TestReader_GetSourceInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "watchdog.json")
 
-	if err := os.WriteFile(tmpFile, []byte("test content"), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte("test content"), 0o644); err != nil {
 		t.Fatalf("Failed to write temp file: %v", err)
 	}
 

@@ -16,15 +16,27 @@ Logwatch AI Analyzer is an intelligent system log analyzer that uses LLM to anal
 
 ```bash
 # Development
-make build          # Dev build
+make help           # Show Makefile targets
+make all            # Build the default local/dev binary
+make build          # Fast local/dev build
 make test           # Run all tests
-make test-coverage  # Coverage report (opens coverage.html)
-make fmt && make vet # Format and lint
+make test-race      # Run tests with race detector
+make coverage       # Run tests with coverage summary
+make coverage-html  # Write coverage.out + coverage.html
+make fmt            # Format with gofumpt
+make fmt-check      # Fail if gofumpt would reformat files
+make vet            # Run go vet
+make lint           # Run all linters
+make check          # fmt-check + vet + lint + test
+make deps           # go mod download
+make tidy           # go mod tidy
+make install-tools  # Install pinned golangci-lint + gofumpt
 
 # Production
-make build-prod           # Optimized build for current platform
-make build-linux-amd64    # Linux AMD64 (Debian 12/Ubuntu)
-make build-all-platforms  # All platforms
+make build-prod           # Optimized host production build
+make build-linux-amd64    # Optimized static Linux AMD64 production build
+make build-darwin-arm64   # Optimized Darwin ARM64 production build
+make build-all-platforms  # Linux AMD64 + Darwin ARM64 production builds
 make install              # Install to /opt/logwatch-ai (requires sudo)
 ```
 
@@ -177,7 +189,7 @@ package <name>
 Specialized agents and slash commands are defined in `.Codex/agents/` and `.Codex/commands/`. Key commands:
 
 - `/test` - Run all tests
-- `/build` - Development build
+- `/build` - Fast local/dev build
 - `/build-all` - All platform builds
 - `/db-stats` - Database statistics
 - `/cost-report` - Cost analysis

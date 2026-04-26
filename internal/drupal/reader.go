@@ -83,7 +83,7 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 	}
 
 	// Check file permissions
-	if fileInfo.Mode().Perm()&0400 == 0 {
+	if fileInfo.Mode().Perm()&0o400 == 0 {
 		return "", fmt.Errorf("watchdog file is not readable: %s", sourcePath)
 	}
 

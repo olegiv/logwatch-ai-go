@@ -13,8 +13,10 @@ import (
 )
 
 // Compile-time interface check
-var _ analyzer.Preprocessor = (*Preprocessor)(nil)
-var _ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+var (
+	_ analyzer.Preprocessor       = (*Preprocessor)(nil)
+	_ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+)
 
 // Preprocessor handles Drupal watchdog content preprocessing for large logs.
 // Implements analyzer.Preprocessor interface.

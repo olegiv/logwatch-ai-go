@@ -42,7 +42,7 @@ Choose the appropriate LLM provider for your deployment:
 ## Pre-Deployment Checklist
 
 1. **Choose LLM provider**: Select based on requirements above
-2. **Build for target platform**: Use `make build-linux-amd64` for Debian/Ubuntu
+2. **Build optimized static Linux AMD64 binary**: Use `make build-linux-amd64` for Debian/Ubuntu
 3. **Test in staging**: Deploy to pre-production environment first
 4. **Verify credentials**: Test with actual API keys in isolated environment
 5. **Check cron configuration**: Ensure logwatch runs before analyzer
@@ -50,7 +50,7 @@ Choose the appropriate LLM provider for your deployment:
 
 ## Deployment Steps
 
-1. Build for target platform: `make build-linux-amd64`
+1. Build optimized static Linux AMD64 binary: `make build-linux-amd64`
 2. Transfer binary to target system
 3. Run installation script: `sudo ./scripts/install.sh`
 4. Configure `.env` with environment-specific credentials
@@ -107,9 +107,9 @@ Choose the appropriate LLM provider for your deployment:
 
 ```bash
 # Use Makefile targets for cross-platform builds
-make build-linux-amd64       # Linux AMD64 binary
-make build-darwin-arm64      # macOS ARM64 binary
-make build-all-platforms     # Build all platforms
+make build-linux-amd64       # Optimized static Linux AMD64 production binary
+make build-darwin-arm64      # Optimized Darwin ARM64 production binary
+make build-all-platforms     # Linux AMD64 + Darwin ARM64 production builds
 
 # Manual cross-compilation (if needed for other platforms)
 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -trimpath -o bin/logwatch-analyzer-linux ./cmd/analyzer

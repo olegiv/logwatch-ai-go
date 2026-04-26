@@ -1,11 +1,17 @@
-.PHONY: build test clean install run fmt vet lint build-linux-amd64 build-darwin-arm64 build-all-platforms
-
 # Build variables
 BINARY_NAME=logwatch-analyzer
 BUILD_DIR=bin
 INSTALL_DIR=/opt/logwatch-ai
 GO=go
-GOFLAGS=-v
+
+GOLANGCI_LINT_VERSION := v2.11.4
+GOFUMPT_VERSION       := v0.9.2
+
+.DEFAULT_GOAL := help
+
+.PHONY: all help build build-prod build-linux-amd64 build-darwin-arm64 build-all-platforms \
+        test test-race coverage coverage-html fmt fmt-check vet lint lint-go check deps tidy clean install-tools \
+        install run
 
 # Version info from git
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -15,64 +21,90 @@ BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 # Linker flags for version injection
 LDFLAGS_VERSION=-X main.version=$(VERSION) -X main.gitCommit=$(GIT_COMMIT) -X main.buildTime=$(BUILD_TIME)
 
-# Build the application
-build:
+all: build ## Build the default local/dev binary
+
+build: ## Build fast local/dev binary for host platform
 	@echo "Building $(BINARY_NAME) $(VERSION)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS_VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
+	$(GO) build -ldflags="$(LDFLAGS_VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
 
-# Build with optimizations (smaller binary)
-build-prod:
+build-prod: ## Build optimized host production binary
 	@echo "Building $(BINARY_NAME) $(VERSION) for production..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -ldflags="-s -w $(LDFLAGS_VERSION)" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
+	$(GO) build -trimpath -ldflags="-s -w $(LDFLAGS_VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/analyzer
 
-# Build for Linux AMD64 (Debian 12/Ubuntu 24)
-build-linux-amd64:
+build-linux-amd64: ## Build optimized static Linux AMD64 production binary
 	@echo "Building $(BINARY_NAME) $(VERSION) for Linux AMD64..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-s -w $(LDFLAGS_VERSION)" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/analyzer
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v3 \
+		$(GO) build -trimpath -ldflags="-s -w $(LDFLAGS_VERSION)" \
+		-o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/analyzer
 
-# Build for macOS ARM64 (Apple Silicon)
-build-darwin-arm64:
+build-darwin-arm64: ## Build optimized Darwin ARM64 production binary
 	@echo "Building $(BINARY_NAME) $(VERSION) for macOS ARM64..."
 	@mkdir -p $(BUILD_DIR)
-	GOOS=darwin GOARCH=arm64 $(GO) build -ldflags="-s -w $(LDFLAGS_VERSION)" -trimpath -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/analyzer
+	GOOS=darwin GOARCH=arm64 \
+		$(GO) build -trimpath -ldflags="-s -w $(LDFLAGS_VERSION)" \
+		-o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/analyzer
 
-# Build for all platforms
-build-all-platforms: build-linux-amd64 build-darwin-arm64
+build-all-platforms: build-linux-amd64 build-darwin-arm64 ## Build all production platform binaries
 	@echo "All platform builds complete!"
 	@ls -lh $(BUILD_DIR)/$(BINARY_NAME)-*
 
-# Run tests
-test:
+test: ## Run all tests
 	@echo "Running tests..."
-	$(GO) test -v ./...
+	$(GO) test ./...
 
-# Run tests with coverage
-test-coverage:
-	@echo "Running tests with coverage..."
-	$(GO) test -v -coverprofile=coverage.out ./...
+test-race: ## Run tests with race detector
+	$(GO) test -race ./...
+
+coverage: ## Run tests with coverage summary
+	$(GO) test -cover ./...
+
+coverage-html: ## Generate HTML coverage report
+	$(GO) test -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
 
-# Format code
-fmt:
+fmt: ## Format code with gofumpt
 	@echo "Formatting code..."
-	$(GO) fmt ./...
+	gofumpt -w .
 
-# Run go vet
-vet:
+fmt-check: ## Fail if gofumpt would reformat files
+	@out=$$(gofumpt -l .); \
+	if [ -n "$$out" ]; then \
+		echo "gofumpt would reformat:"; \
+		echo "$$out"; \
+		exit 1; \
+	fi
+
+vet: ## Run go vet
 	@echo "Running go vet..."
 	$(GO) vet ./...
 
-# Clean build artifacts
-clean:
+lint-go: ## Run golangci-lint
+	golangci-lint run ./...
+
+lint: lint-go ## Run all linters
+
+check: fmt-check vet lint test ## Run the full local quality gate
+
+deps: ## Download Go module dependencies
+	$(GO) mod download
+
+tidy: ## Tidy Go modules
+	$(GO) mod tidy
+
+clean: ## Remove build artifacts
 	@echo "Cleaning..."
 	@rm -rf $(BUILD_DIR)
 	@rm -f coverage.out coverage.html
 
-# Install to system directory
-install: build-prod
+install-tools: ## Install pinned developer tools
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	$(GO) install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
+
+install: build-prod ## Install optimized binary to system directory
 	@echo "Installing to $(INSTALL_DIR)..."
 	@sudo mkdir -p $(INSTALL_DIR)
 	@sudo cp $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/
@@ -86,30 +118,8 @@ install: build-prod
 	fi
 	@echo "Installation complete!"
 
-# Run the application
-run: build
+run: build ## Build and run the application
 	@$(BUILD_DIR)/$(BINARY_NAME)
 
-# Download dependencies
-deps:
-	@echo "Downloading dependencies..."
-	$(GO) mod download
-	$(GO) mod tidy
-
-# Display help
-help:
-	@echo "Available targets:"
-	@echo "  build              - Build the application"
-	@echo "  build-prod         - Build optimized production binary"
-	@echo "  build-linux-amd64  - Build for Linux AMD64 (Debian 12/Ubuntu 24)"
-	@echo "  build-darwin-arm64 - Build for macOS ARM64 (Apple Silicon)"
-	@echo "  build-all-platforms- Build for all platforms"
-	@echo "  test               - Run tests"
-	@echo "  test-coverage      - Run tests with coverage report"
-	@echo "  fmt                - Format code"
-	@echo "  vet                - Run go vet"
-	@echo "  clean              - Remove build artifacts"
-	@echo "  install            - Install to $(INSTALL_DIR)"
-	@echo "  run                - Build and run the application"
-	@echo "  deps               - Download and tidy dependencies"
-	@echo "  help               - Show this help message"
+help: ## Show this help
+	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)

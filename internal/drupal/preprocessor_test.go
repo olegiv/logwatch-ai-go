@@ -8,8 +8,10 @@ import (
 )
 
 // Compile-time interface checks
-var _ analyzer.Preprocessor = (*Preprocessor)(nil)
-var _ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+var (
+	_ analyzer.Preprocessor       = (*Preprocessor)(nil)
+	_ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+)
 
 func TestNewPreprocessor(t *testing.T) {
 	p := NewPreprocessor(150000)

@@ -62,7 +62,7 @@ const (
 func New(dbPath string) (*Storage, error) {
 	// Create directory if it doesn't exist (0700 for security - owner only)
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 

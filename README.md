@@ -56,7 +56,7 @@ git submodule update --init --recursive
 git submodule update --remote --merge
 ```
 
-2. **Build the application**
+2. **Build the local/dev binary**
 ```bash
 make build
 ```
@@ -437,13 +437,24 @@ Options:
 ### Build Options
 
 ```bash
-make build                # Development build
-make build-prod           # Production build (optimized, smaller binary)
-make build-linux-amd64    # Build for Linux AMD64 (Debian 12/Ubuntu 24)
-make build-darwin-arm64   # Build for macOS ARM64 (Apple Silicon)
-make build-all-platforms  # Build for all platforms
+make build                # Fast local/dev build
+make build-prod           # Optimized host production build
+make build-linux-amd64    # Optimized static Linux AMD64 production build
+make build-darwin-arm64   # Optimized Darwin ARM64 production build
+make build-all-platforms  # Linux AMD64 + Darwin ARM64 production builds
 make test                 # Run tests
-make test-coverage        # Run tests with coverage
+make test-race            # Run tests with race detector
+make coverage             # Run tests with coverage summary
+make coverage-html        # Write coverage.out + coverage.html
+make fmt                  # Format with gofumpt
+make fmt-check            # Fail if gofumpt would reformat files
+make vet                  # Run go vet
+make lint                 # Run all linters
+make check                # fmt-check + vet + lint + test
+make deps                 # Download Go module dependencies
+make tidy                 # Tidy Go modules
+make install-tools        # Install pinned developer tools
+make help                 # Show Makefile targets
 make clean                # Clean build artifacts
 make install              # Install to /opt/logwatch-ai
 ```
@@ -614,7 +625,8 @@ This Go implementation provides feature parity with the original Node.js version
 make test
 
 # Run with coverage
-make test-coverage
+make coverage
+make coverage-html
 
 # Run specific package tests
 go test -v ./internal/ai

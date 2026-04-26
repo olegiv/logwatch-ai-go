@@ -52,14 +52,13 @@ func TestRead_ValidFile(t *testing.T) {
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
 	content := strings.Repeat("This is a logwatch output line.\n", 10)
-	err := os.WriteFile(testFile, []byte(content), 0644)
+	err := os.WriteFile(testFile, []byte(content), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
 	reader := NewReader(10, false, 150000)
 	result, err := reader.Read(testFile)
-
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -75,7 +74,7 @@ func TestRead_FileTooBig(t *testing.T) {
 
 	// Create a file larger than 1MB (maxSizeMB is 1)
 	largeContent := strings.Repeat("X", 2*1024*1024)
-	err := os.WriteFile(testFile, []byte(largeContent), 0644)
+	err := os.WriteFile(testFile, []byte(largeContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
@@ -97,7 +96,7 @@ func TestRead_FileTooOld(t *testing.T) {
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
 	content := strings.Repeat("This is a logwatch output line.\n", 10)
-	err := os.WriteFile(testFile, []byte(content), 0644)
+	err := os.WriteFile(testFile, []byte(content), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
@@ -125,7 +124,7 @@ func TestRead_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
-	err := os.WriteFile(testFile, []byte(""), 0644)
+	err := os.WriteFile(testFile, []byte(""), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
@@ -147,7 +146,7 @@ func TestRead_FileTooSmall(t *testing.T) {
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
 	// File with less than 100 bytes
-	err := os.WriteFile(testFile, []byte("Small"), 0644)
+	err := os.WriteFile(testFile, []byte("Small"), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
@@ -170,7 +169,7 @@ func TestRead_WithPreprocessing(t *testing.T) {
 
 	// Create content that will trigger preprocessing (high token count)
 	content := strings.Repeat("This is a logwatch line with many words to increase token count.\n", 10000)
-	err := os.WriteFile(testFile, []byte(content), 0644)
+	err := os.WriteFile(testFile, []byte(content), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
@@ -178,7 +177,6 @@ func TestRead_WithPreprocessing(t *testing.T) {
 	// Use low max tokens to trigger preprocessing
 	reader := NewReader(10, true, 1000)
 	result, err := reader.Read(testFile)
-
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -198,14 +196,13 @@ func TestRead_NoPreprocessing(t *testing.T) {
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
 	content := strings.Repeat("This is a logwatch output line.\n", 100)
-	err := os.WriteFile(testFile, []byte(content), 0644)
+	err := os.WriteFile(testFile, []byte(content), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
 	reader := NewReader(10, false, 150000)
 	result, err := reader.Read(testFile)
-
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -266,14 +263,13 @@ func TestGetSourceInfo(t *testing.T) {
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
 	content := strings.Repeat("Test content.\n", 100)
-	err := os.WriteFile(testFile, []byte(content), 0644)
+	err := os.WriteFile(testFile, []byte(content), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
 	reader := NewReader(10, false, 150000)
 	info, err := reader.GetSourceInfo(testFile)
-
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -351,13 +347,13 @@ func TestRead_NotReadableFile(t *testing.T) {
 	testFile := filepath.Join(tmpDir, "logwatch.txt")
 
 	content := strings.Repeat("This is a logwatch output line.\n", 10)
-	err := os.WriteFile(testFile, []byte(content), 0000) // No permissions
+	err := os.WriteFile(testFile, []byte(content), 0o000) // No permissions
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
 	// Ensure cleanup
-	defer func() { _ = os.Chmod(testFile, 0644) }()
+	defer func() { _ = os.Chmod(testFile, 0o644) }()
 
 	reader := NewReader(10, false, 150000)
 	_, err = reader.Read(testFile)
@@ -404,14 +400,13 @@ func TestRead_PreprocessingThreshold(t *testing.T) {
 
 	// Create content just below threshold
 	content := strings.Repeat("Test line.\n", 100)
-	err := os.WriteFile(testFile, []byte(content), 0644)
+	err := os.WriteFile(testFile, []byte(content), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
 	reader := NewReader(10, true, 1000000) // High threshold
 	result, err := reader.Read(testFile)
-
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -430,7 +425,7 @@ func TestRead_ExactSizeLimit(t *testing.T) {
 	maxSizeMB := 1
 	exactSize := maxSizeMB * 1024 * 1024
 	content := strings.Repeat("X", exactSize)
-	err := os.WriteFile(testFile, []byte(content), 0644)
+	err := os.WriteFile(testFile, []byte(content), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
