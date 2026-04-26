@@ -379,6 +379,9 @@ func (c *Config) applyOCMSMultiSiteConfig(cli *CLIOptions) error {
 	}
 
 	configPath, cliSiteID, registryPath, cliLogKind, cliSourcePath := readOCMSCLI(cli)
+	if cliSourcePath != "" {
+		return c.applyOCMSSourcePathOverride(cliSourcePath, cliLogKind)
+	}
 
 	sitesConfig, configFoundPath, err := LoadOCMSSitesConfig(configPath)
 	if err != nil {
@@ -443,6 +446,22 @@ func readOCMSCLI(cli *CLIOptions) (configPath, siteID, registryPath, logKind, so
 		return
 	}
 	return cli.OCMSSitesConfig, cli.OCMSSite, cli.OCMSSitesRegistry, cli.OCMSLogKind, cli.SourcePath
+}
+
+// applyOCMSSourcePathOverride keeps -source-path as the final explicit path
+// override and avoids loading registry-backed OCMS multisite configuration.
+func (c *Config) applyOCMSSourcePathOverride(sourcePath, cliLogKind string) error {
+	c.OCMSLogsPath = sourcePath
+	if cliLogKind != "" {
+		c.OCMSLogKind = cliLogKind
+	}
+	logKind, err := NormalizeOCMSLogKind(c.OCMSLogKind)
+	if err != nil {
+		return err
+	}
+	c.OCMSLogKind = logKind
+	c.OCMSLogPaths = nil
+	return nil
 }
 
 // applyOCMSSingleSiteFallback handles the case where no ocms-sites.json was found.
