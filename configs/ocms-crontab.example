@@ -1,0 +1,21 @@
+# OCMS multisite analyzer crontab example
+#
+# Install this in the service user's crontab, not root:
+#   crontab -e
+#
+# OCMS site IDs are configured in /opt/logwatch-ai/ocms-sites.json and must
+# match /etc/ocms/sites.conf. The analyzer derives the log path from each
+# site's INSTANCE_DIR in that external OCMS registry:
+#   main:  <INSTANCE_DIR>/logs/ocms.log
+#   error: <INSTANCE_DIR>/logs/error.log
+#   all:   both files in one analyzer run
+#
+# Default: analyze the log kind configured in ocms-sites.json. Sites without a
+# log_kind use default_log_kind, which defaults to main.
+15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com >> logs/cron.log 2>&1
+20 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site app_example_com >> logs/cron.log 2>&1
+25 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site blog_example_com >> logs/cron.log 2>&1
+
+# Optional: override the JSON log kind for one-off cron entries.
+# 45 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-log-kind error >> logs/cron.log 2>&1
+# 50 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site app_example_com -ocms-log-kind all >> logs/cron.log 2>&1

@@ -108,12 +108,19 @@ type PromptBuilder interface {
 **Telegram:** `TELEGRAM_BOT_TOKEN` (format: `number:token`), `TELEGRAM_CHANNEL_ARCHIVE_ID` (must be < -100)
 
 **Log Sources:**
-- `LOG_SOURCE_TYPE`: `logwatch` or `drupal_watchdog`
+- `LOG_SOURCE_TYPE`: `logwatch`, `drupal_watchdog`, or `ocms`
 - Logwatch: `LOGWATCH_OUTPUT_PATH` required
 - Drupal: requires `drupal-sites.json` and `jq` installed
+- OCMS: single-site uses `OCMS_LOGS_PATH`; multi-site uses `ocms-sites.json` + external `/etc/ocms/sites.conf`
 
 **Multi-Site Drupal:** Uses `drupal-sites.json` for centralized site configuration.
 - CLI: `-drupal-site <id>`, `-drupal-sites-config <path>`, `-list-drupal-sites`
+- Search locations: `./`, `./configs/`, `/opt/logwatch-ai/`, `~/.config/logwatch-ai/`
+
+**Multi-Site OCMS:** Uses `ocms-sites.json` (logwatch-ai schema) layered over `/etc/ocms/sites.conf` (external OCMS registry: `SITE_ID INSTANCE_DIR SYSTEM_USER PORT`).
+- CLI: `-ocms-site <id>`, `-ocms-sites-config <path>`, `-ocms-sites-registry <path>`, `-ocms-log-kind <main|error|all>`, `-list-ocms-sites`
+- Derived log paths: `main` → `<INSTANCE_DIR>/logs/ocms.log`; `error` → `<INSTANCE_DIR>/logs/error.log`; `all` reads both files in one report
+- Log-kind precedence: CLI `-ocms-log-kind` > `sites.<id>.log_kind` > `default_log_kind` > built-in `main`
 - Search locations: `./`, `./configs/`, `/opt/logwatch-ai/`, `~/.config/logwatch-ai/`
 
 **Finding Exclusions (optional):** `exclusions.json` instructs the LLM to ignore specific conditions so they never appear as findings and do not influence `systemStatus`, `summary`, or `metrics`. Patterns are injected into the prompt, not post-filtered.

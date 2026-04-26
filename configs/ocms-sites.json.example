@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "default_site": "example_com",
+  "registry_path": "/etc/ocms/sites.conf",
+  "default_log_kind": "main",
+  "sites": {
+    "example_com": {
+      "name": "Example Site"
+    },
+    "app_example_com": {
+      "name": "Example App",
+      "log_kind": "all"
+    },
+    "blog_example_com": {
+      "name": "Example Blog",
+      "log_kind": "error"
+    }
+  }
+}

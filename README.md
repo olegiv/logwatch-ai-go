@@ -113,6 +113,8 @@ LOG_SOURCE_TYPE=logwatch
 LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt
 
 # OCMS Configuration (used when LOG_SOURCE_TYPE=ocms)
+# Single-site mode uses OCMS_LOGS_PATH directly.
+# Multi-site mode uses ocms-sites.json with log kinds: main, error, or all.
 OCMS_LOGS_PATH=/tmp/ocms.log
 
 # Drupal Watchdog Configuration (used when LOG_SOURCE_TYPE=drupal_watchdog)
@@ -392,6 +394,56 @@ For organizations managing multiple Drupal sites, the analyzer supports a centra
 | `min_severity` | No | RFC 5424 severity level 0-7 (default: 3=error) |
 | `watchdog_limit` | No | Max entries in output (default: 100) |
 
+### Multi-Site OCMS Support
+
+For OCMS multi-site analysis, use `ocms-sites.json` for logwatch-ai site
+selection and `/etc/ocms/sites.conf` as the external OCMS registry. Do not put
+per-site log paths in JSON; the analyzer derives them from the registry
+`INSTANCE_DIR`.
+
+```json
+{
+  "version": "1.0",
+  "default_site": "example_com",
+  "registry_path": "/etc/ocms/sites.conf",
+  "default_log_kind": "main",
+  "sites": {
+    "example_com": {
+      "name": "Example Site"
+    },
+    "app_example_com": {
+      "name": "Example App",
+      "log_kind": "all"
+    },
+    "blog_example_com": {
+      "name": "Example Blog",
+      "log_kind": "error"
+    }
+  }
+}
+```
+
+Derived OCMS logs:
+
+- `main`: `<INSTANCE_DIR>/logs/ocms.log`
+- `error`: `<INSTANCE_DIR>/logs/error.log`
+- `all`: both files above, read in that order and analyzed in one report
+
+**OCMS Configuration Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `version` | Yes | Config schema version. Use `"1.0"`. |
+| `default_site` | No | Default OCMS site ID from `sites` when `-ocms-site` is not provided. |
+| `registry_path` | No | External OCMS registry path. Defaults to `/etc/ocms/sites.conf`. |
+| `default_log_kind` | No | Default log kind for sites without `sites.<id>.log_kind`. Allowed: `main`, `error`, `all`. Defaults to `main`. |
+| `sites` | Yes | Map keyed by OCMS site ID. IDs must exist in `/etc/ocms/sites.conf`. |
+| `sites.<id>.name` | No | Human-readable site name for reports. |
+| `sites.<id>.log_kind` | No | Per-site log kind override. Allowed: `main`, `error`, `all`. |
+
+Log-kind precedence: CLI `-ocms-log-kind`, then `sites.<id>.log_kind`, then
+`default_log_kind`, then built-in default `main`.
+
 ## Usage
 
 ### Manual Run
@@ -415,6 +467,10 @@ Options:
   -drupal-site string        Drupal site ID from drupal-sites.json
   -drupal-sites-config string  Path to drupal-sites.json configuration file
   -list-drupal-sites         List available Drupal sites and exit
+  -ocms-site string          OCMS site ID from ocms-sites.json
+  -ocms-sites-config string  Path to ocms-sites.json configuration file
+  -ocms-log-kind string      OCMS log kind: main, error, or all
+  -list-ocms-sites           List available OCMS sites and exit
   -h, -help                  Show usage information
   -v, -version               Show version information
 ```
@@ -427,8 +483,14 @@ Options:
 # Override source type
 ./logwatch-analyzer -source-type drupal_watchdog
 
-# Analyze OCMS logs
-./logwatch-analyzer -source-type ocms -source-path /var/log/ocms/app.log
+# Analyze OCMS site logs
+./logwatch-analyzer -source-type ocms -ocms-site example_com
+
+# Analyze both OCMS main and error logs in one report
+./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-log-kind all
+
+# List OCMS sites and derived log paths
+./logwatch-analyzer -list-ocms-sites
 
 # Analyze specific Drupal site
 ./logwatch-analyzer -drupal-site production
@@ -522,7 +584,8 @@ logwatch-ai-go/
 
 1. **Log Generation**:
    - *Logwatch*: Root cron runs `generate-logwatch.sh` to create daily report
-   - *OCMS*: Application/server logs are exported to `OCMS_LOGS_PATH`
+   - *OCMS*: Single-site mode reads `OCMS_LOGS_PATH`; multisite mode derives
+     logs from `ocms-sites.json` and `/etc/ocms/sites.conf`
    - *Drupal*: drush exports watchdog entries to JSON file
 2. **Source Selection**: Application loads appropriate reader based on `LOG_SOURCE_TYPE`
 3. **File Reading**: Source-specific reader validates and parses log content

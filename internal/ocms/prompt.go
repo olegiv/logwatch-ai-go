@@ -11,13 +11,25 @@ import (
 )
 
 // PromptBuilder implements analyzer.PromptBuilder for OCMS log analysis.
-type PromptBuilder struct{}
+type PromptBuilder struct {
+	siteName string
+}
 
 var _ analyzer.PromptBuilder = (*PromptBuilder)(nil)
 
 // NewPromptBuilder creates a new OCMS prompt builder.
 func NewPromptBuilder() *PromptBuilder {
 	return &PromptBuilder{}
+}
+
+// SetSiteName sets the site name for display in prompts.
+func (p *PromptBuilder) SetSiteName(name string) {
+	p.siteName = name
+}
+
+// GetSiteName returns the configured site name.
+func (p *PromptBuilder) GetSiteName() string {
+	return p.siteName
 }
 
 // GetLogType returns the log type identifier.
@@ -91,6 +103,12 @@ You MUST respond with a valid JSON object (and ONLY JSON) in this exact format:
 // GetUserPrompt constructs the user prompt with OCMS logs and historical context.
 func (p *PromptBuilder) GetUserPrompt(logContent, historicalContext string, contextualExclusions []string) string {
 	var prompt strings.Builder
+	if p.siteName != "" {
+		prompt.WriteString("OCMS SITE: ")
+		prompt.WriteString(p.siteName)
+		prompt.WriteString("\n\n")
+	}
+
 	prompt.WriteString("OCMS LOG OUTPUT:\n")
 	prompt.WriteString(ai.SanitizeLogContent(logContent))
 	prompt.WriteString("\n\n")

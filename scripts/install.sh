@@ -69,12 +69,25 @@ else
     echo_info "drupal-sites.json file already exists, skipping"
 fi
 
+# Create ocms-sites.json for OCMS multi-site configuration
+if [ ! -f "$INSTALL_DIR/ocms-sites.json" ]; then
+    echo_info "Creating ocms-sites.json configuration file..."
+    cp "configs/ocms-sites.json.example" "$INSTALL_DIR/ocms-sites.json"
+    chmod 640 "$INSTALL_DIR/ocms-sites.json"
+else
+    echo_info "ocms-sites.json file already exists, skipping"
+fi
+
 # Install exclusions.json.example as a reference. The exclusions feature is
 # opt-in: operators must explicitly rename/copy this to exclusions.json to
 # activate it, so we never auto-create the active config.
 echo_info "Copying exclusions.json.example reference..."
 cp "configs/exclusions.json.example" "$INSTALL_DIR/exclusions.json.example"
 chmod 644 "$INSTALL_DIR/exclusions.json.example"
+
+echo_info "Copying OCMS reference samples..."
+cp "configs/ocms-crontab.example" "$INSTALL_DIR/ocms-crontab.example"
+chmod 644 "$INSTALL_DIR/ocms-crontab.example"
 
 # Set ownership
 echo_info "Setting ownership to $SERVICE_USER..."
@@ -88,11 +101,14 @@ echo_info ""
 echo_info "Next steps:"
 echo_info "1. Configure $INSTALL_DIR/.env with your API credentials"
 echo_info "2. For Drupal: Edit $INSTALL_DIR/drupal-sites.json with your sites"
-echo_info "3. Optional: to suppress known-acceptable findings, copy"
+echo_info "3. For OCMS: Edit $INSTALL_DIR/ocms-sites.json with site IDs and log kinds"
+echo_info "   (main, error, all) from /etc/ocms/sites.conf"
+echo_info "4. Optional: to suppress known-acceptable findings, copy"
 echo_info "   $INSTALL_DIR/exclusions.json.example to $INSTALL_DIR/exclusions.json"
 echo_info "   and edit patterns (see docs/EXCLUSIONS.md)"
-echo_info "4. Test the analyzer: $BINARY_NAME"
-echo_info "5. Set up cron jobs (see docs/CRON_SETUP.md)"
+echo_info "5. OCMS cron examples: see $INSTALL_DIR/ocms-crontab.example"
+echo_info "6. Test the analyzer: $BINARY_NAME"
+echo_info "7. Set up cron jobs (see docs/CRON_SETUP.md)"
 echo_info ""
 echo_info "Cron setup for Logwatch (as root):"
 echo_info "  0 2 * * * $INSTALL_DIR/scripts/generate-logwatch.sh"
@@ -101,4 +117,8 @@ echo_info ""
 echo_info "Cron setup for Drupal (as $SERVICE_USER):"
 echo_info "  0 2 * * * $INSTALL_DIR/scripts/generate-drupal-watchdog.sh --site production"
 echo_info "  15 2 * * * cd $INSTALL_DIR && ./$BINARY_NAME -source-type drupal_watchdog -drupal-site production >> logs/cron.log 2>&1"
+echo_info ""
+echo_info "Cron setup for OCMS multisite (as $SERVICE_USER):"
+echo_info "  15 2 * * * cd $INSTALL_DIR && ./$BINARY_NAME -source-type ocms -ocms-site example_com >> logs/cron.log 2>&1"
+echo_info "  20 2 * * * cd $INSTALL_DIR && ./$BINARY_NAME -source-type ocms -ocms-site example_com -ocms-log-kind all >> logs/cron.log 2>&1"
 echo_info ""

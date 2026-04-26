@@ -137,6 +137,99 @@ For Drupal log analysis, additional setup is required:
 
 See `configs/drupal-sites.json.example` for configuration format.
 
+## OCMS Multisite Deployment
+
+For OCMS multisite analysis, configure site IDs in `ocms-sites.json`, mirroring
+the Drupal multi-site config style. No per-site log path is required. The site
+IDs must match the external OCMS registry at `/etc/ocms/sites.conf`, whose rows
+are:
+
+```text
+SITE_ID INSTANCE_DIR SYSTEM_USER PORT
+```
+
+For each selected site, `main` is derived as:
+
+```text
+<INSTANCE_DIR>/logs/ocms.log
+```
+
+`error` is derived as:
+
+```text
+<INSTANCE_DIR>/logs/error.log
+```
+
+`all` reads both files in that order and sends one combined OCMS analysis.
+
+Create `/opt/logwatch-ai/ocms-sites.json` from
+`configs/ocms-sites.json.example`:
+
+```json
+{
+  "version": "1.0",
+  "default_site": "example_com",
+  "registry_path": "/etc/ocms/sites.conf",
+  "default_log_kind": "main",
+  "sites": {
+    "example_com": {
+      "name": "Example Site"
+    },
+    "app_example_com": {
+      "name": "Example App",
+      "log_kind": "all"
+    },
+    "blog_example_com": {
+      "name": "Example Blog",
+      "log_kind": "error"
+    }
+  }
+}
+```
+
+`ocms-sites.json` fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `version` | Yes | Config schema version. Use `"1.0"`. |
+| `default_site` | No | Default OCMS site ID from `sites` when `-ocms-site` is not provided. |
+| `registry_path` | No | External OCMS registry path. Defaults to `/etc/ocms/sites.conf`. |
+| `default_log_kind` | No | Default log kind for sites without `sites.<id>.log_kind`. Allowed: `main`, `error`, `all`. Defaults to `main`. |
+| `sites` | Yes | Map keyed by OCMS site ID. IDs must exist in `/etc/ocms/sites.conf`. |
+| `sites.<id>.name` | No | Human-readable site name for reports. |
+| `sites.<id>.log_kind` | No | Per-site log kind override. Allowed: `main`, `error`, `all`. |
+
+Log-kind precedence:
+
+1. CLI `-ocms-log-kind`
+2. `sites.<id>.log_kind`
+3. `default_log_kind`
+4. Built-in default `main`
+
+Examples:
+
+```bash
+# List OCMS sites and derived log paths
+/opt/logwatch-ai/logwatch-analyzer -list-ocms-sites
+
+# Analyze the main log for an OCMS site
+cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com
+
+# Analyze the error-only log for an OCMS site
+cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-log-kind error
+
+# Analyze main and error logs together for an OCMS site
+cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-log-kind all
+```
+
+Use `-ocms-sites-registry /path/to/sites.conf` only when the OCMS registry is
+not in the default `/etc/ocms/sites.conf` location.
+
+Reference samples:
+
+- `configs/ocms-sites.json.example` documents the logwatch-ai OCMS config.
+- `configs/ocms-crontab.example` shows multi-site analyzer cron entries.
+
 ## Optional: Finding Exclusions
 
 To suppress known-acceptable findings (e.g., "TLS certificate validation

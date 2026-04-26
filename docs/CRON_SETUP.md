@@ -110,6 +110,30 @@ tail -f /opt/logwatch-ai/logs/cron.log
 
 ## Cron Schedule Examples
 
+### OCMS Multisite
+
+OCMS site logs are already written under each OCMS instance directory. Select a
+site by ID from `ocms-sites.json`; the analyzer verifies that ID in
+`/etc/ocms/sites.conf`. Log kind `main` derives
+`<INSTANCE_DIR>/logs/ocms.log`; `error` derives
+`<INSTANCE_DIR>/logs/error.log`; `all` checks both files in one run.
+
+See `configs/ocms-crontab.example` for a multi-site crontab sample and
+`configs/ocms-sites.json.example` for the logwatch-ai config format.
+The full schema is documented in `docs/DEPLOYMENT.md`.
+
+```bash
+# Main OCMS log
+15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com >> logs/cron.log 2>&1
+
+# Error-only OCMS log; normally omit this flag if ocms-sites.json already sets
+# sites.<id>.log_kind or default_log_kind.
+20 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-log-kind error >> logs/cron.log 2>&1
+
+# Main plus error OCMS logs in one report.
+25 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site app_example_com -ocms-log-kind all >> logs/cron.log 2>&1
+```
+
 ### Different Frequencies
 
 **Twice Daily** (morning and evening):
