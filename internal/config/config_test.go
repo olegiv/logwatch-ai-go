@@ -812,7 +812,7 @@ func TestValidateLogSource(t *testing.T) {
 			name: "Valid ocms config",
 			setup: func(c *Config) {
 				c.LogSourceType = "ocms"
-				c.OCMSLogsPath = "/var/log/ocms.log"
+				c.OCMSLogsPath = "/var/www/vhosts/example.com/ocms/logs/ocms.log"
 			},
 			expectError: false,
 		},
@@ -890,7 +890,7 @@ func TestGetLogSourcePath(t *testing.T) {
 			logSourceType:  "logwatch",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
-			ocmsPath:       "/var/log/ocms.log",
+			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log",
 			expectedResult: "/tmp/logwatch.txt",
 		},
 		{
@@ -898,7 +898,7 @@ func TestGetLogSourcePath(t *testing.T) {
 			logSourceType:  "drupal_watchdog",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
-			ocmsPath:       "/var/log/ocms.log",
+			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log",
 			expectedResult: "/var/log/drupal.json",
 		},
 		{
@@ -906,15 +906,15 @@ func TestGetLogSourcePath(t *testing.T) {
 			logSourceType:  "ocms",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
-			ocmsPath:       "/var/log/ocms.log",
-			expectedResult: "/var/log/ocms.log",
+			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log",
+			expectedResult: "/var/www/vhosts/example.com/ocms/logs/ocms.log",
 		},
 		{
 			name:           "Unknown source type defaults to logwatch",
 			logSourceType:  "unknown",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
-			ocmsPath:       "/var/log/ocms.log",
+			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log",
 			expectedResult: "/tmp/logwatch.txt",
 		},
 	}
@@ -934,6 +934,374 @@ func TestGetLogSourcePath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ocmsMultiSiteFixtures writes a registry and ocms-sites.json into tmpDir,
+// returning the paths for use by tests.
+func ocmsMultiSiteFixtures(t *testing.T) (registryPath, configPath, tmpDir string) {
+	t.Helper()
+	tmpDir = t.TempDir()
+
+	registryPath = filepath.Join(tmpDir, "sites.conf")
+	registryContent := `example_com /var/www/vhosts/example.com/ocms example_com 8081
+app_example_com /var/www/vhosts/example.com/ocms/app hosting 8082
+all_example_com /var/www/vhosts/all.example.com/ocms all_example_com 8083
+`
+	if err := os.WriteFile(registryPath, []byte(registryContent), 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+
+	configPath = filepath.Join(tmpDir, "ocms-sites.json")
+	configContent := `{
+  "version": "1.0",
+  "default_site": "example_com",
+  "registry_path": "` + registryPath + `",
+  "default_log_kind": "main",
+  "sites": {
+    "example_com": {
+      "name": "Example Site"
+    },
+    "app_example_com": {
+      "name": "Example App",
+      "log_kind": "error"
+    },
+    "all_example_com": {
+      "name": "All Example",
+      "log_kind": "all"
+    }
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o600); err != nil {
+		t.Fatalf("write ocms config: %v", err)
+	}
+
+	return registryPath, configPath, tmpDir
+}
+
+func TestApplyOCMSMultiSiteConfig_DerivesMainLogPath(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		OCMSSite:        "example_com",
+		OCMSSitesConfig: configPath,
+	})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/logs/ocms.log" {
+		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
+	}
+	if cfg.SelectedSiteID() != "example_com" {
+		t.Fatalf("SelectedSiteID() = %q", cfg.SelectedSiteID())
+	}
+	if cfg.SelectedSiteName() != "Example Site" {
+		t.Fatalf("SelectedSiteName() = %q", cfg.SelectedSiteName())
+	}
+	if cfg.OCMSSitesConfigPath != configPath {
+		t.Fatalf("OCMSSitesConfigPath = %q", cfg.OCMSSitesConfigPath)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_DerivesErrorLogFromJSON(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		OCMSSite:        "app_example_com",
+		OCMSSitesConfig: configPath,
+	})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/app/logs/error.log" {
+		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
+	}
+	if cfg.OCMSLogKind != OCMSLogKindError {
+		t.Fatalf("OCMSLogKind = %q", cfg.OCMSLogKind)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_CLILogKindOverridesJSON(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		OCMSSite:        "app_example_com",
+		OCMSSitesConfig: configPath,
+		OCMSLogKind:     OCMSLogKindMain,
+	})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/app/logs/ocms.log" {
+		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_DerivesAllLogPaths(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		OCMSSite:        "all_example_com",
+		OCMSSitesConfig: configPath,
+	})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.OCMSLogKind != OCMSLogKindAll {
+		t.Fatalf("OCMSLogKind = %q", cfg.OCMSLogKind)
+	}
+	paths := cfg.GetOCMSLogPaths()
+	if len(paths) != 2 {
+		t.Fatalf("len(GetOCMSLogPaths()) = %d, want 2", len(paths))
+	}
+	if paths[0].Kind != OCMSLogKindMain || paths[0].Path != "/var/www/vhosts/all.example.com/ocms/logs/ocms.log" {
+		t.Fatalf("main path = %+v", paths[0])
+	}
+	if paths[1].Kind != OCMSLogKindError || paths[1].Path != "/var/www/vhosts/all.example.com/ocms/logs/error.log" {
+		t.Fatalf("error path = %+v", paths[1])
+	}
+	if cfg.OCMSLogsPath != paths[0].Path {
+		t.Fatalf("OCMSLogsPath = %q, want first all path", cfg.OCMSLogsPath)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_CLIAllLogKindOverridesJSON(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		OCMSSite:        "app_example_com",
+		OCMSSitesConfig: configPath,
+		OCMSLogKind:     OCMSLogKindAll,
+	})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	paths := cfg.GetOCMSLogPaths()
+	if len(paths) != 2 {
+		t.Fatalf("len(GetOCMSLogPaths()) = %d, want 2", len(paths))
+	}
+	if paths[0].Path != "/var/www/vhosts/example.com/ocms/app/logs/ocms.log" {
+		t.Fatalf("main path = %+v", paths[0])
+	}
+	if paths[1].Path != "/var/www/vhosts/example.com/ocms/app/logs/error.log" {
+		t.Fatalf("error path = %+v", paths[1])
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_UsesDefaultSite(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{OCMSSitesConfig: configPath})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.SelectedSiteID() != "example_com" {
+		t.Fatalf("SelectedSiteID() = %q", cfg.SelectedSiteID())
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_SourcePathOverridesRegistry(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{
+		LogSourceType: "ocms",
+		OCMSLogsPath:  "/tmp/manual.log",
+		OCMSLogKind:   OCMSLogKindAll,
+	}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		SourcePath:      "/tmp/manual.log",
+		OCMSSite:        "all_example_com",
+		OCMSSitesConfig: configPath,
+		OCMSLogKind:     OCMSLogKindAll,
+	})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.OCMSLogsPath != "/tmp/manual.log" {
+		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
+	}
+	paths := cfg.GetOCMSLogPaths()
+	if len(paths) != 1 || paths[0].Path != "/tmp/manual.log" {
+		t.Fatalf("GetOCMSLogPaths() = %+v, want manual source path only", paths)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_SourcePathSkipsRegistryLookup(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "ocms-sites.json")
+	configContent := `{
+  "version": "1.0",
+  "default_site": "example_com",
+  "registry_path": "` + filepath.Join(tmpDir, "missing-sites.conf") + `",
+  "default_log_kind": "all",
+  "sites": {
+    "example_com": {
+      "name": "Example Site"
+    }
+  }
+}`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o600); err != nil {
+		t.Fatalf("write ocms config: %v", err)
+	}
+
+	cfg := &Config{LogSourceType: "ocms"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		SourcePath:      "/tmp/manual.log",
+		OCMSSitesConfig: configPath,
+		OCMSLogKind:     OCMSLogKindError,
+	})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.OCMSLogsPath != "/tmp/manual.log" {
+		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
+	}
+	if cfg.OCMSLogKind != OCMSLogKindError {
+		t.Fatalf("OCMSLogKind = %q", cfg.OCMSLogKind)
+	}
+	if cfg.OCMSSitesRegistry != nil {
+		t.Fatalf("OCMSSitesRegistry = %+v, want nil", cfg.OCMSSitesRegistry)
+	}
+	paths := cfg.GetOCMSLogPaths()
+	if len(paths) != 1 || paths[0].Path != "/tmp/manual.log" || paths[0].Kind != OCMSLogKindError {
+		t.Fatalf("GetOCMSLogPaths() = %+v, want manual error path only", paths)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_MissingSiteFails(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms", OCMSLogKind: OCMSLogKindMain}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		OCMSSite:        "missing",
+		OCMSSitesConfig: configPath,
+	})
+	if err == nil {
+		t.Fatal("applyOCMSMultiSiteConfig() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to get OCMS site") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_SiteMissingFromRegistryFails(t *testing.T) {
+	registryPath, _, tmpDir := ocmsMultiSiteFixtures(t)
+	missingRegistrySiteConfigPath := filepath.Join(tmpDir, "ocms-sites-missing-registry.json")
+	missingRegistrySiteContent := `{
+  "version": "1.0",
+  "default_site": "not_in_registry",
+  "registry_path": "` + registryPath + `",
+  "sites": {
+    "not_in_registry": {
+      "name": "Missing Registry Site"
+    }
+  }
+}`
+	if err := os.WriteFile(missingRegistrySiteConfigPath, []byte(missingRegistrySiteContent), 0o600); err != nil {
+		t.Fatalf("write ocms config: %v", err)
+	}
+
+	cfg := &Config{LogSourceType: "ocms"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		OCMSSitesConfig: missingRegistrySiteConfigPath,
+	})
+	if err == nil {
+		t.Fatal("applyOCMSMultiSiteConfig() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not_in_registry") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_SingleSiteModeUnchanged(t *testing.T) {
+	cfg := &Config{
+		LogSourceType: "ocms",
+		OCMSLogsPath:  "/tmp/ocms.log",
+		OCMSLogKind:   OCMSLogKindMain,
+	}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.OCMSLogsPath != "/tmp/ocms.log" {
+		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
+	}
+	if cfg.SelectedSiteID() != "" {
+		t.Fatalf("SelectedSiteID() = %q", cfg.SelectedSiteID())
+	}
+}
+
+func TestSelectedSiteID(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{"empty config", Config{}, ""},
+		{"explicit SiteID wins", Config{SiteID: "site-x", DrupalSiteID: "drupal-y", OCMSSiteID: "ocms-z"}, "site-x"},
+		{"falls back to DrupalSiteID", Config{DrupalSiteID: "drupal-y", OCMSSiteID: "ocms-z"}, "drupal-y"},
+		{"falls back to OCMSSiteID", Config{OCMSSiteID: "ocms-z"}, "ocms-z"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.SelectedSiteID(); got != tt.want {
+				t.Errorf("SelectedSiteID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectedSiteName(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{"empty config", Config{}, ""},
+		{"explicit SiteName wins", Config{SiteName: "Site X", DrupalSiteName: "Drupal Y", OCMSSiteName: "OCMS Z"}, "Site X"},
+		{"falls back to DrupalSiteName", Config{DrupalSiteName: "Drupal Y", OCMSSiteName: "OCMS Z"}, "Drupal Y"},
+		{"falls back to OCMSSiteName", Config{OCMSSiteName: "OCMS Z"}, "OCMS Z"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.SelectedSiteName(); got != tt.want {
+				t.Errorf("SelectedSiteName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetOCMSLogPaths(t *testing.T) {
+	t.Run("returns copy of OCMSLogPaths when set", func(t *testing.T) {
+		original := []OCMSLogPath{
+			{Kind: OCMSLogKindMain, Path: "/a/ocms.log"},
+			{Kind: OCMSLogKindError, Path: "/a/error.log"},
+		}
+		cfg := &Config{OCMSLogPaths: original}
+
+		got := cfg.GetOCMSLogPaths()
+		if len(got) != 2 {
+			t.Fatalf("len(GetOCMSLogPaths()) = %d, want 2", len(got))
+		}
+		got[0].Path = "/mutated"
+		if cfg.OCMSLogPaths[0].Path != "/a/ocms.log" {
+			t.Errorf("returned slice should not alias internal storage")
+		}
+	})
+
+	t.Run("falls back to single OCMSLogsPath", func(t *testing.T) {
+		cfg := &Config{OCMSLogsPath: "/tmp/ocms.log", OCMSLogKind: OCMSLogKindMain}
+		got := cfg.GetOCMSLogPaths()
+		if len(got) != 1 || got[0].Path != "/tmp/ocms.log" || got[0].Kind != OCMSLogKindMain {
+			t.Fatalf("GetOCMSLogPaths() = %+v", got)
+		}
+	})
+
+	t.Run("returns nil when no path configured", func(t *testing.T) {
+		cfg := &Config{}
+		if got := cfg.GetOCMSLogPaths(); got != nil {
+			t.Fatalf("GetOCMSLogPaths() = %+v, want nil", got)
+		}
+	})
 }
 
 func TestIsDrupalWatchdog(t *testing.T) {
@@ -1032,6 +1400,11 @@ func TestCLIOptionsStructure(t *testing.T) {
 		DrupalSite:        "production",
 		DrupalSitesConfig: "/etc/drupal-sites.json",
 		ListDrupalSites:   true,
+		OCMSSite:          "example_com",
+		OCMSSitesConfig:   "/etc/ocms-sites.json",
+		OCMSSitesRegistry: "/etc/ocms/sites.conf",
+		OCMSLogKind:       "error",
+		ListOCMSSites:     true,
 		ExclusionsConfig:  "/etc/exclusions.json",
 		ShowHelp:          true,
 		ShowVersion:       true,
@@ -1054,6 +1427,21 @@ func TestCLIOptionsStructure(t *testing.T) {
 	}
 	if !opts.ListDrupalSites {
 		t.Errorf("ListDrupalSites not set correctly")
+	}
+	if opts.OCMSSite != "example_com" {
+		t.Errorf("OCMSSite not set correctly")
+	}
+	if opts.OCMSSitesConfig != "/etc/ocms-sites.json" {
+		t.Errorf("OCMSSitesConfig not set correctly")
+	}
+	if opts.OCMSSitesRegistry != "/etc/ocms/sites.conf" {
+		t.Errorf("OCMSSitesRegistry not set correctly")
+	}
+	if opts.OCMSLogKind != "error" {
+		t.Errorf("OCMSLogKind not set correctly")
+	}
+	if !opts.ListOCMSSites {
+		t.Errorf("ListOCMSSites not set correctly")
 	}
 	if !opts.ShowHelp {
 		t.Errorf("ShowHelp not set correctly")
@@ -1084,6 +1472,21 @@ func TestCLIOptionsDefaults(t *testing.T) {
 	}
 	if opts.ListDrupalSites {
 		t.Errorf("Expected ListDrupalSites to be false by default")
+	}
+	if opts.OCMSSite != "" {
+		t.Errorf("Expected empty OCMSSite by default, got %q", opts.OCMSSite)
+	}
+	if opts.OCMSSitesConfig != "" {
+		t.Errorf("Expected empty OCMSSitesConfig by default, got %q", opts.OCMSSitesConfig)
+	}
+	if opts.OCMSSitesRegistry != "" {
+		t.Errorf("Expected empty OCMSSitesRegistry by default, got %q", opts.OCMSSitesRegistry)
+	}
+	if opts.OCMSLogKind != "" {
+		t.Errorf("Expected empty OCMSLogKind by default, got %q", opts.OCMSLogKind)
+	}
+	if opts.ListOCMSSites {
+		t.Errorf("Expected ListOCMSSites to be false by default")
 	}
 	if opts.ShowHelp {
 		t.Errorf("Expected ShowHelp to be false by default")

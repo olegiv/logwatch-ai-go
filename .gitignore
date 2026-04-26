@@ -57,6 +57,11 @@ Thumbs.db
 drupal-sites.json
 !testdata/**/drupal-sites.json
 
+# OCMS multi-site configuration (operator-specific; contains internal paths)
+ocms-sites.json
+!testdata/**/ocms-sites.json
+!configs/ocms-sites.json.example
+
 # Finding exclusions (operator-specific; may leak internal error strings)
 exclusions.json
 !testdata/**/exclusions.json

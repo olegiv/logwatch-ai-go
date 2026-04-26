@@ -63,6 +63,9 @@ func run() int {
 	if cli.ListDrupalSites {
 		return handleListDrupalSites(cli)
 	}
+	if cli.ListOCMSSites {
+		return handleListOCMSSites(cli)
+	}
 
 	// Setup signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -100,11 +103,11 @@ func run() int {
 
 	// Log startup info with optional site details
 	logEvent := log.Info().Str("source_type", cfg.LogSourceType)
-	if cfg.DrupalSiteID != "" {
-		logEvent = logEvent.Str("drupal_site", cfg.DrupalSiteID)
+	if cfg.SelectedSiteID() != "" {
+		logEvent = logEvent.Str("site_id", cfg.SelectedSiteID())
 	}
-	if cfg.DrupalSiteName != "" && cfg.DrupalSiteName != cfg.DrupalSiteID {
-		logEvent = logEvent.Str("site_name", cfg.DrupalSiteName)
+	if cfg.SelectedSiteName() != "" && cfg.SelectedSiteName() != cfg.SelectedSiteID() {
+		logEvent = logEvent.Str("site_name", cfg.SelectedSiteName())
 	}
 	logEvent.Msg("Starting Log AI Analyzer")
 	log.Info().
@@ -197,25 +200,66 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 	sourcePath := cfg.GetLogSourcePath()
 
 	// Read log content
-	log.Info().
-		Str("path", sourcePath).
-		Str("type", cfg.LogSourceType).
-		Msg("Reading log content...")
+	var logContent string
+	if cfg.IsOCMS() && len(cfg.GetOCMSLogPaths()) > 1 {
+		ocmsReader, ok := logSource.Reader.(*ocms.Reader)
+		if !ok {
+			return fmt.Errorf("OCMS multi-log read requires OCMS reader")
+		}
 
-	logContent, err := logSource.Reader.Read(sourcePath)
-	if err != nil {
-		return fmt.Errorf("failed to read log content: %w", err)
-	}
+		ocmsPaths := cfg.GetOCMSLogPaths()
+		files := make([]ocms.LogFile, 0, len(ocmsPaths))
+		log.Info().
+			Int("files", len(ocmsPaths)).
+			Str("type", cfg.LogSourceType).
+			Msg("Reading OCMS log content...")
+		for _, logPath := range ocmsPaths {
+			files = append(files, ocms.LogFile{Kind: logPath.Kind, Path: logPath.Path})
+			log.Info().
+				Str("path", logPath.Path).
+				Str("log_kind", logPath.Kind).
+				Msg("Reading OCMS log file...")
+		}
 
-	sourceInfo, err := logSource.Reader.GetSourceInfo(sourcePath)
-	if err != nil {
-		log.Warn().Err(err).Msg("Could not get source file info")
-		log.Info().Msg("Log file read successfully")
+		logContent, err = ocmsReader.ReadFiles(files)
+		if err != nil {
+			return fmt.Errorf("failed to read log content: %w", err)
+		}
+
+		for _, logPath := range ocmsPaths {
+			sourceInfo, infoErr := ocmsReader.GetSourceInfo(logPath.Path)
+			if infoErr != nil {
+				log.Warn().Err(infoErr).Str("path", logPath.Path).Msg("Could not get source file info")
+				continue
+			}
+			log.Info().
+				Str("path", logPath.Path).
+				Str("log_kind", logPath.Kind).
+				Float64("size_mb", sourceInfo["size_mb"].(float64)).
+				Float64("age_hours", sourceInfo["age_hours"].(float64)).
+				Msg("Log file read successfully")
+		}
 	} else {
 		log.Info().
-			Float64("size_mb", sourceInfo["size_mb"].(float64)).
-			Float64("age_hours", sourceInfo["age_hours"].(float64)).
-			Msg("Log file read successfully")
+			Str("path", sourcePath).
+			Str("type", cfg.LogSourceType).
+			Msg("Reading log content...")
+
+		logContent, err = logSource.Reader.Read(sourcePath)
+		if err != nil {
+			return fmt.Errorf("failed to read log content: %w", err)
+		}
+
+		sourceInfo, err := logSource.Reader.GetSourceInfo(sourcePath)
+		if err != nil {
+			log.Warn().Err(err).Msg("Could not get source file info")
+			log.Info().Msg("Log file read successfully")
+		} else {
+			log.Info().
+				Float64("size_mb", sourceInfo["size_mb"].(float64)).
+				Float64("age_hours", sourceInfo["age_hours"].(float64)).
+				Msg("Log file read successfully")
+		}
 	}
 
 	// Check for no entries (Drupal watchdog specific)
@@ -225,7 +269,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		log.Info().Msg("No watchdog entries found for the time period - skipping AI analysis")
 
 		// Send informational Telegram notification
-		if err := telegramClient.SendNoEntriesReport(cfg.LogSourceType, cfg.DrupalSiteName); err != nil {
+		if err := telegramClient.SendNoEntriesReport(cfg.LogSourceType, cfg.SelectedSiteName()); err != nil {
 			return fmt.Errorf("failed to send no-entries notification: %w", err)
 		}
 
@@ -238,7 +282,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 	var historicalContext string
 	sourceFilter := &storage.SourceFilter{
 		LogSourceType: cfg.LogSourceType,
-		SiteName:      cfg.DrupalSiteName, // Empty for logwatch
+		SiteName:      cfg.SelectedSiteName(), // Empty for single-site logwatch/OCMS
 	}
 	if store != nil {
 		log.Info().Msg("Retrieving historical context...")
@@ -259,7 +303,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		globalExclusions = cfg.Exclusions.GlobalPatterns()
 		logType, err := analyzer.ParseSourceType(logSource.PromptBuilder.GetLogType())
 		if err == nil {
-			contextualExclusions = cfg.Exclusions.ContextualPatterns(logType, cfg.DrupalSiteID)
+			contextualExclusions = cfg.Exclusions.ContextualPatterns(logType, cfg.SelectedSiteID())
 		}
 		if len(globalExclusions)+len(contextualExclusions) > 0 {
 			log.Info().
@@ -321,7 +365,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		summary := &storage.Summary{
 			Timestamp:       time.Now(),
 			LogSourceType:   cfg.LogSourceType,
-			SiteName:        cfg.DrupalSiteName, // Empty for logwatch
+			SiteName:        cfg.SelectedSiteName(), // Empty for single-site logwatch/OCMS
 			SystemStatus:    analysis.SystemStatus,
 			Summary:         analysis.Summary,
 			CriticalIssues:  analysis.CriticalIssues,
@@ -351,7 +395,7 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 
 	// Send Telegram notifications
 	log.Info().Msg("Sending Telegram notifications...")
-	if err := telegramClient.SendAnalysisReport(analysis, stats, cfg.LogSourceType, cfg.DrupalSiteName); err != nil {
+	if err := telegramClient.SendAnalysisReport(analysis, stats, cfg.LogSourceType, cfg.SelectedSiteName()); err != nil {
 		return fmt.Errorf("failed to send Telegram notification: %w", err)
 	}
 
@@ -447,8 +491,8 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 
 	case "drupal_watchdog":
 		promptBuilder := drupal.NewPromptBuilder()
-		if cfg.DrupalSiteName != "" {
-			promptBuilder.SetSiteName(cfg.DrupalSiteName)
+		if cfg.SelectedSiteName() != "" {
+			promptBuilder.SetSiteName(cfg.SelectedSiteName())
 		}
 		return &analyzer.LogSource{
 			Type: analyzer.LogSourceDrupalWatchdog,
@@ -462,6 +506,10 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 			PromptBuilder: promptBuilder,
 		}, nil
 	case "ocms":
+		promptBuilder := ocms.NewPromptBuilder()
+		if cfg.SelectedSiteName() != "" {
+			promptBuilder.SetSiteName(cfg.SelectedSiteName())
+		}
 		return &analyzer.LogSource{
 			Type: analyzer.LogSourceOCMS,
 			Reader: ocms.NewReader(
@@ -470,7 +518,7 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 				cfg.MaxPreprocessingTokens,
 			),
 			Preprocessor:  ocms.NewPreprocessor(cfg.MaxPreprocessingTokens),
-			PromptBuilder: ocms.NewPromptBuilder(),
+			PromptBuilder: promptBuilder,
 		}, nil
 
 	default:
@@ -524,10 +572,125 @@ func handleListDrupalSites(cli *config.CLIOptions) int {
 	return exitSuccess
 }
 
+// handleListOCMSSites lists available OCMS sites from ocms-sites.json.
+func handleListOCMSSites(cli *config.CLIOptions) int {
+	sitesConfig, configPath, err := config.LoadOCMSSitesConfig(cli.OCMSSitesConfig)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return exitFailure
+	}
+
+	if sitesConfig == nil {
+		_, _ = fmt.Fprintf(os.Stderr, "No ocms-sites.json configuration file found.\n")
+		_, _ = fmt.Fprintf(os.Stderr, "\nSearch locations:\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  - ./ocms-sites.json\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  - ./configs/ocms-sites.json\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  - /opt/logwatch-ai/ocms-sites.json\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  - ~/.config/logwatch-ai/ocms-sites.json\n")
+		_, _ = fmt.Fprintf(os.Stderr, "\nUse -ocms-sites-config to specify a custom path.\n")
+		return exitFailure
+	}
+
+	registryPath := sitesConfig.RegistryPath
+	if cli.OCMSSitesRegistry != "" {
+		registryPath = cli.OCMSSitesRegistry
+	}
+	registry, registryFoundPath, err := config.LoadOCMSSitesRegistry(registryPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return exitFailure
+	}
+	if registry == nil {
+		_, _ = fmt.Fprintf(os.Stderr, "No OCMS sites registry found.\n")
+		_, _ = fmt.Fprintf(os.Stderr, "\nDefault location:\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  - %s\n", config.DefaultOCMSSitesRegistryPath)
+		_, _ = fmt.Fprintf(os.Stderr, "\nUse registry_path in ocms-sites.json or -ocms-sites-registry to specify a custom path.\n")
+		return exitFailure
+	}
+
+	fmt.Printf("OCMS sites configuration: %s\n", configPath)
+	fmt.Printf("Version: %s\n", sitesConfig.Version)
+	fmt.Printf("Default site: %s\n", sitesConfig.DefaultSite)
+	fmt.Printf("Default log kind: %s\n", getOCMSLogKindOrDefault(sitesConfig.DefaultLogKind))
+	fmt.Printf("OCMS sites registry: %s\n\n", registryFoundPath)
+	fmt.Printf("Available sites:\n")
+
+	for _, siteID := range sitesConfig.ListSites() {
+		siteConfig := sitesConfig.Sites[siteID]
+		registrySite, err := registry.GetSite(siteID)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return exitFailure
+		}
+		logKind, err := sitesConfig.EffectiveLogKind(&siteConfig)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return exitFailure
+		}
+		if cli.OCMSLogKind != "" {
+			logKind, err = config.NormalizeOCMSLogKind(cli.OCMSLogKind)
+			if err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return exitFailure
+			}
+		}
+		mainLog, err := registrySite.LogPath(config.OCMSLogKindMain)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return exitFailure
+		}
+		errorLog, err := registrySite.LogPath(config.OCMSLogKindError)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return exitFailure
+		}
+		selectedLogs, err := registrySite.LogPaths(logKind)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return exitFailure
+		}
+
+		displayName := siteConfig.Name
+		if displayName == "" {
+			displayName = siteID
+		}
+		defaultMarker := ""
+		if siteID == sitesConfig.DefaultSite {
+			defaultMarker = " (default)"
+		}
+
+		fmt.Printf("  %-20s %s%s\n", siteID, displayName, defaultMarker)
+		fmt.Printf("    Instance dir:  %s\n", registrySite.InstanceDir)
+		fmt.Printf("    System user:   %s\n", registrySite.SystemUser)
+		fmt.Printf("    Port:          %d\n", registrySite.Port)
+		fmt.Printf("    Log kind:      %s\n", logKind)
+		if len(selectedLogs) == 1 {
+			fmt.Printf("    Selected log:  %s\n", selectedLogs[0].Path)
+		} else {
+			fmt.Printf("    Selected logs:\n")
+			for _, selectedLog := range selectedLogs {
+				fmt.Printf("      %-5s %s\n", selectedLog.Kind, selectedLog.Path)
+			}
+		}
+		fmt.Printf("    Main log:      %s\n", mainLog)
+		fmt.Printf("    Error log:     %s\n", errorLog)
+		fmt.Println()
+	}
+
+	return exitSuccess
+}
+
 // getFormatOrDefault returns the format or "json" if empty
 func getFormatOrDefault(format string) string {
 	if format == "" {
 		return "json"
 	}
 	return format
+}
+
+func getOCMSLogKindOrDefault(logKind string) string {
+	if logKind == "" {
+		return config.OCMSLogKindMain
+	}
+	return logKind
 }

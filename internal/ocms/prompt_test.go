@@ -21,6 +21,17 @@ func TestPromptBuilder_GetLogType(t *testing.T) {
 	}
 }
 
+func TestPromptBuilder_SiteName(t *testing.T) {
+	t.Parallel()
+
+	pb := NewPromptBuilder()
+	pb.SetSiteName("example_com")
+
+	if got := pb.GetSiteName(); got != "example_com" {
+		t.Fatalf("GetSiteName() = %q, want %q", got, "example_com")
+	}
+}
+
 func TestPromptBuilder_GetSystemPrompt(t *testing.T) {
 	t.Parallel()
 
@@ -47,5 +58,17 @@ func TestPromptBuilder_GetUserPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "foo") {
 		t.Fatal("user prompt should include contextual exclusions")
+	}
+}
+
+func TestPromptBuilder_GetUserPrompt_IncludesSiteName(t *testing.T) {
+	t.Parallel()
+
+	pb := NewPromptBuilder()
+	pb.SetSiteName("example_com")
+	prompt := pb.GetUserPrompt("line1", "", nil)
+
+	if !strings.Contains(prompt, "OCMS SITE: example_com") {
+		t.Fatal("user prompt should include OCMS site name")
 	}
 }

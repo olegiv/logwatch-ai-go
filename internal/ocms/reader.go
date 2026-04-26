@@ -6,10 +6,17 @@ package ocms
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
+
+// LogFile identifies one OCMS log file to read.
+type LogFile struct {
+	Kind string
+	Path string
+}
 
 // Reader handles reading and validating OCMS log files.
 type Reader struct {
@@ -33,6 +40,15 @@ func NewReader(maxSizeMB int, enablePreprocessing bool, maxTokens int) *Reader {
 
 // Read reads and validates OCMS log content.
 func (r *Reader) Read(sourcePath string) (string, error) {
+	contentStr, err := r.readRaw(sourcePath)
+	if err != nil {
+		return "", err
+	}
+
+	return r.preprocessIfNeeded(contentStr)
+}
+
+func (r *Reader) readRaw(sourcePath string) (string, error) {
 	contentStr, err := analyzer.ReadSourceFileWithGuards(
 		sourcePath,
 		analyzer.FileReadOptions{
@@ -46,10 +62,14 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 		return "", err
 	}
 
+	return contentStr, nil
+}
+
+func (r *Reader) preprocessIfNeeded(content string) (string, error) {
 	if r.enablePreprocessing {
-		tokens := r.preprocessor.EstimateTokens(contentStr)
+		tokens := r.preprocessor.EstimateTokens(content)
 		if tokens > r.maxTokens {
-			processedContent, perr := r.preprocessor.Process(contentStr)
+			processedContent, perr := r.preprocessor.Process(content)
 			if perr != nil {
 				return "", fmt.Errorf("preprocessing failed: %w", perr)
 			}
@@ -57,7 +77,39 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 		}
 	}
 
-	return contentStr, nil
+	return content, nil
+}
+
+// ReadFiles reads one or more OCMS log files. Multiple files are combined with
+// labels so the LLM can distinguish main and error log sections.
+func (r *Reader) ReadFiles(files []LogFile) (string, error) {
+	if len(files) == 0 {
+		return "", fmt.Errorf("no OCMS log files specified")
+	}
+	if len(files) == 1 {
+		return r.Read(files[0].Path)
+	}
+
+	var combined strings.Builder
+	for i, file := range files {
+		content, err := r.readRaw(file.Path)
+		if err != nil {
+			return "", fmt.Errorf("failed to read OCMS %s log %s: %w", file.Kind, file.Path, err)
+		}
+
+		if i > 0 {
+			combined.WriteString("\n\n")
+		}
+		combined.WriteString("### OCMS ")
+		combined.WriteString(strings.ToUpper(file.Kind))
+		combined.WriteString(" LOG\n")
+		combined.WriteString("Path: ")
+		combined.WriteString(file.Path)
+		combined.WriteString("\n\n")
+		combined.WriteString(content)
+	}
+
+	return r.preprocessIfNeeded(combined.String())
 }
 
 // Validate validates OCMS log content.

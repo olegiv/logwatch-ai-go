@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Package config loads runtime configuration from environment variables
-// and optional JSON side-files (drupal-sites.json, exclusions.json).
+// and optional side-files (drupal-sites.json, ocms-sites.json, exclusions.json).
 package config
 
 import (
@@ -28,6 +28,11 @@ type CLIOptions struct {
 	DrupalSite        string // -drupal-site: Drupal site ID from drupal-sites.json
 	DrupalSitesConfig string // -drupal-sites-config: path to drupal-sites.json
 	ListDrupalSites   bool   // -list-drupal-sites: list available sites and exit
+	OCMSSite          string // -ocms-site: OCMS site ID from ocms-sites.json
+	OCMSSitesConfig   string // -ocms-sites-config: path to ocms-sites.json
+	OCMSSitesRegistry string // -ocms-sites-registry: path to OCMS sites.conf
+	OCMSLogKind       string // -ocms-log-kind: main, error, or all
+	ListOCMSSites     bool   // -list-ocms-sites: list available OCMS sites and exit
 	ExclusionsConfig  string // -exclusions-config: path to exclusions.json
 	ShowHelp          bool   // -help: show usage
 	ShowVersion       bool   // -version: show version
@@ -42,6 +47,11 @@ func ParseCLI() *CLIOptions {
 	flag.StringVar(&opts.DrupalSite, "drupal-site", "", "Drupal site ID from drupal-sites.json (for multi-site deployments)")
 	flag.StringVar(&opts.DrupalSitesConfig, "drupal-sites-config", "", "Path to drupal-sites.json configuration file")
 	flag.BoolVar(&opts.ListDrupalSites, "list-drupal-sites", false, "List available Drupal sites from drupal-sites.json and exit")
+	flag.StringVar(&opts.OCMSSite, "ocms-site", "", "OCMS site ID from ocms-sites.json (for multi-site deployments)")
+	flag.StringVar(&opts.OCMSSitesConfig, "ocms-sites-config", "", "Path to ocms-sites.json configuration file")
+	flag.StringVar(&opts.OCMSSitesRegistry, "ocms-sites-registry", "", "Path to OCMS sites.conf registry (default: /etc/ocms/sites.conf)")
+	flag.StringVar(&opts.OCMSLogKind, "ocms-log-kind", "", "OCMS log kind for site registry mode: main, error, or all (default: main)")
+	flag.BoolVar(&opts.ListOCMSSites, "list-ocms-sites", false, "List available OCMS sites from ocms-sites.json and exit")
 	flag.StringVar(&opts.ExclusionsConfig, "exclusions-config", "", "Path to exclusions.json configuration file")
 	flag.BoolVar(&opts.ShowHelp, "help", false, "Show usage information")
 	flag.BoolVar(&opts.ShowHelp, "h", false, "Show usage information (shorthand)")
@@ -57,12 +67,17 @@ func ParseCLI() *CLIOptions {
 		_, _ = fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type logwatch\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type ocms -source-path /tmp/ocms.log\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type ocms -ocms-site example_com\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -source-path /tmp/watchdog.json\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -drupal-site production\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -list-drupal-sites\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -list-ocms-sites\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "\nMulti-site Drupal:\n")
 		_, _ = fmt.Fprintf(os.Stderr, "  Create drupal-sites.json with site configurations.\n")
 		_, _ = fmt.Fprintf(os.Stderr, "  Use -drupal-site to select which site to analyze.\n")
+		_, _ = fmt.Fprintf(os.Stderr, "\nMulti-site OCMS:\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  Create ocms-sites.json with site IDs matching /etc/ocms/sites.conf.\n")
+		_, _ = fmt.Fprintf(os.Stderr, "  Use -ocms-site to select which site to analyze.\n")
 		_, _ = fmt.Fprintf(os.Stderr, "\nEnvironment variables can be set in .env file or exported directly.\n")
 		_, _ = fmt.Fprintf(os.Stderr, "CLI arguments override environment variables.\n")
 	}
@@ -107,16 +122,30 @@ type Config struct {
 
 	// OCMS Settings (used when LogSourceType = "ocms")
 	OCMSLogsPath string
+	OCMSLogKind  string
+	OCMSLogPaths []OCMSLogPath
 
 	// Drupal Watchdog Settings (used when LogSourceType = "drupal_watchdog")
 	DrupalWatchdogPath   string // Path to watchdog export file
 	DrupalWatchdogFormat string // "json" or "drush"
 	DrupalSiteName       string // Optional: site identifier for multi-site
 
+	// Selected site metadata shared by multi-site log sources
+	SiteID   string
+	SiteName string
+
 	// Multi-site Drupal configuration (loaded from drupal-sites.json)
 	DrupalSiteID          string             // Selected site ID from drupal-sites.json
 	DrupalSitesConfig     *DrupalSitesConfig // Loaded multi-site config (nil if single-site mode)
 	DrupalSitesConfigPath string             // Path to drupal-sites.json (if used)
+
+	// Multi-site OCMS configuration (loaded from ocms-sites.json and /etc/ocms/sites.conf)
+	OCMSSiteID            string             // Selected site ID from ocms-sites.json
+	OCMSSiteName          string             // Display name for OCMS reports
+	OCMSSitesConfig       *OCMSSitesConfig   // Loaded multi-site config (nil if single-site mode)
+	OCMSSitesConfigPath   string             // Path to ocms-sites.json (if used)
+	OCMSSitesRegistry     *OCMSSitesRegistry // Loaded OCMS registry (nil in single-site mode)
+	OCMSSitesRegistryPath string             // Path to sites.conf (if used)
 
 	// Finding exclusions (loaded from exclusions.json, nil if feature not used)
 	Exclusions           *exclusions.Config
@@ -183,6 +212,7 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 		LogSourceType:      viper.GetString("LOG_SOURCE_TYPE"),
 		LogwatchOutputPath: viper.GetString("LOGWATCH_OUTPUT_PATH"),
 		OCMSLogsPath:       viper.GetString("OCMS_LOGS_PATH"),
+		OCMSLogKind:        OCMSLogKindMain,
 		// Drupal settings are loaded from drupal-sites.json, not env vars
 		DrupalWatchdogFormat: "json", // default, overridden by site config
 		MaxLogSizeMB:         viper.GetInt("MAX_LOG_SIZE_MB"),
@@ -215,10 +245,18 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 				config.LogwatchOutputPath = cli.SourcePath
 			}
 		}
+		if cli.OCMSLogKind != "" {
+			config.OCMSLogKind = cli.OCMSLogKind
+		}
 	}
 
 	// Handle multi-site Drupal configuration
 	if err := config.applyDrupalMultiSiteConfig(cli); err != nil {
+		return nil, err
+	}
+
+	// Handle multi-site OCMS configuration
+	if err := config.applyOCMSMultiSiteConfig(cli); err != nil {
 		return nil, err
 	}
 
@@ -311,6 +349,7 @@ func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
 
 	// Store the selected site ID
 	c.DrupalSiteID = siteID
+	c.SiteID = siteID
 
 	// Apply site-specific configuration (CLI -source-path takes precedence)
 	if cli == nil || cli.SourcePath == "" {
@@ -328,8 +367,164 @@ func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
 	} else {
 		c.DrupalSiteName = siteID
 	}
+	c.SiteName = c.DrupalSiteName
 
 	return nil
+}
+
+// applyOCMSMultiSiteConfig loads and applies OCMS site configuration from ocms-sites.json.
+func (c *Config) applyOCMSMultiSiteConfig(cli *CLIOptions) error {
+	if c.LogSourceType != "ocms" {
+		return nil
+	}
+
+	configPath, cliSiteID, registryPath, cliLogKind, cliSourcePath := readOCMSCLI(cli)
+	if cliSourcePath != "" {
+		return c.applyOCMSSourcePathOverride(cliSourcePath, cliLogKind)
+	}
+
+	sitesConfig, configFoundPath, err := LoadOCMSSitesConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load OCMS sites config: %w", err)
+	}
+
+	if sitesConfig == nil {
+		return c.applyOCMSSingleSiteFallback(cliSiteID, configPath)
+	}
+
+	c.OCMSSitesConfig = sitesConfig
+	c.OCMSSitesConfigPath = configFoundPath
+
+	siteID, err := resolveOCMSSiteID(cliSiteID, sitesConfig.DefaultSite)
+	if err != nil {
+		return err
+	}
+
+	siteConfig, err := sitesConfig.GetSite(siteID)
+	if err != nil {
+		return fmt.Errorf("failed to get OCMS site '%s': %w", siteID, err)
+	}
+
+	logKind, err := resolveOCMSLogKind(sitesConfig, siteConfig, cliLogKind)
+	if err != nil {
+		return err
+	}
+	c.OCMSLogKind = logKind
+
+	registrySite, registry, foundPath, err := loadOCMSRegistrySite(registryPath, sitesConfig.RegistryPath, siteID)
+	if err != nil {
+		return err
+	}
+
+	c.OCMSSiteID = siteID
+	c.OCMSSiteName = siteID
+	if siteConfig.Name != "" {
+		c.OCMSSiteName = siteConfig.Name
+	}
+	c.SiteID = siteID
+	c.SiteName = c.OCMSSiteName
+	c.OCMSSitesRegistry = registry
+	c.OCMSSitesRegistryPath = foundPath
+
+	if cliSourcePath == "" {
+		logPaths, err := registrySite.LogPaths(logKind)
+		if err != nil {
+			return err
+		}
+		c.OCMSLogPaths = logPaths
+		if len(logPaths) > 0 {
+			c.OCMSLogsPath = logPaths[0].Path
+		}
+	}
+
+	return nil
+}
+
+// readOCMSCLI extracts OCMS-related CLI fields with nil-safety.
+func readOCMSCLI(cli *CLIOptions) (configPath, siteID, registryPath, logKind, sourcePath string) {
+	if cli == nil {
+		return
+	}
+	return cli.OCMSSitesConfig, cli.OCMSSite, cli.OCMSSitesRegistry, cli.OCMSLogKind, cli.SourcePath
+}
+
+// applyOCMSSourcePathOverride keeps -source-path as the final explicit path
+// override and avoids loading registry-backed OCMS multisite configuration.
+func (c *Config) applyOCMSSourcePathOverride(sourcePath, cliLogKind string) error {
+	c.OCMSLogsPath = sourcePath
+	if cliLogKind != "" {
+		c.OCMSLogKind = cliLogKind
+	}
+	logKind, err := NormalizeOCMSLogKind(c.OCMSLogKind)
+	if err != nil {
+		return err
+	}
+	c.OCMSLogKind = logKind
+	c.OCMSLogPaths = nil
+	return nil
+}
+
+// applyOCMSSingleSiteFallback handles the case where no ocms-sites.json was found.
+func (c *Config) applyOCMSSingleSiteFallback(cliSiteID, configPath string) error {
+	if cliSiteID != "" || configPath != "" {
+		return fmt.Errorf("ocms-sites.json is required when -ocms-site or -ocms-sites-config is used. " +
+			"Create ocms-sites.json in one of: ./ocms-sites.json, ./configs/ocms-sites.json, " +
+			"/opt/logwatch-ai/ocms-sites.json, or ~/.config/logwatch-ai/ocms-sites.json. " +
+			"See configs/ocms-sites.json.example for format")
+	}
+	logKind, err := NormalizeOCMSLogKind(c.OCMSLogKind)
+	if err != nil {
+		return err
+	}
+	c.OCMSLogKind = logKind
+	return nil
+}
+
+// resolveOCMSSiteID returns the selected site ID, falling back to the JSON default.
+func resolveOCMSSiteID(cliSiteID, defaultSite string) (string, error) {
+	if cliSiteID != "" {
+		return cliSiteID, nil
+	}
+	if defaultSite != "" {
+		return defaultSite, nil
+	}
+	return "", fmt.Errorf("no OCMS site specified. Use -ocms-site <site_id> or set default_site in ocms-sites.json. " +
+		"Available sites: use -list-ocms-sites to see options")
+}
+
+// resolveOCMSLogKind applies CLI override on top of the site/config-derived log kind.
+func resolveOCMSLogKind(sitesConfig *OCMSSitesConfig, siteConfig *OCMSSiteConfig, cliLogKind string) (string, error) {
+	logKind, err := sitesConfig.EffectiveLogKind(siteConfig)
+	if err != nil {
+		return "", err
+	}
+	if cliLogKind != "" {
+		return NormalizeOCMSLogKind(cliLogKind)
+	}
+	return logKind, nil
+}
+
+// loadOCMSRegistrySite loads the registry and returns the matching site entry.
+func loadOCMSRegistrySite(cliRegistryPath, jsonRegistryPath, siteID string) (*OCMSSite, *OCMSSitesRegistry, string, error) {
+	registryPath := cliRegistryPath
+	if registryPath == "" {
+		registryPath = jsonRegistryPath
+	}
+
+	registry, foundPath, err := LoadOCMSSitesRegistry(registryPath)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to load OCMS sites registry: %w", err)
+	}
+	if registry == nil {
+		return nil, nil, "", fmt.Errorf("OCMS sites registry is required when ocms-sites.json is used. Expected %s or use -ocms-sites-registry <path>",
+			DefaultOCMSSitesRegistryPath)
+	}
+
+	registrySite, err := registry.GetSite(siteID)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to get OCMS site '%s': %w", siteID, err)
+	}
+	return registrySite, registry, foundPath, nil
 }
 
 // setDefaults sets default configuration values
@@ -542,6 +737,9 @@ func (c *Config) validateLogSource() error {
 			return fmt.Errorf("watchdog_format must be 'json' or 'drush' in drupal-sites.json (got: %s)", c.DrupalWatchdogFormat)
 		}
 	case "ocms":
+		if _, err := NormalizeOCMSLogKind(c.OCMSLogKind); err != nil {
+			return err
+		}
 		if c.OCMSLogsPath == "" {
 			return fmt.Errorf("OCMS_LOGS_PATH is required when LOG_SOURCE_TYPE=ocms")
 		}
@@ -560,6 +758,41 @@ func (c *Config) GetLogSourcePath() string {
 	default:
 		return c.LogwatchOutputPath
 	}
+}
+
+// GetOCMSLogPaths returns resolved OCMS log paths for the active run.
+func (c *Config) GetOCMSLogPaths() []OCMSLogPath {
+	if len(c.OCMSLogPaths) > 0 {
+		out := make([]OCMSLogPath, len(c.OCMSLogPaths))
+		copy(out, c.OCMSLogPaths)
+		return out
+	}
+	if c.OCMSLogsPath == "" {
+		return nil
+	}
+	return []OCMSLogPath{{Kind: c.OCMSLogKind, Path: c.OCMSLogsPath}}
+}
+
+// SelectedSiteID returns the selected multi-site ID for the active source.
+func (c *Config) SelectedSiteID() string {
+	if c.SiteID != "" {
+		return c.SiteID
+	}
+	if c.DrupalSiteID != "" {
+		return c.DrupalSiteID
+	}
+	return c.OCMSSiteID
+}
+
+// SelectedSiteName returns the selected multi-site display name for the active source.
+func (c *Config) SelectedSiteName() string {
+	if c.SiteName != "" {
+		return c.SiteName
+	}
+	if c.DrupalSiteName != "" {
+		return c.DrupalSiteName
+	}
+	return c.OCMSSiteName
 }
 
 // IsDrupalWatchdog returns true if the log source type is drupal_watchdog

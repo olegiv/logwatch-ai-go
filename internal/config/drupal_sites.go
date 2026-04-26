@@ -6,9 +6,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 )
 
 // DrupalSite represents configuration for a single Drupal site
@@ -62,18 +59,15 @@ func (c *DrupalSitesConfig) Validate() error {
 
 // GetSite returns a site by ID, falling back to default_site if siteID is empty
 func (c *DrupalSitesConfig) GetSite(siteID string) (*DrupalSite, error) {
-	// Use default site if no site ID provided
-	if siteID == "" {
-		if c.DefaultSite == "" {
-			return nil, fmt.Errorf("no site ID specified and no default_site configured")
-		}
-		siteID = c.DefaultSite
+	resolvedSiteID, err := resolveSiteID("Drupal", "-drupal-site", siteID, c.DefaultSite, "-list-drupal-sites")
+	if err != nil {
+		return nil, err
 	}
 
-	site, exists := c.Sites[siteID]
+	site, exists := c.Sites[resolvedSiteID]
 	if !exists {
 		available := c.ListSites()
-		return nil, fmt.Errorf("site '%s' not found (available: %v)", siteID, available)
+		return nil, fmt.Errorf("site '%s' not found (available: %v)", resolvedSiteID, available)
 	}
 
 	return &site, nil
@@ -81,69 +75,33 @@ func (c *DrupalSitesConfig) GetSite(siteID string) (*DrupalSite, error) {
 
 // ListSites returns all available site IDs in sorted order
 func (c *DrupalSitesConfig) ListSites() []string {
-	sites := make([]string, 0, len(c.Sites))
-	for siteID := range c.Sites {
-		sites = append(sites, siteID)
-	}
-	sort.Strings(sites)
-	return sites
+	return sortedSiteIDs(c.Sites)
 }
 
 // LoadDrupalSitesConfig loads and parses the drupal-sites.json file
 // If configPath is empty, it searches standard locations.
 // Returns nil, nil if no config file is found (not an error - single-site mode).
 func LoadDrupalSitesConfig(configPath string) (*DrupalSitesConfig, string, error) {
-	var searchPaths []string
-
-	// If explicit path provided, only search that
-	if configPath != "" {
-		searchPaths = append(searchPaths, configPath)
-	} else {
-		// Standard search paths in priority order
-		searchPaths = append(searchPaths,
-			"./drupal-sites.json",
-			"./configs/drupal-sites.json",
-			"/opt/logwatch-ai/drupal-sites.json",
-		)
-
-		// Add user config directory if HOME is set
-		if home := os.Getenv("HOME"); home != "" {
-			searchPaths = append(searchPaths,
-				filepath.Join(home, ".config", "logwatch-ai", "drupal-sites.json"),
-			)
-		}
+	data, foundPath, err := loadFirstExistingFile(
+		configPath,
+		"drupal sites config",
+		standardDrupalSitesConfigPaths(),
+	)
+	if err != nil {
+		return nil, "", err
+	}
+	if data == nil {
+		return nil, "", nil
 	}
 
-	for _, path := range searchPaths {
-		if path == "" {
-			continue
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue // Try next path
-			}
-			return nil, "", fmt.Errorf("failed to read %s: %w", path, err)
-		}
-
-		var config DrupalSitesConfig
-		if err := json.Unmarshal(data, &config); err != nil {
-			return nil, "", fmt.Errorf("failed to parse %s: %w", path, err)
-		}
-
-		if err := config.Validate(); err != nil {
-			return nil, "", fmt.Errorf("invalid config in %s: %w", path, err)
-		}
-
-		return &config, path, nil
+	var config DrupalSitesConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, "", fmt.Errorf("failed to parse %s: %w", foundPath, err)
 	}
 
-	// If explicit path was provided but not found, that's an error
-	if configPath != "" {
-		return nil, "", fmt.Errorf("drupal sites config not found: %s", configPath)
+	if err := config.Validate(); err != nil {
+		return nil, "", fmt.Errorf("invalid config in %s: %w", foundPath, err)
 	}
 
-	// No config file found (not an error - single-site mode)
-	return nil, "", nil
+	return &config, foundPath, nil
 }
