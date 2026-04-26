@@ -106,11 +106,14 @@ TELEGRAM_CHANNEL_ARCHIVE_ID=-1001234567890    # Required
 TELEGRAM_CHANNEL_ALERTS_ID=-1009876543210     # Optional
 
 # Log Source Configuration
-# Options: "logwatch" (default) or "drupal_watchdog"
+# Options: "logwatch" (default), "drupal_watchdog", or "ocms"
 LOG_SOURCE_TYPE=logwatch
 
 # Logwatch Configuration (used when LOG_SOURCE_TYPE=logwatch)
 LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt
+
+# OCMS Configuration (used when LOG_SOURCE_TYPE=ocms)
+OCMS_LOGS_PATH=/tmp/ocms.log
 
 # Drupal Watchdog Configuration (used when LOG_SOURCE_TYPE=drupal_watchdog)
 # Configure in drupal-sites.json (see configs/drupal-sites.json.example)
@@ -407,7 +410,7 @@ logwatch-analyzer
 ./logwatch-analyzer [options]
 
 Options:
-  -source-type string        Log source type: logwatch, drupal_watchdog
+  -source-type string        Log source type: logwatch, drupal_watchdog, ocms
   -source-path string        Path to log source file (overrides env config)
   -drupal-site string        Drupal site ID from drupal-sites.json
   -drupal-sites-config string  Path to drupal-sites.json configuration file
@@ -423,6 +426,9 @@ Options:
 
 # Override source type
 ./logwatch-analyzer -source-type drupal_watchdog
+
+# Analyze OCMS logs
+./logwatch-analyzer -source-type ocms -source-path /var/log/ocms/app.log
 
 # Analyze specific Drupal site
 ./logwatch-analyzer -drupal-site production
@@ -502,6 +508,7 @@ logwatch-ai-go/
 │   ├── errors/             # Error sanitization (credential redaction)
 │   ├── logging/            # Secure logger (credential filtering)
 │   ├── logwatch/           # Logwatch file reading and preprocessing
+│   ├── ocms/               # OCMS log reader, prompt, and preprocessing adapters
 │   ├── notification/       # Telegram notifications
 │   └── storage/            # SQLite database operations
 ├── scripts/                # Helper scripts
@@ -515,6 +522,7 @@ logwatch-ai-go/
 
 1. **Log Generation**:
    - *Logwatch*: Root cron runs `generate-logwatch.sh` to create daily report
+   - *OCMS*: Application/server logs are exported to `OCMS_LOGS_PATH`
    - *Drupal*: drush exports watchdog entries to JSON file
 2. **Source Selection**: Application loads appropriate reader based on `LOG_SOURCE_TYPE`
 3. **File Reading**: Source-specific reader validates and parses log content

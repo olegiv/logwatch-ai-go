@@ -39,7 +39,7 @@ If the file is absent the feature is a silent no-op.
 
 ```json
 {
-  "version": "1.1",
+  "version": "1.2",
   "global": [
     "TLS certificate validation failures"
   ],
@@ -48,6 +48,9 @@ If the file is absent the feature is a silent no-op.
   ],
   "drupal": [
     "Deprecated function"
+  ],
+  "ocms": [
+    "healthcheck timeout"
   ],
   "sites": {
     "production": [
@@ -62,10 +65,11 @@ If the file is absent the feature is a silent no-op.
 
 | Field      | Meaning                                                                                                  |
 |------------|----------------------------------------------------------------------------------------------------------|
-| `version`  | Config format version. `"1.1"` (recommended) or `"1.0"` (backward-compatible, no `logwatch`/`drupal`).   |
+| `version`  | Config format version. `"1.2"` (recommended), `"1.1"` (no `ocms` list), or `"1.0"` (global+sites only). |
 | `global`   | Applies to every run. Rendered into the **system prompt** (stable, cache-friendly for Anthropic).        |
 | `logwatch` | Applies only to logwatch runs. Rendered into the **user prompt**. (v1.1 only.)                           |
 | `drupal`   | Applies only to Drupal watchdog runs, regardless of site. Rendered into the **user prompt**. (v1.1.)     |
+| `ocms`     | Applies only to OCMS runs. Rendered into the **user prompt**. (v1.2.)                                      |
 | `sites`    | Map keyed by Drupal site ID (from `drupal-sites.json`). Stacked on top of `drupal`. User-prompt section. |
 
 ## Resolution
@@ -73,11 +77,12 @@ If the file is absent the feature is a silent no-op.
 | Run type         | System prompt gets | User prompt gets            |
 |------------------|--------------------|-----------------------------|
 | Logwatch         | `global`           | `logwatch`                  |
+| OCMS             | `global`           | `ocms`                      |
 | Drupal (site X)  | `global`           | `drupal` + `sites.X`        |
 
-`logwatch` patterns are ignored for Drupal runs. `drupal` and
-`sites.<id>` patterns are ignored for logwatch runs. Unknown site IDs
-fall back to just `drupal`.
+`logwatch` patterns are ignored for Drupal/OCMS runs. `ocms` patterns are
+ignored for Logwatch/Drupal runs. `drupal` and `sites.<id>` patterns are
+ignored for Logwatch/OCMS runs. Unknown site IDs fall back to just `drupal`.
 
 ## Match Semantics
 

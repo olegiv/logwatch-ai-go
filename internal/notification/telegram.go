@@ -309,6 +309,8 @@ func getLogSourceDisplayName(logSourceType string) string {
 		return "Logwatch"
 	case "drupal_watchdog":
 		return "Drupal Watchdog"
+	case "ocms":
+		return "OCMS"
 	default:
 		return "Log"
 	}

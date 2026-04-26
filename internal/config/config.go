@@ -23,7 +23,7 @@ import (
 
 // CLIOptions holds command-line argument overrides
 type CLIOptions struct {
-	SourceType        string // -source-type: log source type (logwatch, drupal_watchdog)
+	SourceType        string // -source-type: log source type (logwatch, drupal_watchdog, ocms)
 	SourcePath        string // -source-path: path to log source file
 	DrupalSite        string // -drupal-site: Drupal site ID from drupal-sites.json
 	DrupalSitesConfig string // -drupal-sites-config: path to drupal-sites.json
@@ -37,7 +37,7 @@ type CLIOptions struct {
 func ParseCLI() *CLIOptions {
 	opts := &CLIOptions{}
 
-	flag.StringVar(&opts.SourceType, "source-type", "", "Log source type: logwatch, drupal_watchdog")
+	flag.StringVar(&opts.SourceType, "source-type", "", "Log source type: logwatch, drupal_watchdog, ocms")
 	flag.StringVar(&opts.SourcePath, "source-path", "", "Path to log source file (overrides config)")
 	flag.StringVar(&opts.DrupalSite, "drupal-site", "", "Drupal site ID from drupal-sites.json (for multi-site deployments)")
 	flag.StringVar(&opts.DrupalSitesConfig, "drupal-sites-config", "", "Path to drupal-sites.json configuration file")
@@ -56,6 +56,7 @@ func ParseCLI() *CLIOptions {
 		flag.PrintDefaults()
 		_, _ = fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type logwatch\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type ocms -source-path /tmp/ocms.log\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -source-path /tmp/watchdog.json\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -drupal-site production\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -list-drupal-sites\n", os.Args[0])
@@ -99,10 +100,13 @@ type Config struct {
 	TelegramAlertsChannel  int64 // Optional
 
 	// Log Source Selection
-	LogSourceType string // "logwatch" or "drupal_watchdog"
+	LogSourceType string // "logwatch", "drupal_watchdog", or "ocms"
 
 	// Logwatch Settings (used when LogSourceType = "logwatch")
 	LogwatchOutputPath string
+
+	// OCMS Settings (used when LogSourceType = "ocms")
+	OCMSLogsPath string
 
 	// Drupal Watchdog Settings (used when LogSourceType = "drupal_watchdog")
 	DrupalWatchdogPath   string // Path to watchdog export file
@@ -178,6 +182,7 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 		// Log source settings
 		LogSourceType:      viper.GetString("LOG_SOURCE_TYPE"),
 		LogwatchOutputPath: viper.GetString("LOGWATCH_OUTPUT_PATH"),
+		OCMSLogsPath:       viper.GetString("OCMS_LOGS_PATH"),
 		// Drupal settings are loaded from drupal-sites.json, not env vars
 		DrupalWatchdogFormat: "json", // default, overridden by site config
 		MaxLogSizeMB:         viper.GetInt("MAX_LOG_SIZE_MB"),
@@ -204,6 +209,8 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 			switch config.LogSourceType {
 			case "drupal_watchdog":
 				config.DrupalWatchdogPath = cli.SourcePath
+			case "ocms":
+				config.OCMSLogsPath = cli.SourcePath
 			default:
 				config.LogwatchOutputPath = cli.SourcePath
 			}
@@ -338,6 +345,7 @@ func setDefaults() {
 	// Log source defaults
 	viper.SetDefault("LOG_SOURCE_TYPE", "logwatch")
 	viper.SetDefault("LOGWATCH_OUTPUT_PATH", "/tmp/logwatch-output.txt")
+	viper.SetDefault("OCMS_LOGS_PATH", "/tmp/ocms.log")
 	// Drupal settings come from drupal-sites.json, not env vars
 	viper.SetDefault("MAX_LOG_SIZE_MB", 10)
 	viper.SetDefault("LOG_LEVEL", "info")
@@ -509,10 +517,11 @@ func (c *Config) validateLogSource() error {
 	validSourceTypes := map[string]bool{
 		"logwatch":        true,
 		"drupal_watchdog": true,
+		"ocms":            true,
 	}
 
 	if !validSourceTypes[c.LogSourceType] {
-		return fmt.Errorf("LOG_SOURCE_TYPE must be 'logwatch' or 'drupal_watchdog' (got: %s)", c.LogSourceType)
+		return fmt.Errorf("LOG_SOURCE_TYPE must be 'logwatch', 'drupal_watchdog', or 'ocms' (got: %s)", c.LogSourceType)
 	}
 
 	// Validate source-specific settings
@@ -532,6 +541,10 @@ func (c *Config) validateLogSource() error {
 		if !validFormats[c.DrupalWatchdogFormat] {
 			return fmt.Errorf("watchdog_format must be 'json' or 'drush' in drupal-sites.json (got: %s)", c.DrupalWatchdogFormat)
 		}
+	case "ocms":
+		if c.OCMSLogsPath == "" {
+			return fmt.Errorf("OCMS_LOGS_PATH is required when LOG_SOURCE_TYPE=ocms")
+		}
 	}
 
 	return nil
@@ -542,6 +555,8 @@ func (c *Config) GetLogSourcePath() string {
 	switch c.LogSourceType {
 	case "drupal_watchdog":
 		return c.DrupalWatchdogPath
+	case "ocms":
+		return c.OCMSLogsPath
 	default:
 		return c.LogwatchOutputPath
 	}
@@ -555,6 +570,11 @@ func (c *Config) IsDrupalWatchdog() bool {
 // IsLogwatch returns true if the log source type is logwatch
 func (c *Config) IsLogwatch() bool {
 	return c.LogSourceType == "logwatch"
+}
+
+// IsOCMS returns true if the log source type is ocms
+func (c *Config) IsOCMS() bool {
+	return c.LogSourceType == "ocms"
 }
 
 // IsOllama returns true if the LLM provider is Ollama

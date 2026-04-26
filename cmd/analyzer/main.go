@@ -19,6 +19,7 @@ import (
 	"github.com/olegiv/logwatch-ai-go/internal/logging"
 	"github.com/olegiv/logwatch-ai-go/internal/logwatch"
 	"github.com/olegiv/logwatch-ai-go/internal/notification"
+	"github.com/olegiv/logwatch-ai-go/internal/ocms"
 	"github.com/olegiv/logwatch-ai-go/internal/storage"
 )
 
@@ -459,6 +460,17 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 			),
 			Preprocessor:  drupal.NewPreprocessor(cfg.MaxPreprocessingTokens),
 			PromptBuilder: promptBuilder,
+		}, nil
+	case "ocms":
+		return &analyzer.LogSource{
+			Type: analyzer.LogSourceOCMS,
+			Reader: ocms.NewReader(
+				cfg.MaxLogSizeMB,
+				false, // Reader preprocessing disabled — handled by preparePromptForAnalysis
+				cfg.MaxPreprocessingTokens,
+			),
+			Preprocessor:  ocms.NewPreprocessor(cfg.MaxPreprocessingTokens),
+			PromptBuilder: ocms.NewPromptBuilder(),
 		}, nil
 
 	default:

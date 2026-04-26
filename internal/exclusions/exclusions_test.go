@@ -39,6 +39,14 @@ func TestConfig_Validate(t *testing.T) {
 			},
 		},
 		{
+			name: "valid v1.2 with ocms scope",
+			cfg: Config{
+				Version: "1.2",
+				Global:  []string{"TLS cert"},
+				OCMS:    []string{"healthcheck timeout"},
+			},
+		},
+		{
 			name:    "missing version",
 			cfg:     Config{Global: []string{"foo"}},
 			wantErr: "version is required",
@@ -133,6 +141,14 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			wantErr: "too many patterns",
 		},
+		{
+			name: "too many patterns in ocms",
+			cfg: Config{
+				Version: "1.2",
+				OCMS:    makeUniquePatterns(maxPatternsPerList + 1),
+			},
+			wantErr: "too many patterns",
+		},
 	}
 
 	for _, tt := range tests {
@@ -204,6 +220,7 @@ func TestConfig_ContextualPatterns(t *testing.T) {
 		Global:   []string{"must-not-appear-in-contextual"},
 		Logwatch: []string{"kernel watchdog"},
 		Drupal:   []string{"deprecated function"},
+		OCMS:     []string{"request timeout"},
 		Sites: map[string][]string{
 			"production": {"cron exceeded"},
 			"staging":    {"email delayed"},
@@ -251,6 +268,12 @@ func TestConfig_ContextualPatterns(t *testing.T) {
 			logType: analyzer.LogSourceDrupalWatchdog,
 			siteID:  "staging",
 			want:    []string{"deprecated function", "email delayed"},
+		},
+		{
+			name:    "ocms returns ocms only",
+			logType: analyzer.LogSourceOCMS,
+			siteID:  "",
+			want:    []string{"request timeout"},
 		},
 		{
 			name:    "unknown logType returns nil",
