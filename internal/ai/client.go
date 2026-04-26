@@ -218,5 +218,7 @@ func (c *Client) GetProviderName() string {
 }
 
 // Ensure Client implements Provider interface
-var _ Provider = (*Client)(nil)
-var _ PromptTokenCounter = (*Client)(nil)
+var (
+	_ Provider           = (*Client)(nil)
+	_ PromptTokenCounter = (*Client)(nil)
+)

@@ -13,8 +13,10 @@ import (
 )
 
 // Compile-time interface check
-var _ analyzer.Preprocessor = (*Preprocessor)(nil)
-var _ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+var (
+	_ analyzer.Preprocessor       = (*Preprocessor)(nil)
+	_ analyzer.BudgetPreprocessor = (*Preprocessor)(nil)
+)
 
 // Preprocessor handles logwatch content preprocessing for large files.
 // Implements analyzer.Preprocessor interface.

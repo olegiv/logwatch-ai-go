@@ -384,7 +384,7 @@ func TestLoadDrupalSitesConfig_InvalidJSON(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "drupal-sites.json")
 
 	// Write invalid JSON
-	if err := os.WriteFile(configPath, []byte("{ invalid json }"), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte("{ invalid json }"), 0o644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -403,7 +403,7 @@ func TestLoadDrupalSitesConfig_ValidationFails(t *testing.T) {
 
 	// Write valid JSON but invalid config (empty sites)
 	invalidConfig := `{"version": "1.0", "sites": {}}`
-	if err := os.WriteFile(configPath, []byte(invalidConfig), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(invalidConfig), 0o644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 

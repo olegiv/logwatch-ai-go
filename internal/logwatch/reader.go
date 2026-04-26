@@ -46,7 +46,43 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 		r.validateContent,
 	)
 	if err != nil {
-		return "", err
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("logwatch output file not found: %s", sourcePath)
+		}
+		return "", fmt.Errorf("failed to stat logwatch file: %w", err)
+	}
+
+	// Check file permissions
+	if fileInfo.Mode().Perm()&0o400 == 0 {
+		return "", fmt.Errorf("logwatch file is not readable: %s", sourcePath)
+	}
+
+	// Check file size
+	maxBytes := int64(r.maxSizeMB) * 1024 * 1024
+	if fileInfo.Size() > maxBytes {
+		return "", fmt.Errorf("logwatch file exceeds maximum size of %dMB (size: %.2fMB)",
+			r.maxSizeMB, float64(fileInfo.Size())/1024/1024)
+	}
+
+	// Check file age (warn if older than 24 hours)
+	fileAge := time.Since(fileInfo.ModTime())
+	if fileAge > 24*time.Hour {
+		return "", fmt.Errorf("logwatch file is too old (%.1f hours), may be stale",
+			fileAge.Hours())
+	}
+
+	// Read file content
+	content, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read logwatch file: %w", err)
+	}
+
+	// Convert to string
+	contentStr := string(content)
+
+	// Validate content
+	if err := r.validateContent(contentStr); err != nil {
+		return "", fmt.Errorf("logwatch content validation failed: %w", err)
 	}
 
 	// Apply preprocessing if enabled
