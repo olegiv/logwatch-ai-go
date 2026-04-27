@@ -18,9 +18,13 @@
 #
 # Exit code: 0 if all jobs ok, otherwise the failure count.
 
-set -e
 set -u
 set -o pipefail
+# `set -e` is intentionally NOT enabled. run_job below propagates failure
+# status to the caller, and per-source policy is expressed at each call:
+# append `|| exit` to gate (logwatch lines below) or leave bare to continue
+# on failure (drupal/ocms lines). With `set -e` even bare run_job calls
+# would abort the whole run on first failure.
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
 # /run is root:root 0755 on systemd-based distros. Avoid /var/lock — it is
@@ -39,10 +43,14 @@ run_job() {
     log "[$tag] start"
     if "$@"; then
         log "[$tag] ok"
+        return 0
     else
+        # $? here is the exit status of the failed "$@". Outside this else
+        # branch (after `fi`) bash resets it to 0, so capture it inline.
         local rc=$?
         log "[$tag] FAILED rc=$rc"
         failures=$((failures + 1))
+        return "$rc"
     fi
 }
 
