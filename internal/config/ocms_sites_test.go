@@ -133,29 +133,93 @@ func TestNormalizeOCMSLogKind(t *testing.T) {
 	}
 }
 
+func TestNormalizeOCMSLogRange(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty defaults to yesterday", input: "", want: OCMSLogRangeYesterday},
+		{name: "yesterday", input: "yesterday", want: OCMSLogRangeYesterday},
+		{name: "today", input: "today", want: OCMSLogRangeToday},
+		{name: "uppercase today", input: "TODAY", want: OCMSLogRangeToday},
+		{name: "trim whitespace", input: " yesterday ", want: OCMSLogRangeYesterday},
+		{name: "invalid", input: "lastweek", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := NormalizeOCMSLogRange(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("NormalizeOCMSLogRange() expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NormalizeOCMSLogRange() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("NormalizeOCMSLogRange() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOCMSSite_LogPath(t *testing.T) {
 	t.Parallel()
 
 	site := OCMSSite{InstanceDir: "/var/www/vhosts/example.com/ocms"}
 
-	mainLog, err := site.LogPath(OCMSLogKindMain)
+	mainLog, err := site.LogPath(OCMSLogKindMain, OCMSLogRangeToday)
 	if err != nil {
-		t.Fatalf("LogPath(main) error = %v", err)
+		t.Fatalf("LogPath(main, today) error = %v", err)
 	}
 	if mainLog != "/var/www/vhosts/example.com/ocms/logs/ocms.log" {
-		t.Fatalf("LogPath(main) = %q", mainLog)
+		t.Fatalf("LogPath(main, today) = %q", mainLog)
 	}
 
-	errorLog, err := site.LogPath(OCMSLogKindError)
+	errorLog, err := site.LogPath(OCMSLogKindError, OCMSLogRangeToday)
 	if err != nil {
-		t.Fatalf("LogPath(error) error = %v", err)
+		t.Fatalf("LogPath(error, today) error = %v", err)
 	}
 	if errorLog != "/var/www/vhosts/example.com/ocms/logs/error.log" {
-		t.Fatalf("LogPath(error) = %q", errorLog)
+		t.Fatalf("LogPath(error, today) = %q", errorLog)
 	}
 
-	if _, err := site.LogPath(OCMSLogKindAll); err == nil {
-		t.Fatal("LogPath(all) expected error, got nil")
+	if _, err := site.LogPath(OCMSLogKindAll, OCMSLogRangeToday); err == nil {
+		t.Fatal("LogPath(all, today) expected error, got nil")
+	}
+}
+
+func TestOCMSSite_LogPath_Yesterday(t *testing.T) {
+	t.Parallel()
+
+	site := OCMSSite{InstanceDir: "/var/www/vhosts/example.com/ocms"}
+
+	mainLog, err := site.LogPath(OCMSLogKindMain, OCMSLogRangeYesterday)
+	if err != nil {
+		t.Fatalf("LogPath(main, yesterday) error = %v", err)
+	}
+	if mainLog != "/var/www/vhosts/example.com/ocms/logs/ocms.log.1" {
+		t.Fatalf("LogPath(main, yesterday) = %q, want .1 suffix", mainLog)
+	}
+
+	errorLog, err := site.LogPath(OCMSLogKindError, OCMSLogRangeYesterday)
+	if err != nil {
+		t.Fatalf("LogPath(error, yesterday) error = %v", err)
+	}
+	if errorLog != "/var/www/vhosts/example.com/ocms/logs/error.log.1" {
+		t.Fatalf("LogPath(error, yesterday) = %q, want .1 suffix", errorLog)
+	}
+
+	if _, err := site.LogPath(OCMSLogKindMain, "lastweek"); err == nil {
+		t.Fatal("LogPath(main, invalid range) expected error, got nil")
 	}
 }
 
@@ -164,18 +228,46 @@ func TestOCMSSite_LogPaths(t *testing.T) {
 
 	site := OCMSSite{InstanceDir: "/var/www/vhosts/example.com/ocms"}
 
-	paths, err := site.LogPaths(OCMSLogKindAll)
+	paths, err := site.LogPaths(OCMSLogKindAll, OCMSLogRangeToday)
 	if err != nil {
-		t.Fatalf("LogPaths(all) error = %v", err)
+		t.Fatalf("LogPaths(all, today) error = %v", err)
 	}
 	if len(paths) != 2 {
-		t.Fatalf("len(LogPaths(all)) = %d, want 2", len(paths))
+		t.Fatalf("len(LogPaths(all, today)) = %d, want 2", len(paths))
 	}
 	if paths[0].Kind != OCMSLogKindMain || paths[0].Path != "/var/www/vhosts/example.com/ocms/logs/ocms.log" {
 		t.Fatalf("main path = %+v", paths[0])
 	}
 	if paths[1].Kind != OCMSLogKindError || paths[1].Path != "/var/www/vhosts/example.com/ocms/logs/error.log" {
 		t.Fatalf("error path = %+v", paths[1])
+	}
+}
+
+func TestOCMSSite_LogPaths_Yesterday(t *testing.T) {
+	t.Parallel()
+
+	site := OCMSSite{InstanceDir: "/var/www/vhosts/example.com/ocms"}
+
+	paths, err := site.LogPaths(OCMSLogKindAll, OCMSLogRangeYesterday)
+	if err != nil {
+		t.Fatalf("LogPaths(all, yesterday) error = %v", err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("len(LogPaths(all, yesterday)) = %d, want 2", len(paths))
+	}
+	if paths[0].Path != "/var/www/vhosts/example.com/ocms/logs/ocms.log.1" {
+		t.Fatalf("main path = %q, want .1 suffix", paths[0].Path)
+	}
+	if paths[1].Path != "/var/www/vhosts/example.com/ocms/logs/error.log.1" {
+		t.Fatalf("error path = %q, want .1 suffix", paths[1].Path)
+	}
+
+	mainOnly, err := site.LogPaths(OCMSLogKindMain, OCMSLogRangeYesterday)
+	if err != nil {
+		t.Fatalf("LogPaths(main, yesterday) error = %v", err)
+	}
+	if len(mainOnly) != 1 || mainOnly[0].Path != "/var/www/vhosts/example.com/ocms/logs/ocms.log.1" {
+		t.Fatalf("LogPaths(main, yesterday) = %+v", mainOnly)
 	}
 }
 

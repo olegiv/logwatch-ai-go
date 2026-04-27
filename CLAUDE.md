@@ -118,8 +118,9 @@ type PromptBuilder interface {
 - Search locations: `./`, `./configs/`, `/opt/logwatch-ai/`, `~/.config/logwatch-ai/`
 
 **Multi-Site OCMS:** Uses `ocms-sites.json` (logwatch-ai schema) layered over `/etc/ocms/sites.conf` (external OCMS registry: `SITE_ID INSTANCE_DIR SYSTEM_USER PORT`).
-- CLI: `-ocms-site <id>`, `-ocms-sites-config <path>`, `-ocms-sites-registry <path>`, `-ocms-log-kind <main|error|all>`, `-list-ocms-sites`
+- CLI: `-ocms-site <id>`, `-ocms-sites-config <path>`, `-ocms-sites-registry <path>`, `-ocms-log-kind <main|error|all>`, `-ocms-range <today|yesterday>`, `-list-ocms-sites`
 - Derived log paths: `main` → `<INSTANCE_DIR>/logs/ocms.log`; `error` → `<INSTANCE_DIR>/logs/error.log`; `all` reads both files in one report
+- Log-range default is `yesterday` — appends `.1` to derived paths (`ocms.log.1`, `error.log.1`) so the daily cron after midnight logrotate analyzes yesterday's full data, mirroring `logwatch --range yesterday`. Pass `-ocms-range today` for ad-hoc analysis of the live log.
 - Log-kind precedence: CLI `-ocms-log-kind` > `sites.<id>.log_kind` > `default_log_kind` > built-in `main`
 - Search locations: `./`, `./configs/`, `/opt/logwatch-ai/`, `~/.config/logwatch-ai/`
 

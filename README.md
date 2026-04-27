@@ -254,19 +254,26 @@ LMSTUDIO_MODEL=local-model
 
 ### Cron Setup
 
-Run logwatch analysis daily at 2:00 AM:
+logwatch-ai uses a single cron entry that calls a host-customized shell
+script (`run-cron.sh`) listing every job — logwatch, drupal sites, ocms
+sites — in one place.
 
-**Root crontab** (generate logwatch report):
 ```bash
-0 2 * * * /opt/logwatch-ai/scripts/generate-logwatch.sh
+# 1. Copy the template and make it executable
+sudo cp /opt/logwatch-ai/scripts/run-cron.sh.example /opt/logwatch-ai/run-cron.sh
+sudo chmod 755 /opt/logwatch-ai/run-cron.sh
+
+# 2. Edit run-cron.sh and uncomment the run_job lines for your sites
+sudo $EDITOR /opt/logwatch-ai/run-cron.sh
+
+# 3. Add ONE cron entry (root cron — logwatch needs /var/log/* access):
+sudo crontab -e
+#   #@desc: Logwatch AI
+#   7 2 * * * /opt/logwatch-ai/run-cron.sh >> /opt/logwatch-ai/logs/cron.log 2>&1
 ```
 
-**User crontab** (run analyzer):
-```bash
-15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer >> logs/cron.log 2>&1
-```
-
-See [docs/CRON_SETUP.md](docs/CRON_SETUP.md) for detailed setup instructions.
+See [docs/CRON_SETUP.md](docs/CRON_SETUP.md) for detailed setup
+instructions, sample log output, email-on-failure config, and troubleshooting.
 
 ### Drupal Watchdog Setup
 
@@ -296,13 +303,12 @@ To analyze Drupal watchdog logs instead of logwatch:
 }
 ```
 
-2. **Set up cron jobs**:
+2. **Add the site to your `run-cron.sh`** (see the unified cron model in
+   [docs/CRON_SETUP.md](docs/CRON_SETUP.md)):
 ```bash
-# Export watchdog logs daily at 2:00 AM
-0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh --site production
-
-# Run analyzer at 2:15 AM
-15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type drupal_watchdog -drupal-site production >> logs/cron.log 2>&1
+# In /opt/logwatch-ai/run-cron.sh:
+run_job "drupal/production/generate" ./scripts/generate-drupal-watchdog.sh --site production
+run_job "drupal/production/analyze"  ./logwatch-analyzer -source-type drupal_watchdog -drupal-site production
 ```
 
 **Drupal Watchdog JSON Format:**
@@ -374,15 +380,15 @@ For organizations managing multiple Drupal sites, the analyzer supports a centra
 ```
 
 5. **Automated multi-site cron** (analyze all sites daily):
+   Add one `run_job` block per site to `/opt/logwatch-ai/run-cron.sh`:
 ```bash
-# Export watchdog for each site at 2:00 AM
-0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh --site production
-5 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh --site staging
-
-# Analyze each site at 2:15 AM
-15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -drupal-site production >> logs/cron.log 2>&1
-20 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -drupal-site staging >> logs/cron.log 2>&1
+run_job "drupal/production/generate" ./scripts/generate-drupal-watchdog.sh --site production
+run_job "drupal/production/analyze"  ./logwatch-analyzer -source-type drupal_watchdog -drupal-site production
+run_job "drupal/staging/generate"    ./scripts/generate-drupal-watchdog.sh --site staging
+run_job "drupal/staging/analyze"     ./logwatch-analyzer -source-type drupal_watchdog -drupal-site staging
 ```
+   The runner executes them sequentially in one cron tick — no staggered
+   minutes, one log file, one exit code.
 
 **Site Configuration Fields:**
 | Field | Required | Description |
@@ -444,6 +450,11 @@ Derived OCMS logs:
 Log-kind precedence: CLI `-ocms-log-kind`, then `sites.<id>.log_kind`, then
 `default_log_kind`, then built-in default `main`.
 
+Log range default is `yesterday` — appends `.1` to derived paths
+(`ocms.log.1`, `error.log.1`) so the daily cron after midnight logrotate
+analyzes yesterday's data, mirroring `logwatch --range yesterday`. Pass
+`-ocms-range today` for ad-hoc analysis of the live log.
+
 ## Usage
 
 ### Manual Run
@@ -470,6 +481,7 @@ Options:
   -ocms-site string          OCMS site ID from ocms-sites.json
   -ocms-sites-config string  Path to ocms-sites.json configuration file
   -ocms-log-kind string      OCMS log kind: main, error, or all
+  -ocms-range string         OCMS log range: yesterday (default, reads .log.1) or today (live log)
   -list-ocms-sites           List available OCMS sites and exit
   -h, -help                  Show usage information
   -v, -version               Show version information
@@ -483,8 +495,11 @@ Options:
 # Override source type
 ./logwatch-analyzer -source-type drupal_watchdog
 
-# Analyze OCMS site logs
+# Analyze OCMS site logs (default: yesterday's rotated .log.1)
 ./logwatch-analyzer -source-type ocms -ocms-site example_com
+
+# Ad-hoc analysis of OCMS site's live log
+./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-range today
 
 # Analyze both OCMS main and error logs in one report
 ./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-log-kind all

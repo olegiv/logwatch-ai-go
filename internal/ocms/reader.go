@@ -5,7 +5,9 @@
 package ocms
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"time"
 
@@ -81,7 +83,10 @@ func (r *Reader) preprocessIfNeeded(content string) (string, error) {
 }
 
 // ReadFiles reads one or more OCMS log files. Multiple files are combined with
-// labels so the LLM can distinguish main and error log sections.
+// labels so the LLM can distinguish main and error log sections. Missing
+// files are tolerated in multi-file mode — a site with no errors won't have
+// error.log (or its rotated .1) and that's a normal case. Fails only if
+// every requested file is missing.
 func (r *Reader) ReadFiles(files []LogFile) (string, error) {
 	if len(files) == 0 {
 		return "", fmt.Errorf("no OCMS log files specified")
@@ -91,13 +96,23 @@ func (r *Reader) ReadFiles(files []LogFile) (string, error) {
 	}
 
 	var combined strings.Builder
-	for i, file := range files {
+	var skipped []string
+	written := 0
+	for _, file := range files {
 		content, err := r.readRaw(file.Path)
 		if err != nil {
+			// Tolerate missing rotated files in multi-file mode without a
+			// separate os.Stat call — going through readRaw alone keeps the
+			// existence check and the read in one path lookup, removing a
+			// TOCTOU window.
+			if errors.Is(err, fs.ErrNotExist) {
+				skipped = append(skipped, fmt.Sprintf("%s (%s)", file.Kind, file.Path))
+				continue
+			}
 			return "", fmt.Errorf("failed to read OCMS %s log %s: %w", file.Kind, file.Path, err)
 		}
 
-		if i > 0 {
+		if written > 0 {
 			combined.WriteString("\n\n")
 		}
 		combined.WriteString("### OCMS ")
@@ -107,6 +122,11 @@ func (r *Reader) ReadFiles(files []LogFile) (string, error) {
 		combined.WriteString(file.Path)
 		combined.WriteString("\n\n")
 		combined.WriteString(content)
+		written++
+	}
+
+	if written == 0 {
+		return "", fmt.Errorf("no readable OCMS log files (all missing): %s", strings.Join(skipped, ", "))
 	}
 
 	return r.preprocessIfNeeded(combined.String())

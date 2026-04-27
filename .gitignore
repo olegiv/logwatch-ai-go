@@ -69,3 +69,7 @@ exclusions.json
 
 # Deploy — host-specific, personal
 deploy/deploy.env
+
+# Cron runner — host-specific (operator copies from scripts/run-cron.sh.example)
+scripts/run-cron.sh
+!scripts/run-cron.sh.example
