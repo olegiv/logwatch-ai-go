@@ -1,0 +1,85 @@
+#!/bin/bash
+#
+# Unified cron runner for logwatch-ai. Customize the run_job lines below
+# for the sources/sites you actually run on this host.
+#
+# Install (one-time):
+#   cp /opt/logwatch-ai/scripts/run-cron.sh.example /opt/logwatch-ai/run-cron.sh
+#   chmod 755 /opt/logwatch-ai/run-cron.sh
+#   $EDITOR /opt/logwatch-ai/run-cron.sh   # uncomment lines for your setup
+#
+# Crontab entry (root cron — logwatch needs /var/log/* read access):
+#   #@desc: Logwatch AI
+#   7 2 * * * /opt/logwatch-ai/run-cron.sh >> /opt/logwatch-ai/logs/cron.log 2>&1
+#
+# Each run_job runs independently — failure of one job no longer aborts the
+# rest. To make a job act as a gate (abort the whole run on failure), append
+# `|| exit` to the run_job line; the logwatch lines below show that pattern.
+#
+# Exit code: 0 if all jobs ok, otherwise the failure count.
+
+set -e
+set -u
+set -o pipefail
+
+INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
+# /run is root:root 0755 on systemd-based distros. Avoid /var/lock — it is
+# 1777 sticky world-writable on Debian/Ubuntu, so a local user could plant a
+# symlink here and trick the cron runner (running as root) into truncating
+# arbitrary files via `exec 9>"$LOCK_FILE"`.
+LOCK_FILE="${LOCK_FILE:-/run/logwatch-ai-cron.lock}"
+
+failures=0
+total=0
+
+log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+run_job() {
+    local tag="$1"; shift
+    total=$((total + 1))
+    log "[$tag] start"
+    if "$@"; then
+        log "[$tag] ok"
+    else
+        local rc=$?
+        log "[$tag] FAILED rc=$rc"
+        failures=$((failures + 1))
+    fi
+}
+
+# Lockfile — prevent overlap if a previous run is still going.
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+        log "another run-cron.sh is already in progress; exiting"
+        exit 0
+    fi
+else
+    log "WARN: flock(1) not on PATH — overlap protection DISABLED for this run"
+fi
+
+cd "$INSTALL_DIR" || exit
+
+log "begin run on $(hostname) (user=$(id -un))"
+
+# ===== Logwatch (system) — uncomment if logwatch is installed =====
+# Gate pattern: `|| exit` aborts the run if logwatch fails (so drupal/ocms
+# don't waste API credits when the host's logs aren't generating).
+# run_job "logwatch/generate" ./scripts/generate-logwatch.sh /tmp/logwatch-output.txt 10 yesterday || exit
+# run_job "logwatch/analyze"  ./logwatch-analyzer -source-type logwatch || exit
+
+# ===== Drupal sites — one block per site listed in drupal-sites.json =====
+# run_job "drupal/<site>/generate" ./scripts/generate-drupal-watchdog.sh --site <site>
+# run_job "drupal/<site>/analyze"  ./logwatch-analyzer -source-type drupal_watchdog -drupal-site <site>
+
+# ===== OCMS sites — one line per site listed in ocms-sites.json =====
+# Reads ocms.log.1 (yesterday's rotated log) by default. Pass -ocms-range
+# today to read the live log instead.
+# run_job "ocms/<site>" ./logwatch-analyzer -source-type ocms -ocms-site <site>
+
+ok=$((total - failures))
+log "done — $ok/$total ok, $failures failed"
+
+if (( failures > 255 )); then
+    exit 255
+fi
+exit "$failures"

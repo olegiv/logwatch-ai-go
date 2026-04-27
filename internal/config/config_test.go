@@ -812,7 +812,7 @@ func TestValidateLogSource(t *testing.T) {
 			name: "Valid ocms config",
 			setup: func(c *Config) {
 				c.LogSourceType = "ocms"
-				c.OCMSLogsPath = "/var/www/vhosts/example.com/ocms/logs/ocms.log"
+				c.OCMSLogsPath = "/var/www/vhosts/example.com/ocms/logs/ocms.log.1"
 			},
 			expectError: false,
 		},
@@ -890,7 +890,7 @@ func TestGetLogSourcePath(t *testing.T) {
 			logSourceType:  "logwatch",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
-			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log",
+			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log.1",
 			expectedResult: "/tmp/logwatch.txt",
 		},
 		{
@@ -898,7 +898,7 @@ func TestGetLogSourcePath(t *testing.T) {
 			logSourceType:  "drupal_watchdog",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
-			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log",
+			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log.1",
 			expectedResult: "/var/log/drupal.json",
 		},
 		{
@@ -906,15 +906,15 @@ func TestGetLogSourcePath(t *testing.T) {
 			logSourceType:  "ocms",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
-			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log",
-			expectedResult: "/var/www/vhosts/example.com/ocms/logs/ocms.log",
+			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log.1",
+			expectedResult: "/var/www/vhosts/example.com/ocms/logs/ocms.log.1",
 		},
 		{
 			name:           "Unknown source type defaults to logwatch",
 			logSourceType:  "unknown",
 			logwatchPath:   "/tmp/logwatch.txt",
 			drupalPath:     "/var/log/drupal.json",
-			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log",
+			ocmsPath:       "/var/www/vhosts/example.com/ocms/logs/ocms.log.1",
 			expectedResult: "/tmp/logwatch.txt",
 		},
 	}
@@ -988,7 +988,7 @@ func TestApplyOCMSMultiSiteConfig_DerivesMainLogPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
 	}
-	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/logs/ocms.log" {
+	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/logs/ocms.log.1" {
 		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
 	}
 	if cfg.SelectedSiteID() != "example_com" {
@@ -1012,7 +1012,7 @@ func TestApplyOCMSMultiSiteConfig_DerivesErrorLogFromJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
 	}
-	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/app/logs/error.log" {
+	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/app/logs/error.log.1" {
 		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
 	}
 	if cfg.OCMSLogKind != OCMSLogKindError {
@@ -1031,7 +1031,7 @@ func TestApplyOCMSMultiSiteConfig_CLILogKindOverridesJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
 	}
-	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/app/logs/ocms.log" {
+	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/app/logs/ocms.log.1" {
 		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
 	}
 }
@@ -1053,10 +1053,10 @@ func TestApplyOCMSMultiSiteConfig_DerivesAllLogPaths(t *testing.T) {
 	if len(paths) != 2 {
 		t.Fatalf("len(GetOCMSLogPaths()) = %d, want 2", len(paths))
 	}
-	if paths[0].Kind != OCMSLogKindMain || paths[0].Path != "/var/www/vhosts/all.example.com/ocms/logs/ocms.log" {
+	if paths[0].Kind != OCMSLogKindMain || paths[0].Path != "/var/www/vhosts/all.example.com/ocms/logs/ocms.log.1" {
 		t.Fatalf("main path = %+v", paths[0])
 	}
-	if paths[1].Kind != OCMSLogKindError || paths[1].Path != "/var/www/vhosts/all.example.com/ocms/logs/error.log" {
+	if paths[1].Kind != OCMSLogKindError || paths[1].Path != "/var/www/vhosts/all.example.com/ocms/logs/error.log.1" {
 		t.Fatalf("error path = %+v", paths[1])
 	}
 	if cfg.OCMSLogsPath != paths[0].Path {
@@ -1079,11 +1079,74 @@ func TestApplyOCMSMultiSiteConfig_CLIAllLogKindOverridesJSON(t *testing.T) {
 	if len(paths) != 2 {
 		t.Fatalf("len(GetOCMSLogPaths()) = %d, want 2", len(paths))
 	}
-	if paths[0].Path != "/var/www/vhosts/example.com/ocms/app/logs/ocms.log" {
+	if paths[0].Path != "/var/www/vhosts/example.com/ocms/app/logs/ocms.log.1" {
 		t.Fatalf("main path = %+v", paths[0])
 	}
-	if paths[1].Path != "/var/www/vhosts/example.com/ocms/app/logs/error.log" {
+	if paths[1].Path != "/var/www/vhosts/example.com/ocms/app/logs/error.log.1" {
 		t.Fatalf("error path = %+v", paths[1])
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_RangeToday(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms", OCMSLogRange: OCMSLogRangeToday}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		OCMSSite:        "example_com",
+		OCMSSitesConfig: configPath,
+	})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.OCMSLogsPath != "/var/www/vhosts/example.com/ocms/logs/ocms.log" {
+		t.Fatalf("OCMSLogsPath = %q, want today's live log", cfg.OCMSLogsPath)
+	}
+	if cfg.OCMSLogRange != OCMSLogRangeToday {
+		t.Fatalf("OCMSLogRange = %q", cfg.OCMSLogRange)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_RangeInvalid(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms", OCMSLogRange: "lastweek"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		OCMSSite:        "example_com",
+		OCMSSitesConfig: configPath,
+	})
+	if err == nil {
+		t.Fatal("applyOCMSMultiSiteConfig() expected error for invalid range, got nil")
+	}
+}
+
+func TestApplyOCMSSourcePathOverride_DefaultsToYesterday(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{LogSourceType: "ocms", OCMSLogsPath: "/tmp/manual.log"}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		SourcePath:      "/tmp/manual.log",
+		OCMSSite:        "example_com",
+		OCMSSitesConfig: configPath,
+	})
+	if err != nil {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
+	}
+	if cfg.OCMSLogRange != OCMSLogRangeYesterday {
+		t.Fatalf("OCMSLogRange = %q, want yesterday (default)", cfg.OCMSLogRange)
+	}
+}
+
+func TestApplyOCMSSourcePathOverride_RangeInvalid(t *testing.T) {
+	_, configPath, _ := ocmsMultiSiteFixtures(t)
+	cfg := &Config{
+		LogSourceType: "ocms",
+		OCMSLogsPath:  "/tmp/manual.log",
+		OCMSLogRange:  "lastweek",
+	}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
+		SourcePath:      "/tmp/manual.log",
+		OCMSSite:        "example_com",
+		OCMSSitesConfig: configPath,
+	})
+	if err == nil {
+		t.Fatal("applyOCMSSourcePathOverride() expected error for invalid range, got nil")
 	}
 }
 

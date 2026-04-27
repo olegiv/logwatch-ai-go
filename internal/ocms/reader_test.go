@@ -102,15 +102,39 @@ func TestReader_ReadFiles_CombinedContent(t *testing.T) {
 	}
 }
 
-func TestReader_ReadFiles_MissingSecondFileFails(t *testing.T) {
+func TestReader_ReadFiles_MissingSecondFileTolerated(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
 	mainLog := filepath.Join(tmpDir, "ocms.log")
 	errorLog := filepath.Join(tmpDir, "error.log")
-	if err := os.WriteFile(mainLog, []byte("2026-04-26T02:15:00Z INFO main log event\n"), 0o600); err != nil {
+	mainContent := "2026-04-26T02:15:00Z INFO main log event\n"
+	if err := os.WriteFile(mainLog, []byte(mainContent), 0o600); err != nil {
 		t.Fatalf("failed to write main log: %v", err)
 	}
+
+	reader := NewReader(10, false, 1000)
+	got, err := reader.ReadFiles([]LogFile{
+		{Kind: "main", Path: mainLog},
+		{Kind: "error", Path: errorLog},
+	})
+	if err != nil {
+		t.Fatalf("ReadFiles() should tolerate missing error log; got error = %v", err)
+	}
+	if !strings.Contains(got, "### OCMS MAIN LOG") || !strings.Contains(got, mainContent) {
+		t.Fatalf("combined content missing main log section:\n%s", got)
+	}
+	if strings.Contains(got, "### OCMS ERROR LOG") {
+		t.Fatalf("combined content unexpectedly includes ERROR section for missing file:\n%s", got)
+	}
+}
+
+func TestReader_ReadFiles_AllMissingFails(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	mainLog := filepath.Join(tmpDir, "ocms.log")
+	errorLog := filepath.Join(tmpDir, "error.log")
 
 	reader := NewReader(10, false, 1000)
 	_, err := reader.ReadFiles([]LogFile{
@@ -118,10 +142,10 @@ func TestReader_ReadFiles_MissingSecondFileFails(t *testing.T) {
 		{Kind: "error", Path: errorLog},
 	})
 	if err == nil {
-		t.Fatal("ReadFiles() expected error for missing second file")
+		t.Fatal("ReadFiles() expected error when all files are missing")
 	}
-	if !strings.Contains(err.Error(), "failed to read OCMS error log") {
-		t.Fatalf("error = %v", err)
+	if !strings.Contains(err.Error(), "all missing") {
+		t.Fatalf("error = %v, want 'all missing'", err)
 	}
 }
 

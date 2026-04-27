@@ -31,7 +31,7 @@ func ReadSourceFileWithGuards(
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("%s file not found: %s", opts.SourceLabel, sourcePath)
+			return "", fmt.Errorf("%s file not found: %s: %w", opts.SourceLabel, sourcePath, err)
 		}
 		return "", fmt.Errorf("failed to stat %s file: %w", opts.SourceLabel, err)
 	}

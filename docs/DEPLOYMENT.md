@@ -126,14 +126,8 @@ For Drupal log analysis, additional setup is required:
 
 1. **Install jq**: `apt-get install jq` (required for multi-site config)
 2. **Create drupal-sites.json** in `/opt/logwatch-ai/` or `./configs/`
-3. **Set up watchdog export cron**:
-   ```bash
-   0 2 * * * /opt/logwatch-ai/scripts/generate-drupal-watchdog.sh --site production
-   ```
-4. **Set up analyzer cron**:
-   ```bash
-   15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -drupal-site production >> logs/cron.log 2>&1
-   ```
+3. **Add a `run_job` line** for each site to `/opt/logwatch-ai/run-cron.sh`
+   (see [CRON_SETUP.md](CRON_SETUP.md) and `scripts/run-cron.sh.example`).
 
 See `configs/drupal-sites.json.example` for configuration format.
 
@@ -206,14 +200,31 @@ Log-kind precedence:
 3. `default_log_kind`
 4. Built-in default `main`
 
+Log range — selects the live log vs the rotated copy from the previous
+day:
+
+| Range       | Resolves to                       | Use for                                |
+|-------------|-----------------------------------|----------------------------------------|
+| `yesterday` | `<INSTANCE_DIR>/logs/ocms.log.1`  | Daily cron (after midnight logrotate)  |
+| `today`     | `<INSTANCE_DIR>/logs/ocms.log`    | Ad-hoc analysis of the live log        |
+
+`-ocms-range yesterday` is the default — it mirrors
+`generate-logwatch.sh`'s `--range yesterday` and matches the typical
+post-logrotate cron schedule. Pass `-ocms-range today` to read the
+current file. Plain `.1` only — gzipped older rotations
+(`.2.gz` etc.) are not supported.
+
 Examples:
 
 ```bash
-# List OCMS sites and derived log paths
+# List OCMS sites and derived log paths (default range: yesterday)
 /opt/logwatch-ai/logwatch-analyzer -list-ocms-sites
 
-# Analyze the main log for an OCMS site
+# Daily cron job (uses yesterday by default — reads ocms.log.1)
 cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com
+
+# Ad-hoc analysis of the live log
+cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-range today
 
 # Analyze the error-only log for an OCMS site
 cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-log-kind error
@@ -228,7 +239,9 @@ not in the default `/etc/ocms/sites.conf` location.
 Reference samples:
 
 - `configs/ocms-sites.json.example` documents the logwatch-ai OCMS config.
-- `configs/ocms-crontab.example` shows multi-site analyzer cron entries.
+- For cron, add one `run_job "ocms/<site>" ...` line per site to
+  `/opt/logwatch-ai/run-cron.sh`. See [CRON_SETUP.md](CRON_SETUP.md) and
+  `scripts/run-cron.sh.example`.
 
 ## Optional: Finding Exclusions
 

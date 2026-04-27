@@ -1,340 +1,125 @@
 # Cron Setup Guide
 
-This guide explains how to set up automated daily logwatch analysis using cron.
+logwatch-ai uses a single shell script — `run-cron.sh` — that you customize
+for your host, plus **one** cron entry that calls it. Adding or removing a
+site is a one-line edit.
 
-## Overview
+## Quick start
 
-The logwatch-ai-go system requires two cron jobs:
+1. Copy the template into the install directory and make it executable:
+   ```bash
+   sudo cp /opt/logwatch-ai/scripts/run-cron.sh.example /opt/logwatch-ai/run-cron.sh
+   sudo chmod 755 /opt/logwatch-ai/run-cron.sh
+   ```
 
-1. **Root cron** (2:00 AM): Generate logwatch report
-2. **User cron** (2:15 AM): Analyze the report with AI
+2. Edit `run-cron.sh` and uncomment / fill in the lines for your sources:
+   ```bash
+   sudo $EDITOR /opt/logwatch-ai/run-cron.sh
+   ```
+   - **logwatch** (system source): one job pair (generate → analyze).
+     Suffix the lines with `|| exit` to gate the rest of the run on
+     logwatch success.
+   - **drupal**: per site listed in `drupal-sites.json` — one
+     `generate-drupal-watchdog.sh` line and one analyzer line.
+   - **ocms**: per site listed in `ocms-sites.json` — one analyzer line.
+     Reads `ocms.log.1` (yesterday's rotated log) by default; pass
+     `-ocms-range today` to read the live log.
 
-The 15-minute delay ensures logwatch has finished generating the report before analysis begins.
+3. Add **one** cron entry (root cron — logwatch needs `/var/log/*` access):
+   ```bash
+   sudo crontab -e
+   ```
+   Add:
+   ```cron
+   #@desc: Logwatch AI
+   7 2 * * * /opt/logwatch-ai/run-cron.sh >> /opt/logwatch-ai/logs/cron.log 2>&1
+   ```
+   Or in `/etc/cron.d/logwatch-ai`:
+   ```
+   7 2 * * * root /opt/logwatch-ai/run-cron.sh >> /opt/logwatch-ai/logs/cron.log 2>&1
+   ```
 
-## Prerequisites
+## How it works
 
-- Logwatch installed on the system
-- logwatch-ai-go installed (preferably to `/opt/logwatch-ai`)
-- `.env` file configured with API keys
-- For Drupal watchdog: `jq` installed (`apt-get install jq` or `brew install jq` / `port install jq`)
+`run-cron.sh` is a thin wrapper:
 
-## Step 1: Root Cron (Generate Logwatch)
+- One `run_job "tag" cmd...` per task.
+- Each job is independent — a failure on one doesn't abort the rest. Append
+  `|| exit` to make a job act as a gate.
+- A `flock` lockfile prevents overlap if a previous run is still going.
+- All output is timestamped and prefixed with `[source/site]` tags.
+- Exit code = number of failed jobs (0 = success).
 
-Logwatch typically requires root privileges to access all log files.
+## Sample log output
 
-### Edit Root Crontab
+A box with logwatch + 2 drupal sites + 3 ocms sites runs ~9 jobs:
 
-```bash
-sudo crontab -e
+```
+2026-04-27 02:07:00 begin run on prod-01 (user=root)
+2026-04-27 02:07:00 [logwatch/generate] start
+2026-04-27 02:07:42 [logwatch/generate] ok
+2026-04-27 02:07:42 [logwatch/analyze] start
+2026-04-27 02:08:08 [logwatch/analyze] ok
+2026-04-27 02:08:08 [drupal/italy/generate] start
+...
+2026-04-27 02:18:31 done — 9/9 ok, 0 failed
 ```
 
-### Add Cron Entry
+## Email on failure
 
-```bash
-# Generate logwatch report daily at 2:00 AM
-0 2 * * * /opt/logwatch-ai/scripts/generate-logwatch.sh
+Add `MAILTO` at the top of the crontab (or above the cron line in
+`/etc/cron.d/`):
+
+```cron
+MAILTO=admin@example.com
+
+7 2 * * * /opt/logwatch-ai/run-cron.sh >> /opt/logwatch-ai/logs/cron.log 2>&1
 ```
 
-### Alternative: Specify Custom Output Path
+`run-cron.sh` exits non-zero only when at least one job failed, so cron
+mails you on real problems only.
 
-```bash
-# Generate to custom location
-0 2 * * * LOGWATCH_OUTPUT_PATH=/var/log/logwatch-daily.txt /opt/logwatch-ai/scripts/generate-logwatch.sh
-```
+## Schedule customization
 
-### Verify Root Cron
+Edit the cron line directly:
 
-```bash
-sudo crontab -l
-```
-
-## Step 2: User Cron (Run Analyzer)
-
-The analyzer should run as a regular user (not root) for security.
-
-### Edit User Crontab
-
-```bash
-crontab -e
-```
-
-### Add Cron Entry
-
-```bash
-# Run logwatch AI analysis daily at 2:15 AM
-15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer >> logs/cron.log 2>&1
-```
-
-### Alternative: With Environment File
-
-```bash
-# Explicitly load environment
-15 2 * * * cd /opt/logwatch-ai && source .env && ./logwatch-analyzer >> logs/cron.log 2>&1
-```
-
-### Verify User Cron
-
-```bash
-crontab -l
-```
-
-## Step 3: Test the Setup
-
-### Manual Test of Logwatch Generation
-
-```bash
-sudo /opt/logwatch-ai/scripts/generate-logwatch.sh
-```
-
-Check output:
-```bash
-ls -lh /tmp/logwatch-output.txt
-```
-
-### Manual Test of Analyzer
-
-```bash
-cd /opt/logwatch-ai
-./logwatch-analyzer
-```
-
-### Monitor Logs
-
-```bash
-# Watch analyzer logs
-tail -f /opt/logwatch-ai/logs/logwatch-analyzer.log
-
-# Watch cron logs
-tail -f /opt/logwatch-ai/logs/cron.log
-```
-
-## Cron Schedule Examples
-
-### OCMS Multisite
-
-OCMS site logs are already written under each OCMS instance directory. Select a
-site by ID from `ocms-sites.json`; the analyzer verifies that ID in
-`/etc/ocms/sites.conf`. Log kind `main` derives
-`<INSTANCE_DIR>/logs/ocms.log`; `error` derives
-`<INSTANCE_DIR>/logs/error.log`; `all` checks both files in one run.
-
-See `configs/ocms-crontab.example` for a multi-site crontab sample and
-`configs/ocms-sites.json.example` for the logwatch-ai config format.
-The full schema is documented in `docs/DEPLOYMENT.md`.
-
-```bash
-# Main OCMS log
-15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com >> logs/cron.log 2>&1
-
-# Error-only OCMS log; normally omit this flag if ocms-sites.json already sets
-# sites.<id>.log_kind or default_log_kind.
-20 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site example_com -ocms-log-kind error >> logs/cron.log 2>&1
-
-# Main plus error OCMS logs in one report.
-25 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer -source-type ocms -ocms-site app_example_com -ocms-log-kind all >> logs/cron.log 2>&1
-```
-
-### Different Frequencies
-
-**Twice Daily** (morning and evening):
-```bash
-# Root cron
-0 2,14 * * * /opt/logwatch-ai/scripts/generate-logwatch.sh
-
-# User cron
-15 2,14 * * * cd /opt/logwatch-ai && ./logwatch-analyzer >> logs/cron.log 2>&1
-```
-
-**Weekly** (Sunday at 3:00 AM):
-```bash
-# Root cron
-0 3 * * 0 /opt/logwatch-ai/scripts/generate-logwatch.sh
-
-# User cron
-15 3 * * 0 cd /opt/logwatch-ai && ./logwatch-analyzer >> logs/cron.log 2>&1
-```
-
-**Hourly** (on the hour):
-```bash
-# Root cron
-0 * * * * LOGWATCH_RANGE='--range "1 hour"' /opt/logwatch-ai/scripts/generate-logwatch.sh
-
-# User cron
-5 * * * * cd /opt/logwatch-ai && ./logwatch-analyzer >> logs/cron.log 2>&1
-```
-
-## Environment Variables for Cron
-
-### Setting in Crontab
-
-```bash
-# Set environment variables at the top of crontab
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt
-
-# Then add cron jobs
-0 2 * * * /opt/logwatch-ai/scripts/generate-logwatch.sh
-```
-
-### Using .env File
-
-If cron doesn't load your .env automatically:
-
-```bash
-15 2 * * * cd /opt/logwatch-ai && export $(cat .env | xargs) && ./logwatch-analyzer >> logs/cron.log 2>&1
-```
+- Twice daily: `7 2,14 * * * ...`
+- Weekly (Sunday 03:07): `7 3 * * 0 ...`
 
 ## Troubleshooting
 
-### Cron Not Running
-
-1. **Check cron service is running**:
-   ```bash
-   sudo systemctl status cron     # Debian/Ubuntu
-   sudo systemctl status crond    # RHEL/CentOS
-   ```
-
-2. **Check system logs**:
-   ```bash
-   sudo grep CRON /var/log/syslog
-   ```
-
-3. **Verify cron has permission to execute scripts**:
-   ```bash
-   ls -l /opt/logwatch-ai/scripts/
-   # Should show -rwxr-xr-x
-   ```
-
-### Cron Runs But Fails
-
-1. **Check cron output logs**:
-   ```bash
-   cat /opt/logwatch-ai/logs/cron.log
-   ```
-
-2. **Test scripts manually**:
-   ```bash
-   # As root
-   sudo /opt/logwatch-ai/scripts/generate-logwatch.sh
-
-   # As user
-   cd /opt/logwatch-ai && ./logwatch-analyzer
-   ```
-
-3. **Check file permissions**:
-   ```bash
-   ls -l /tmp/logwatch-output.txt
-   # Should be readable by the user running analyzer
-   ```
-
-### No Notifications Received
-
-1. **Check analyzer logs**:
-   ```bash
-   tail -50 /opt/logwatch-ai/logs/logwatch-analyzer.log
-   ```
-
-2. **Verify Telegram configuration**:
-   ```bash
-   grep TELEGRAM /opt/logwatch-ai/.env
-   ```
-
-3. **Test Telegram bot**:
-   ```bash
-   curl https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getMe
-   ```
-
-## Email Notifications (Optional)
-
-Configure cron to send email on failures:
-
-### Install mail utilities
+**Cron isn't firing**
 
 ```bash
-# Debian/Ubuntu
-sudo apt-get install mailutils
-
-# RHEL/CentOS
-sudo yum install mailx
+sudo systemctl status cron       # Debian/Ubuntu
+sudo grep CRON /var/log/syslog | tail -20
 ```
 
-### Set MAILTO in crontab
+**A job failed**
+
+`run-cron.sh` logs `[<source>/<site>] FAILED rc=<n>` and continues. Repro
+manually:
 
 ```bash
-MAILTO=admin@example.com
-
-0 2 * * * /opt/logwatch-ai/scripts/generate-logwatch.sh
-15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer
-```
-
-Cron will email output only on errors (non-zero exit code).
-
-## Advanced Configuration
-
-### Redirect Output to Separate Files
-
-```bash
-# Separate stdout and stderr
-15 2 * * * cd /opt/logwatch-ai && ./logwatch-analyzer >> logs/cron-out.log 2>> logs/cron-err.log
-```
-
-### Add Timestamp to Logs
-
-```bash
-15 2 * * * cd /opt/logwatch-ai && echo "=== Run at $(date) ===" >> logs/cron.log && ./logwatch-analyzer >> logs/cron.log 2>&1
-```
-
-### Lock File to Prevent Concurrent Runs
-
-```bash
-15 2 * * * cd /opt/logwatch-ai && flock -n /tmp/logwatch-ai.lock ./logwatch-analyzer >> logs/cron.log 2>&1
-```
-
-## Security Considerations
-
-1. **Don't run analyzer as root** - Use a dedicated service user
-2. **Protect .env file** - Ensure proper file permissions:
-   ```bash
-   chmod 600 /opt/logwatch-ai/.env
-   ```
-3. **Rotate logs** - The application handles log rotation automatically
-4. **Limit cron email** - Only send on errors, not every run
-5. **Use absolute paths** - Always use full paths in cron commands
-
-## Monitoring
-
-### Check Last Run Time
-
-```bash
-# Check last modified time of output file
-stat /tmp/logwatch-output.txt
-
-# Check last database entry
-sqlite3 /opt/logwatch-ai/data/summaries.db "SELECT timestamp FROM summaries ORDER BY timestamp DESC LIMIT 1;"
-```
-
-### Monitor Cron Success Rate
-
-```bash
-# Count successful runs in the last 7 days
-grep "Analysis completed successfully" /opt/logwatch-ai/logs/logwatch-analyzer.log | tail -7
-```
-
-### Alert on Failures
-
-Add a wrapper script to send alerts on failures:
-
-```bash
-#!/bin/bash
 cd /opt/logwatch-ai
-if ! ./logwatch-analyzer >> logs/cron.log 2>&1; then
-    echo "Logwatch AI analysis failed at $(date)" | mail -s "Logwatch AI Alert" admin@example.com
-fi
+./logwatch-analyzer -source-type ocms -ocms-site <id>
 ```
 
-## See Also
+**Lockfile stuck after a crash**
 
-- [README.md](../README.md) - Main documentation
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Troubleshooting guide
-- Logwatch documentation: `/usr/share/doc/logwatch/`
+```bash
+sudo rm /var/lock/logwatch-ai-cron.lock
+```
+
+## Security
+
+- Cron runs as root because logwatch needs `/var/log/*` access. Drop
+  privileges per-job inside `run-cron.sh` if your site setup demands it.
+- `.env` should be `chmod 600`.
+- Logs go to `$INSTALL_DIR/logs/cron.log` (700 directory).
+
+## See also
+
+- [README.md](../README.md)
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+- `scripts/run-cron.sh.example` — the template

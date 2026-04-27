@@ -16,9 +16,8 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
-	"github.com/spf13/viper"
-
 	"github.com/olegiv/logwatch-ai-go/internal/exclusions"
+	"github.com/spf13/viper"
 )
 
 // CLIOptions holds command-line argument overrides
@@ -32,6 +31,7 @@ type CLIOptions struct {
 	OCMSSitesConfig   string // -ocms-sites-config: path to ocms-sites.json
 	OCMSSitesRegistry string // -ocms-sites-registry: path to OCMS sites.conf
 	OCMSLogKind       string // -ocms-log-kind: main, error, or all
+	OCMSLogRange      string // -ocms-range: today (live log) or yesterday (rotated .1)
 	ListOCMSSites     bool   // -list-ocms-sites: list available OCMS sites and exit
 	ExclusionsConfig  string // -exclusions-config: path to exclusions.json
 	ShowHelp          bool   // -help: show usage
@@ -51,6 +51,7 @@ func ParseCLI() *CLIOptions {
 	flag.StringVar(&opts.OCMSSitesConfig, "ocms-sites-config", "", "Path to ocms-sites.json configuration file")
 	flag.StringVar(&opts.OCMSSitesRegistry, "ocms-sites-registry", "", "Path to OCMS sites.conf registry (default: /etc/ocms/sites.conf)")
 	flag.StringVar(&opts.OCMSLogKind, "ocms-log-kind", "", "OCMS log kind for site registry mode: main, error, or all (default: main)")
+	flag.StringVar(&opts.OCMSLogRange, "ocms-range", "", "OCMS log range: yesterday (default, reads rotated .1 file) or today (reads live log)")
 	flag.BoolVar(&opts.ListOCMSSites, "list-ocms-sites", false, "List available OCMS sites from ocms-sites.json and exit")
 	flag.StringVar(&opts.ExclusionsConfig, "exclusions-config", "", "Path to exclusions.json configuration file")
 	flag.BoolVar(&opts.ShowHelp, "help", false, "Show usage information")
@@ -123,6 +124,7 @@ type Config struct {
 	// OCMS Settings (used when LogSourceType = "ocms")
 	OCMSLogsPath string
 	OCMSLogKind  string
+	OCMSLogRange string // "today" (live log) or "yesterday" (rotated .1)
 	OCMSLogPaths []OCMSLogPath
 
 	// Drupal Watchdog Settings (used when LogSourceType = "drupal_watchdog")
@@ -213,6 +215,7 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 		LogwatchOutputPath: viper.GetString("LOGWATCH_OUTPUT_PATH"),
 		OCMSLogsPath:       viper.GetString("OCMS_LOGS_PATH"),
 		OCMSLogKind:        OCMSLogKindMain,
+		OCMSLogRange:       OCMSLogRangeYesterday,
 		// Drupal settings are loaded from drupal-sites.json, not env vars
 		DrupalWatchdogFormat: "json", // default, overridden by site config
 		MaxLogSizeMB:         viper.GetInt("MAX_LOG_SIZE_MB"),
@@ -247,6 +250,9 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 		}
 		if cli.OCMSLogKind != "" {
 			config.OCMSLogKind = cli.OCMSLogKind
+		}
+		if cli.OCMSLogRange != "" {
+			config.OCMSLogRange = cli.OCMSLogRange
 		}
 	}
 
@@ -411,6 +417,12 @@ func (c *Config) applyOCMSMultiSiteConfig(cli *CLIOptions) error {
 	}
 	c.OCMSLogKind = logKind
 
+	logRange, err := NormalizeOCMSLogRange(c.OCMSLogRange)
+	if err != nil {
+		return err
+	}
+	c.OCMSLogRange = logRange
+
 	registrySite, registry, foundPath, err := loadOCMSRegistrySite(registryPath, sitesConfig.RegistryPath, siteID)
 	if err != nil {
 		return err
@@ -427,7 +439,7 @@ func (c *Config) applyOCMSMultiSiteConfig(cli *CLIOptions) error {
 	c.OCMSSitesRegistryPath = foundPath
 
 	if cliSourcePath == "" {
-		logPaths, err := registrySite.LogPaths(logKind)
+		logPaths, err := registrySite.LogPaths(logKind, logRange)
 		if err != nil {
 			return err
 		}
@@ -460,6 +472,11 @@ func (c *Config) applyOCMSSourcePathOverride(sourcePath, cliLogKind string) erro
 		return err
 	}
 	c.OCMSLogKind = logKind
+	logRange, err := NormalizeOCMSLogRange(c.OCMSLogRange)
+	if err != nil {
+		return err
+	}
+	c.OCMSLogRange = logRange
 	c.OCMSLogPaths = nil
 	return nil
 }

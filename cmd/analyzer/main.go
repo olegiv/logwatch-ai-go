@@ -612,7 +612,14 @@ func handleListOCMSSites(cli *config.CLIOptions) int {
 	fmt.Printf("Version: %s\n", sitesConfig.Version)
 	fmt.Printf("Default site: %s\n", sitesConfig.DefaultSite)
 	fmt.Printf("Default log kind: %s\n", getOCMSLogKindOrDefault(sitesConfig.DefaultLogKind))
-	fmt.Printf("OCMS sites registry: %s\n\n", registryFoundPath)
+	fmt.Printf("OCMS sites registry: %s\n", registryFoundPath)
+
+	logRange, err := config.NormalizeOCMSLogRange(cli.OCMSLogRange)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return exitFailure
+	}
+	fmt.Printf("Log range: %s\n\n", logRange)
 	fmt.Printf("Available sites:\n")
 
 	for _, siteID := range sitesConfig.ListSites() {
@@ -634,17 +641,17 @@ func handleListOCMSSites(cli *config.CLIOptions) int {
 				return exitFailure
 			}
 		}
-		mainLog, err := registrySite.LogPath(config.OCMSLogKindMain)
+		mainLog, err := registrySite.LogPath(config.OCMSLogKindMain, logRange)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return exitFailure
 		}
-		errorLog, err := registrySite.LogPath(config.OCMSLogKindError)
+		errorLog, err := registrySite.LogPath(config.OCMSLogKindError, logRange)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return exitFailure
 		}
-		selectedLogs, err := registrySite.LogPaths(logKind)
+		selectedLogs, err := registrySite.LogPaths(logKind, logRange)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return exitFailure

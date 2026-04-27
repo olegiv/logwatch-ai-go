@@ -19,6 +19,18 @@ const (
 	OCMSLogKindMain  = "main"
 	OCMSLogKindError = "error"
 	OCMSLogKindAll   = "all"
+
+	// OCMS log range — selects current vs rotated log files. yesterday
+	// is the default because the dominant use case is the daily cron
+	// running after midnight logrotate, where ocms.log.1 holds the full
+	// previous day's data.
+	OCMSLogRangeToday     = "today"
+	OCMSLogRangeYesterday = "yesterday"
+
+	// rotatedLogSuffix is appended to the derived log filename when the
+	// effective range is "yesterday". Plain numeric suffix only — gzipped
+	// older rotations (.2.gz etc.) are not supported in v1.
+	rotatedLogSuffix = ".1"
 )
 
 // OCMSSite represents one site entry from /etc/ocms/sites.conf.
@@ -66,6 +78,19 @@ func NormalizeOCMSLogKind(logKind string) (string, error) {
 		return OCMSLogKindAll, nil
 	default:
 		return "", fmt.Errorf("OCMS log kind must be 'main', 'error', or 'all' (got: %s)", logKind)
+	}
+}
+
+// NormalizeOCMSLogRange validates and normalizes an OCMS log range.
+// Empty input maps to yesterday (the daily-cron default).
+func NormalizeOCMSLogRange(logRange string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(logRange)) {
+	case "", OCMSLogRangeYesterday:
+		return OCMSLogRangeYesterday, nil
+	case OCMSLogRangeToday:
+		return OCMSLogRangeToday, nil
+	default:
+		return "", fmt.Errorf("OCMS log range must be 'today' or 'yesterday' (got: %s)", logRange)
 	}
 }
 
@@ -155,35 +180,58 @@ func LoadOCMSSitesConfig(configPath string) (*OCMSSitesConfig, string, error) {
 	return &config, foundPath, nil
 }
 
-// LogPath returns the derived log path for the requested log kind.
-func (s OCMSSite) LogPath(logKind string) (string, error) {
-	normalized, err := NormalizeOCMSLogKind(logKind)
+// LogPath returns the derived log path for the requested log kind and
+// range. Range "yesterday" appends `.1` to the filename (the rotated
+// log produced by the previous day's logrotate run).
+func (s OCMSSite) LogPath(logKind, logRange string) (string, error) {
+	normalizedKind, err := NormalizeOCMSLogKind(logKind)
 	if err != nil {
 		return "", err
 	}
-	if normalized == OCMSLogKindAll {
+	if normalizedKind == OCMSLogKindAll {
 		return "", fmt.Errorf("OCMS log kind 'all' resolves to multiple log paths")
 	}
 
-	switch normalized {
-	case OCMSLogKindError:
-		return filepath.Join(s.InstanceDir, "logs", "error.log"), nil
-	default:
-		return filepath.Join(s.InstanceDir, "logs", "ocms.log"), nil
+	normalizedRange, err := NormalizeOCMSLogRange(logRange)
+	if err != nil {
+		return "", err
 	}
+
+	var basename string
+	switch normalizedKind {
+	case OCMSLogKindError:
+		basename = "error.log"
+	default:
+		basename = "ocms.log"
+	}
+	if normalizedRange == OCMSLogRangeYesterday {
+		basename += rotatedLogSuffix
+	}
+	return filepath.Join(s.InstanceDir, "logs", basename), nil
 }
 
-// LogPaths returns all derived log paths for the requested log kind.
-func (s OCMSSite) LogPaths(logKind string) ([]OCMSLogPath, error) {
-	normalized, err := NormalizeOCMSLogKind(logKind)
+// LogPaths returns all derived log paths for the requested log kind and
+// range. Same `.1` rule as LogPath when range is "yesterday".
+func (s OCMSSite) LogPaths(logKind, logRange string) ([]OCMSLogPath, error) {
+	normalizedKind, err := NormalizeOCMSLogKind(logKind)
+	if err != nil {
+		return nil, err
+	}
+	normalizedRange, err := NormalizeOCMSLogRange(logRange)
 	if err != nil {
 		return nil, err
 	}
 
-	mainPath := filepath.Join(s.InstanceDir, "logs", "ocms.log")
-	errorPath := filepath.Join(s.InstanceDir, "logs", "error.log")
+	mainBase := "ocms.log"
+	errorBase := "error.log"
+	if normalizedRange == OCMSLogRangeYesterday {
+		mainBase += rotatedLogSuffix
+		errorBase += rotatedLogSuffix
+	}
+	mainPath := filepath.Join(s.InstanceDir, "logs", mainBase)
+	errorPath := filepath.Join(s.InstanceDir, "logs", errorBase)
 
-	switch normalized {
+	switch normalizedKind {
 	case OCMSLogKindAll:
 		return []OCMSLogPath{
 			{Kind: OCMSLogKindMain, Path: mainPath},
