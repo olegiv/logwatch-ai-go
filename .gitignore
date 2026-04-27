@@ -66,3 +66,6 @@ ocms-sites.json
 exclusions.json
 !testdata/**/exclusions.json
 !configs/exclusions.json.example
+
+# Deploy — host-specific, personal
+deploy/deploy.env
