@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-04-27
+
+### Added
+#### OCMS analyzer
+- **`-ocms-range <yesterday|today>` CLI flag.** Selects whether OCMS
+  reads the live log file or the rotated `.1` file from the previous
+  day's logrotate. Pass `today` for ad-hoc analysis of the current
+  log; `yesterday` is the default and matches the daily-cron use
+  case. See "Changed" for the default-behavior implications.
+
+#### Cron runner
+- **`scripts/run-cron.sh.example`** — new tracked template for a
+  unified daily cron runner. Replaces the multi-cron staggered
+  pattern with one root cron entry calling one script that lists
+  every job (logwatch + drupal sites + ocms sites) explicitly.
+  Operators copy the template to `/opt/logwatch-ai/run-cron.sh`,
+  customize the `run_job` lines for their sites, and add a single
+  cron line. `flock` lockfile in `/run` (root-only), continues past
+  per-source failures, supports a gate pattern (`run_job ... ||
+  exit`) for must-succeed-first jobs.
+
+#### Deploy auth template
+- **`deploy/deploy.env.example`** documents the SSH-target
+  convention used by deploy helpers, mirroring the
+  `it-digest-bot/deploy/` pattern. Real per-host `deploy.env` stays
+  gitignored.
+
+### Changed
+#### OCMS analyzer default
+- **OCMS now reads yesterday's rotated log by default.** With the
+  new `-ocms-range` flag defaulting to `yesterday`, derived OCMS
+  log paths get `.1` appended (`ocms.log.1`, `error.log.1`).
+  Previously the analyzer always read the live `ocms.log` — which
+  by 02:07 cron-time contained only ~2h of "today" since the
+  midnight rotation, silently missing yesterday's full data.
+  Mirrors `generate-logwatch.sh --range yesterday`. **Ad-hoc runs
+  that previously analyzed live logs now analyze yesterday's by
+  default; pass `-ocms-range today` for the old behavior.**
+
+#### OCMS reader tolerates missing rotated files
+- `ReadFiles` in multi-file (`all`) mode now skips a missing file
+  (e.g., `error.log.1` for a site with no errors) instead of
+  failing. Only fails if every requested file is missing. Removes
+  the operator-side workaround of pinning `log_kind: main` for
+  sites that never generate error logs.
+
+#### Documentation and install flow
+- `docs/CRON_SETUP.md` rewritten around the unified runner (one
+  cron entry → one script).
+- `docs/DEPLOYMENT.md`, `README.md`, `CLAUDE.md` updated to point
+  at `scripts/run-cron.sh.example` and the new OCMS log-range
+  flag.
+- `scripts/install.sh` no longer prints the staggered multi-cron
+  block; operator instructions now describe the template-copy
+  workflow.
+
+### Fixed
+#### Cron runner
+- **`run_job` propagates failure exit status to its caller.** The
+  previous implementation always returned 0 because the failure-
+  branch's last command (`failures=$((..))`) is an assignment that
+  returns 0, and bash resets `$?` to 0 after a bare `if/fi` block.
+  The documented `run_job ... || exit` gate pattern was therefore
+  ineffective — a failed `logwatch/generate` did not abort
+  downstream jobs, wasting API credits and processing invalid
+  inputs. (Caught by Codex review on PR #23.)
+
+#### OCMS reader file-read TOCTOU window
+- `internal/ocms/reader.go::ReadFiles` removed the redundant
+  `os.Stat` call; existence is now detected via
+  `errors.Is(err, fs.ErrNotExist)` on the read result. The not-
+  found error in `internal/analyzer/file_reader.go` is wrapped
+  with `%w` so `errors.Is` works on the chain. **Closes audit
+  finding I-04** (TOCTOU between Stat and ReadFile).
+
+### Security
+- **Cron runner lockfile moved out of world-writable `/var/lock`.**
+  The default `LOCK_FILE` is now `/run/logwatch-ai-cron.lock`
+  (root:root 0755 on systemd). On Debian/Ubuntu, `/var/lock` is
+  `1777` sticky world-writable; a local user could plant a symlink
+  there and trick the cron runner (running as root) into
+  truncating arbitrary files via `exec 9>"$LOCK_FILE"`. **Closes
+  audit finding L-06.**
+- **Cron runner warns when `flock(1)` is missing** instead of
+  silently disabling overlap protection. **Closes audit finding
+  I-05.**
+
+### Removed
+- `configs/ocms-crontab.example`. Superseded by
+  `scripts/run-cron.sh.example`. Operators add OCMS sites as
+  `run_job` lines in their host-specific `run-cron.sh`.
+
 ## [0.12.0] - 2026-04-27
 
 ### Added
@@ -726,7 +818,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.12.0...v0.14.0
 [0.12.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.9.0...v0.10.0
