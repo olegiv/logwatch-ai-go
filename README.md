@@ -9,6 +9,7 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 **Supported Log Sources:**
 - **Logwatch** - Linux system log aggregation (syslog, auth, mail, etc.)
 - **Drupal Watchdog** - PHP/Drupal application logs (JSON or drush export)
+- **OCMS** - OCMS application logs (single-site or multi-site with main/error/combined log kinds)
 
 **Supported LLM Providers:**
 - **Anthropic Claude** - Cloud-based AI (Claude Haiku 4.5 default; Sonnet 4.6 and Opus 4.7 supported)
@@ -19,7 +20,7 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 
 - **AI-Powered Analysis**: Uses LLM to analyze log reports (Claude AI or local models)
 - **Multiple LLM Providers**: Choose between Anthropic Claude (cloud), Ollama (local), or LM Studio (local)
-- **Multi-Source Support**: Analyze Logwatch reports or Drupal watchdog logs
+- **Multi-Source Support**: Analyze Logwatch reports, Drupal watchdog, or OCMS logs
 - **Smart Notifications**: Dual-channel Telegram notifications (archive + alerts)
 - **Historical Tracking**: SQLite database stores analysis history for trend detection
 - **Intelligent Preprocessing**: Handles large log files (up to 800KB-1MB) with smart content reduction

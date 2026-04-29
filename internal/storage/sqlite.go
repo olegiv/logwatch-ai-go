@@ -27,8 +27,8 @@ type Storage struct {
 type Summary struct {
 	ID              int64
 	Timestamp       time.Time
-	LogSourceType   string // "logwatch" or "drupal_watchdog"
-	SiteName        string // Site identifier (empty for logwatch, site ID for Drupal multi-site)
+	LogSourceType   string // "logwatch", "drupal_watchdog", or "ocms"
+	SiteName        string // Site identifier (empty for logwatch, site ID for Drupal/OCMS multi-site)
 	SystemStatus    string
 	Summary         string
 	CriticalIssues  []string
@@ -42,8 +42,8 @@ type Summary struct {
 
 // SourceFilter specifies filtering criteria for log source and site
 type SourceFilter struct {
-	LogSourceType string // Required: "logwatch" or "drupal_watchdog"
-	SiteName      string // Optional: site identifier for Drupal multi-site
+	LogSourceType string // Required: "logwatch", "drupal_watchdog", or "ocms"
+	SiteName      string // Optional: site identifier for Drupal/OCMS multi-site
 }
 
 // Database configuration constants (L-04 fix)

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 Logwatch AI Analyzer is an intelligent system log analyzer that uses LLM to analyze log reports and send actionable insights via Telegram. Go port optimized for single-binary deployment.
 
-**Log Sources:** Logwatch (Linux), Drupal Watchdog (PHP/Drupal)
+**Log Sources:** Logwatch (Linux), Drupal Watchdog (PHP/Drupal), OCMS
 **LLM Providers:** Anthropic Claude, Ollama, LM Studio
 **Key Tech:** Go 1.25+, pure Go SQLite (modernc.org/sqlite), Telegram Bot API
 
@@ -54,9 +54,10 @@ internal/
   ├── logging/     - Secure logger wrapper (credential filtering)
   ├── logwatch/    - Logwatch reader, preprocessing, token estimation
   ├── notification/- Telegram client and message formatting
+  ├── ocms/        - OCMS reader, preprocessor, prompts
   └── storage/     - SQLite operations (summaries table)
 scripts/           - Shell scripts (install.sh, generate-*.sh)
-configs/           - Configuration templates (.env.example, drupal-sites.json.example)
+configs/           - Configuration templates (.env.example, drupal-sites.json.example, ocms-sites.json.example)
 testdata/          - Test fixtures
 docs/              - Extended documentation (DEPLOYMENT.md, COST_OPTIMIZATION.md)
 ```
