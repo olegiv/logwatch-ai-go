@@ -8,7 +8,7 @@ Logwatch AI Analyzer is an intelligent system log analyzer that uses LLM to anal
 
 **Log Sources:** Logwatch (Linux), Drupal Watchdog (PHP/Drupal), OCMS
 **LLM Providers:** Anthropic Claude, Ollama, LM Studio
-**Key Tech:** Go 1.25+, pure Go SQLite (modernc.org/sqlite), Telegram Bot API
+**Key Tech:** Go 1.26+, pure Go SQLite (modernc.org/sqlite), Telegram Bot API
 
 **Status:** Production ready - deployed to Integration, QA, and Pre-Production on Debian 12.
 
