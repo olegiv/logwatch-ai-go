@@ -35,7 +35,7 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 
 ### Prerequisites
 
-- Go 1.25+ (for building from source)
+- Go 1.26+ (for building from source)
 - Logwatch installed and configured
 - **LLM Provider** (choose one):
   - Anthropic API key (for cloud-based Claude AI), OR
