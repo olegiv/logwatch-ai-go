@@ -341,6 +341,7 @@ cp bin/logwatch-analyzer-linux-amd64 logwatch-ai-deploy/logwatch-analyzer
 cp -r scripts logwatch-ai-deploy/
 cp configs/.env.example logwatch-ai-deploy/
 cp configs/drupal-sites.json.example logwatch-ai-deploy/
+cp configs/ocms-sites.json.example logwatch-ai-deploy/
 cp configs/exclusions.json.example logwatch-ai-deploy/
 chmod +x logwatch-ai-deploy/logwatch-analyzer
 chmod +x logwatch-ai-deploy/scripts/*.sh

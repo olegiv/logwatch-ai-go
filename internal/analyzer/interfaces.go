@@ -3,7 +3,7 @@
 
 // Package analyzer provides common interfaces for log analysis.
 // This abstraction layer enables support for multiple log source types
-// (logwatch, drupal_watchdog, etc.) through a unified interface.
+// (logwatch, drupal_watchdog, ocms) through a unified interface.
 package analyzer
 
 import "strings"
@@ -82,6 +82,6 @@ type PromptBuilder interface {
 	// nil for no exclusions.
 	GetUserPrompt(logContent, historicalContext string, contextualExclusions []string) string
 
-	// GetLogType returns the type identifier (e.g., "logwatch", "drupal_watchdog").
+	// GetLogType returns the type identifier (e.g., "logwatch", "drupal_watchdog", "ocms").
 	GetLogType() string
 }
