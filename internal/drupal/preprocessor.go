@@ -314,7 +314,9 @@ func (p *Preprocessor) normalizeLine(line string) string {
 	return line
 }
 
-// aggressiveCompress applies more aggressive compression when content is still too large.
+// aggressiveCompressWithLimit applies more aggressive compression when content
+// is still too large. The returned content is verified to fit maxTokens
+// (for maxTokens > 0).
 func (p *Preprocessor) aggressiveCompressWithLimit(content string, maxTokens int) string {
 	lines := strings.Split(content, "\n")
 
@@ -342,17 +344,11 @@ func (p *Preprocessor) aggressiveCompressWithLimit(content string, maxTokens int
 		}
 	}
 
-	// If still too many lines, limit to first N
-	maxLines := maxTokens / 10 // Rough estimate
-	if maxLines <= 0 {
-		maxLines = 1
-	}
-	if len(essential) > maxLines {
-		essential = essential[:maxLines]
-		essential = append(essential, fmt.Sprintf("\n[... truncated to %d lines due to size limits ...]", maxLines))
-	}
-
-	return strings.Join(essential, "\n")
+	// Enforce the budget with the shared verified binary-search trim: a
+	// line-count heuristic underestimates long lines (serialized payloads,
+	// stack traces) and over-trims short ones. The reader formats entries
+	// newest-first, so first-N retention keeps the most recent entries.
+	return analyzer.TrimToTokenBudget(strings.Join(essential, "\n"), maxTokens)
 }
 
 // aggressiveCompress preserves the previous fixed-budget behavior for tests and callers

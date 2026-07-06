@@ -278,8 +278,22 @@ func (t *TelegramClient) splitMessage(message string) []string {
 				chunk.Grow(maxMessageLength)
 				for _, r := range line {
 					if chunk.Len()+utf8.RuneLen(r) > maxMessageLength {
-						messages = append(messages, chunk.String())
+						flushed := chunk.String()
 						chunk.Reset()
+						// Never end a chunk on an unpaired trailing backslash:
+						// escapeMarkdown emits backslashes only in pairs, so an
+						// odd trailing run means this boundary would split an
+						// escape sequence — the chunk would end with a dangling
+						// `\` and the next would start with an unescaped special
+						// character, and Telegram rejects both with 400 "can't
+						// parse entities". Carry the dangling backslash over.
+						if countTrailingBackslashes(flushed)%2 == 1 {
+							flushed = flushed[:len(flushed)-1]
+							chunk.WriteByte('\\')
+						}
+						if flushed != "" {
+							messages = append(messages, flushed)
+						}
 					}
 					chunk.WriteRune(r)
 				}
@@ -314,6 +328,17 @@ func getLogSourceDisplayName(logSourceType string) string {
 	default:
 		return "Log"
 	}
+}
+
+// countTrailingBackslashes returns the number of consecutive backslash bytes
+// at the end of s. Safe on UTF-8 input: '\\' (0x5C) is ASCII and never
+// appears as a continuation byte of a multi-byte rune.
+func countTrailingBackslashes(s string) int {
+	n := 0
+	for i := len(s) - 1; i >= 0 && s[i] == '\\'; i-- {
+		n++
+	}
+	return n
 }
 
 // escapeMarkdown escapes special characters for Telegram MarkdownV2

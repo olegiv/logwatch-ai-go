@@ -47,25 +47,33 @@ func TestModelPricing_Cost(t *testing.T) {
 	tests := []struct {
 		name             string
 		model            string
+		inputTokens      int
+		outputTokens     int
 		cacheWriteTokens int
 		cacheReadTokens  int
-		wantCost         float64 // for 1M input + 1M output + cache amounts below
+		wantCost         float64
 	}{
-		{"Haiku 4.5 no cache", "claude-haiku-4-5", 0, 0, 6.0},                                       // 1 + 5
-		{"Sonnet 4.6 no cache", "claude-sonnet-4-6", 0, 0, 18.0},                                    // 3 + 15
-		{"Opus 4.7 no cache", "claude-opus-4-7", 0, 0, 30.0},                                        // 5 + 25
-		{"Haiku 4.5 with cache", "claude-haiku-4-5", 1_000_000, 1_000_000, 7_350_000 / 1_000_000.0}, // 6 + 1.25 + 0.10
+		{"Haiku 4.5 no cache", "claude-haiku-4-5", 1_000_000, 1_000_000, 0, 0, 6.0},                                       // 1 + 5
+		{"Sonnet 4.6 no cache", "claude-sonnet-4-6", 1_000_000, 1_000_000, 0, 0, 18.0},                                    // 3 + 15
+		{"Opus 4.7 no cache", "claude-opus-4-7", 1_000_000, 1_000_000, 0, 0, 30.0},                                        // 5 + 25
+		{"Haiku 4.5 with cache", "claude-haiku-4-5", 1_000_000, 1_000_000, 1_000_000, 1_000_000, 7_350_000 / 1_000_000.0}, // 6 + 1.25 + 0.10
+		// Negative provider-supplied counts are clamped to zero.
+		{"all negative counts clamp to zero", "claude-sonnet-4-6", -1_000_000, -2_000_000, -1, -1, 0.0},
+		{"negative input clamps, output still costed", "claude-sonnet-4-6", -500_000, 1_000_000, 0, 0, 15.0},
+		{"negative cache counts clamp", "claude-haiku-4-5", 1_000_000, 1_000_000, -1_000_000, -42, 6.0},
 	}
 
-	const in, out = 1_000_000, 1_000_000
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p, _ := ResolvePricing(tt.model)
-			got := p.Cost(in, out, tt.cacheWriteTokens, tt.cacheReadTokens)
+			got := p.Cost(tt.inputTokens, tt.outputTokens, tt.cacheWriteTokens, tt.cacheReadTokens)
 			const tolerance = 0.0001
 			if got < tt.wantCost-tolerance || got > tt.wantCost+tolerance {
 				t.Errorf("%s: Cost(%d, %d, %d, %d) = %.4f, want %.4f",
-					tt.model, in, out, tt.cacheWriteTokens, tt.cacheReadTokens, got, tt.wantCost)
+					tt.model, tt.inputTokens, tt.outputTokens, tt.cacheWriteTokens, tt.cacheReadTokens, got, tt.wantCost)
+			}
+			if got < 0 {
+				t.Errorf("Cost() = %.4f, must never be negative", got)
 			}
 		})
 	}
