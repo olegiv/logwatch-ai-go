@@ -33,6 +33,7 @@ package exclusions
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -299,18 +300,29 @@ func Load(explicitPath string) (*Config, string, error) {
 			continue
 		}
 
-		info, err := os.Stat(path)
+		// Open once and run all checks against the handle so the size that
+		// is validated belongs to the same inode that is read (no
+		// stat-then-read TOCTOU window).
+		file, err := os.Open(path) // #nosec G304 -- path comes from hardcoded search locations or the operator's -exclusions-config flag
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
+			return nil, "", fmt.Errorf("failed to open %s: %w", path, err)
+		}
+		// At most one file is ever opened: every branch after a successful
+		// Open returns from the function within this loop iteration.
+		defer func() { _ = file.Close() }()
+
+		info, err := file.Stat()
+		if err != nil {
 			return nil, "", fmt.Errorf("failed to stat %s: %w", path, err)
 		}
 		if info.Size() > maxConfigFileSize {
 			return nil, "", fmt.Errorf("exclusions config %s too large: %d bytes (max %d)", path, info.Size(), maxConfigFileSize)
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := io.ReadAll(file)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to read %s: %w", path, err)
 		}
