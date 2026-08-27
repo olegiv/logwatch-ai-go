@@ -28,8 +28,7 @@ func isRateLimitError(err error) bool {
 	}
 
 	// Check Anthropic SDK error type
-	var apiErr *anthropic.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*anthropic.APIError](err); ok {
 		return apiErr.IsRateLimitErr()
 	}
 
@@ -49,8 +48,7 @@ func isOverloadedError(err error) bool {
 	}
 
 	// Check Anthropic SDK error type
-	var apiErr *anthropic.APIError
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[*anthropic.APIError](err); ok {
 		return apiErr.IsOverloadedErr()
 	}
 
