@@ -18,16 +18,23 @@ type ModelPricing struct {
 // (e.g. "claude-haiku-4-5-20251001") resolve via longest-prefix match, so
 // we don't need a new entry every time Anthropic publishes a dated snapshot.
 var modelPricingTable = map[string]ModelPricing{
-	"claude-haiku-4-5":  {Input: 1.0, Output: 5.0, CacheWrite: 1.25, CacheRead: 0.10},
-	"claude-sonnet-4-6": {Input: 3.0, Output: 15.0, CacheWrite: 3.75, CacheRead: 0.30},
-	"claude-sonnet-4-5": {Input: 3.0, Output: 15.0, CacheWrite: 3.75, CacheRead: 0.30},
+	"claude-fable-5":    {Input: 10.0, Output: 50.0, CacheWrite: 12.50, CacheRead: 1.00},
+	"claude-opus-5":     {Input: 5.0, Output: 25.0, CacheWrite: 6.25, CacheRead: 0.50},
+	"claude-opus-4-8":   {Input: 5.0, Output: 25.0, CacheWrite: 6.25, CacheRead: 0.50},
 	"claude-opus-4-7":   {Input: 5.0, Output: 25.0, CacheWrite: 6.25, CacheRead: 0.50},
 	"claude-opus-4-6":   {Input: 5.0, Output: 25.0, CacheWrite: 6.25, CacheRead: 0.50},
+	"claude-sonnet-5":   {Input: 2.0, Output: 10.0, CacheWrite: 2.50, CacheRead: 0.20},
+	"claude-sonnet-4-6": {Input: 3.0, Output: 15.0, CacheWrite: 3.75, CacheRead: 0.30},
+	"claude-sonnet-4-5": {Input: 3.0, Output: 15.0, CacheWrite: 3.75, CacheRead: 0.30},
+	"claude-haiku-4-5":  {Input: 1.0, Output: 5.0, CacheWrite: 1.25, CacheRead: 0.10},
 }
 
-// fallbackPricing is used for unknown models. Sonnet-tier rates are a safe
-// default: they over-report for cheaper models (Haiku) rather than silently
-// reporting $0, which would hide cost in the database.
+// fallbackPricing is used for unknown models. Sonnet-tier rates avoid
+// silently reporting $0, which would hide cost in the database entirely.
+// Note the fallback is only approximate in either direction: it over-reports
+// for cheaper models (Haiku) and under-reports for any unlisted Opus- or
+// Fable-tier model. Add new families to modelPricingTable rather than relying
+// on it -- ResolvePricing returns ok=false so a miss is logged.
 var fallbackPricing = ModelPricing{Input: 3.0, Output: 15.0, CacheWrite: 3.75, CacheRead: 0.30}
 
 // ResolvePricing returns pricing for a model ID plus a boolean indicating

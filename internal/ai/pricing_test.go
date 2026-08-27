@@ -22,6 +22,14 @@ func TestResolvePricing(t *testing.T) {
 		{"Sonnet 4.5 dated", "claude-sonnet-4-5-20250929", true, 3.0, 15.0},
 		{"Opus 4.7", "claude-opus-4-7", true, 5.0, 25.0},
 		{"Opus 4.6", "claude-opus-4-6", true, 5.0, 25.0},
+		{"Fable 5", "claude-fable-5", true, 10.0, 50.0},
+		{"Opus 5", "claude-opus-5", true, 5.0, 25.0},
+		{"Opus 5 dated", "claude-opus-5-20260101", true, 5.0, 25.0},
+		{"Opus 4.8", "claude-opus-4-8", true, 5.0, 25.0},
+		{"Sonnet 5", "claude-sonnet-5", true, 2.0, 10.0},
+		// Sonnet 5 must not be captured by the older Sonnet prefixes, which
+		// would silently over-report it at 3/15 instead of 2/10.
+		{"Sonnet 5 dated", "claude-sonnet-5-20260101", true, 2.0, 10.0},
 		{"Unknown model falls back to Sonnet tier", "claude-imaginary-9-0", false, 3.0, 15.0},
 		{"Empty model falls back", "", false, 3.0, 15.0},
 	}
@@ -56,6 +64,10 @@ func TestModelPricing_Cost(t *testing.T) {
 		{"Haiku 4.5 no cache", "claude-haiku-4-5", 1_000_000, 1_000_000, 0, 0, 6.0},                                       // 1 + 5
 		{"Sonnet 4.6 no cache", "claude-sonnet-4-6", 1_000_000, 1_000_000, 0, 0, 18.0},                                    // 3 + 15
 		{"Opus 4.7 no cache", "claude-opus-4-7", 1_000_000, 1_000_000, 0, 0, 30.0},                                        // 5 + 25
+		{"Opus 5 no cache", "claude-opus-5", 1_000_000, 1_000_000, 0, 0, 30.0},                                            // 5 + 25
+		{"Sonnet 5 no cache", "claude-sonnet-5", 1_000_000, 1_000_000, 0, 0, 12.0},                                        // 2 + 10
+		{"Fable 5 no cache", "claude-fable-5", 1_000_000, 1_000_000, 0, 0, 60.0},                                          // 10 + 50
+		{"Fable 5 with cache", "claude-fable-5", 1_000_000, 1_000_000, 1_000_000, 1_000_000, 73.5},                        // 60 + 12.50 + 1.00
 		{"Haiku 4.5 with cache", "claude-haiku-4-5", 1_000_000, 1_000_000, 1_000_000, 1_000_000, 7_350_000 / 1_000_000.0}, // 6 + 1.25 + 0.10
 		// Negative provider-supplied counts are clamped to zero.
 		{"all negative counts clamp to zero", "claude-sonnet-4-6", -1_000_000, -2_000_000, -1, -1, 0.0},

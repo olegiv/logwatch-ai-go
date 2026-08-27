@@ -621,8 +621,14 @@ logwatch-ai-go/
 | Model                         | Input | Output | Cache write | Cache read |
 |-------------------------------|------:|-------:|------------:|-----------:|
 | claude-haiku-4-5-20251001 (default) | $1  | $5   | $1.25       | $0.10      |
+| claude-sonnet-5               | $2    | $10    | $2.50       | $0.20      |
 | claude-sonnet-4-6             | $3    | $15    | $3.75       | $0.30      |
+| claude-sonnet-4-5             | $3    | $15    | $3.75       | $0.30      |
+| claude-opus-5                 | $5    | $25    | $6.25       | $0.50      |
+| claude-opus-4-8               | $5    | $25    | $6.25       | $0.50      |
 | claude-opus-4-7               | $5    | $25    | $6.25       | $0.50      |
+| claude-opus-4-6               | $5    | $25    | $6.25       | $0.50      |
+| claude-fable-5                | $10   | $50    | $12.50      | $1.00      |
 
 Canonical pricing table lives in `internal/ai/pricing.go`.
 
