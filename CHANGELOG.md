@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-27
+
+### Added
+
+#### Claude 5 model pricing
+- **Cost tracking for the Claude 5 family.** `claude-fable-5`,
+  `claude-opus-5`, `claude-opus-4-8` and `claude-sonnet-5` are now priced
+  explicitly, so `cost_usd` is accurate when `CLAUDE_MODEL` names one of
+  them. They previously fell through to the Sonnet-tier fallback, which
+  under-reported Opus 5 and Opus 4.8 by 40% and Fable 5 by 70%. The default
+  model is unchanged (`claude-haiku-4-5-20251001`), so no already-recorded
+  cost is affected.
+
+### Changed
+
+#### Go 1.27 toolchain
+- **Minimum Go version is now 1.27** (was 1.26). CI resolves its toolchain
+  from `go.mod`, so it had been building and testing on 1.26.2 while release
+  binaries were compiled with 1.27.0 — the stdlib under test was not the
+  stdlib shipped. Building from source now requires Go 1.27+.
+- Lint tooling moved with it: golangci-lint v2.11.4 → v2.13.1 (Go 1.27
+  support landed in v2.13.0; the previous pin fails with an export-data
+  error and silently disables the lint gate), gofumpt v0.9.2 → v0.11.0.
+
+#### Documentation
+- OCMS is now listed as a supported log source in README, CLAUDE.md and
+  AGENTS.md. It shipped in v0.14.0, but the overview sections still named
+  only Logwatch and Drupal Watchdog.
+- `docs/TROUBLESHOOTING.md` no longer instructs readers to install Go 1.23.0
+  three lines after stating a newer minimum.
+
+### Security
+
+#### 2026-07-05 audit remediation
+- **M-03 — Drupal token budget not enforced.** The Drupal preprocessor's
+  final compression pass used an unverified `maxTokens/10` line-count
+  heuristic, letting long watchdog lines exceed the token budget on the
+  Ollama/LM Studio path. It now terminates in the shared
+  `analyzer.TrimToTokenBudget`, the verified binary-search trim hoisted out
+  of logwatch. Ships with a regression test that failed pre-fix at 20,491
+  tokens against a 1,000-token budget.
+- **L-07 — Telegram MarkdownV2 escape split across messages.**
+  `splitMessage` could strand an unpaired escape backslash at a chunk
+  boundary, causing Telegram to reject that message with 400 "can't parse
+  entities". Trailing backslashes are now counted and an unpaired one
+  carried into the next chunk. Ships with regression tests for pair and
+  odd-run boundaries.
+- **L-08 — negative cost values.** `ModelPricing.Cost` clamps all four token
+  counts to >= 0, so a misbehaving provider endpoint can never store a
+  negative `cost_usd`. Ships with a never-negative assertion.
+- **I-01 — stat-then-read TOCTOU.** File reads now open once and run every
+  guard (permission bits, size cap, age cap) against the open handle — in
+  `ReadSourceFileWithGuards`, `exclusions.Load`, and the Drupal reader's
+  inline copy.
+- **I-07 — SAST gate.** `gosec` is now part of the lint pipeline. The
+  `common-false-positives` preset was removed because it silently suppressed
+  all G304 findings including future ones; the four triaged sites carry
+  justified `#nosec` annotations.
+- **I-08 — dead code removed.** Legacy `ai.GetSystemPrompt` /
+  `ai.GetUserPrompt`, which predated the `PromptBuilder` interface and
+  bypassed exclusion injection, plus the unused `analyzer.Registry` type and
+  their tests.
+
+#### Dependency advisories
+- **GO-2026-5970 in `golang.org/x/text`** — `norm.Iter` could enter an
+  infinite loop on invalid UTF-8. Reachable from `NormalizePromptContent`,
+  which normalizes untrusted log content, so a malformed log line could hang
+  the analyzer. Closed by v0.41.0.
+- **GO-2026-5024 in `golang.org/x/sys`** (I-06) — Windows-only and
+  unreachable here; closed by the bump. `govulncheck` now reports zero
+  advisories at both symbol and module level.
+
+### Dependencies
+- `github.com/liushuangls/go-anthropic/v2` v2.18.0 → v2.25.0. v2.22.0 fixes
+  a typed-nil error when returning `*APIError` as the error interface — the
+  type driving rate-limit and overload retry detection; v2.24.0 makes the
+  combined rate-limit `tokens-*` headers optional.
+- `golang.org/x/text` v0.36.0 → v0.41.0 (see Security).
+- `modernc.org/sqlite` v1.50.0 → v1.57.0.
+- `golang.org/x/sys` v0.43.0 → v0.47.0.
+- Indirect: `fsnotify` v1.10.1, `go-colorable` v0.1.15, `go-isatty` v0.0.24,
+  `pelletier/go-toml/v2` v2.4.3, `go.yaml.in/yaml/v3` v3.0.5.
+  `modernc.org/libc` and `modernc.org/memory` are deliberately held at the
+  versions `modernc.org/sqlite` v1.57.0 requires.
+
 ## [0.14.0] - 2026-04-27
 
 ### Added
@@ -818,7 +903,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.12.0...v0.14.0
 [0.12.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.10.0...v0.11.0
