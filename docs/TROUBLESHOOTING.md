@@ -67,7 +67,7 @@ chmod +x ./bin/logwatch-analyzer
 **Symptom:**
 ```
 go: cannot find main module; see 'go help modules'
-or: requires Go 1.26 or later
+or: requires Go 1.27 or later
 ```
 
 **Cause:** Go version is too old.
@@ -79,8 +79,8 @@ go version
 
 # Update Go (Linux)
 sudo rm -rf /usr/local/go
-wget https://go.dev/dl/go1.23.0.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.23.0.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.27.0.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.27.0.linux-amd64.tar.gz
 
 # Update Go (macOS with Homebrew)
 brew upgrade go
