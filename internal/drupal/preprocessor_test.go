@@ -1,6 +1,7 @@
 package drupal
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -297,6 +298,11 @@ Failed to connect`
 	if !strings.Contains(result, "error") || !strings.Contains(result, "critical") || !strings.Contains(result, "Failed") {
 		t.Error("aggressiveCompress() should keep lines with critical keywords")
 	}
+
+	// Result must fit the configured token budget
+	if got := p.EstimateTokens(result); got > 100 {
+		t.Errorf("aggressiveCompress() produced %d tokens, want <= 100", got)
+	}
 }
 
 func TestProcessWithBudget(t *testing.T) {
@@ -323,4 +329,33 @@ func TestProcessWithBudget(t *testing.T) {
 			t.Fatalf("expected result to contain original content, got %q", result)
 		}
 	})
+}
+
+func TestProcessWithBudget_LongLines_EnforcesTokenBudget(t *testing.T) {
+	p := NewPreprocessor(150000)
+
+	// Synthetic watchdog export with very long single lines (serialized
+	// payloads), the case where a line-count heuristic underestimates the
+	// real token cost of each retained line.
+	var sb strings.Builder
+	sb.WriteString("## Critical/Error Entries (Full Detail)\n")
+	payload := strings.Repeat(`s:11:"stack_trace";`, 40)
+	for i := range 200 {
+		fmt.Fprintf(&sb, "[2026-07-05 10:%02d:00] ERROR | php | PDOException: SQLSTATE[HY000] %s\n", i%60, payload)
+	}
+
+	const budget = 1000
+	result, err := p.ProcessWithBudget(sb.String(), budget)
+	if err != nil {
+		t.Fatalf("ProcessWithBudget() error = %v", err)
+	}
+	if got := p.EstimateTokens(result); got > budget {
+		t.Fatalf("ProcessWithBudget() result = %d tokens, want <= %d", got, budget)
+	}
+	if !strings.Contains(result, "truncated to fit token budget") {
+		t.Error("expected truncation notice in result")
+	}
+	if !strings.Contains(result, "## Critical/Error Entries") {
+		t.Error("expected section header to be preserved")
+	}
 }

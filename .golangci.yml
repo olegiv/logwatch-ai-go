@@ -21,6 +21,7 @@ linters:
     - revive
     - dupl
     - gocyclo
+    - gosec
 
   settings:
     staticcheck:
@@ -49,10 +50,12 @@ linters:
 
   exclusions:
     generated: lax
-    presets:
-      - common-false-positives
     rules:
       - linters: [unparam, dupl]
+        path: _test\.go
+      # Tests legitimately read fixture paths, write temp files with relaxed
+      # permissions, and use predictable test data — not a production surface.
+      - linters: [gosec]
         path: _test\.go
       - linters: [gocyclo]
         path: cmd/analyzer/main\.go

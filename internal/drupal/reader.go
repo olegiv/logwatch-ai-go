@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -73,12 +74,23 @@ func NewReader(maxSizeMB int, enablePreprocessing bool, maxTokens int, format In
 // Read implements analyzer.LogReader.Read.
 // Reads and processes the Drupal watchdog file.
 func (r *Reader) Read(sourcePath string) (string, error) {
-	// Check file exists and get info
-	fileInfo, err := os.Stat(sourcePath)
+	// Open once and run all checks against the handle so the metadata that
+	// is validated always describes the same inode that is read (no
+	// stat-then-read TOCTOU window).
+	file, err := os.Open(sourcePath) // #nosec G304 -- operator-configured watchdog export path; no untrusted input channel exists
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("watchdog file not found: %s", sourcePath)
 		}
+		if os.IsPermission(err) {
+			return "", fmt.Errorf("watchdog file is not readable: %s", sourcePath)
+		}
+		return "", fmt.Errorf("failed to open watchdog file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
 		return "", fmt.Errorf("failed to stat watchdog file: %w", err)
 	}
 
@@ -95,7 +107,7 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 	}
 
 	// Read file content
-	content, err := os.ReadFile(sourcePath)
+	content, err := io.ReadAll(file)
 	if err != nil {
 		return "", fmt.Errorf("failed to read watchdog file: %w", err)
 	}

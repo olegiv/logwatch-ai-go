@@ -436,45 +436,7 @@ func (p *Preprocessor) isEssentialLine(line string) bool {
 	return false
 }
 
+// trimToTokenBudget delegates to the shared verified binary-search trim.
 func (p *Preprocessor) trimToTokenBudget(content string, maxTokens int) string {
-	if maxTokens <= 0 || p.EstimateTokens(content) <= maxTokens {
-		return content
-	}
-
-	lines := strings.Split(content, "\n")
-	truncationNotice := "[... truncated to fit token budget ...]"
-
-	low := 0
-	high := len(lines)
-
-	for low < high {
-		mid := (low + high + 1) / 2
-		candidate := strings.Join(lines[:mid], "\n")
-		if mid < len(lines) {
-			candidate += "\n" + truncationNotice
-		}
-
-		if p.EstimateTokens(candidate) <= maxTokens {
-			low = mid
-		} else {
-			high = mid - 1
-		}
-	}
-
-	if low == 0 {
-		if p.EstimateTokens(truncationNotice) <= maxTokens {
-			return truncationNotice
-		}
-		return ""
-	}
-
-	result := strings.Join(lines[:low], "\n")
-	if low < len(lines) {
-		candidate := result + "\n" + truncationNotice
-		if p.EstimateTokens(candidate) <= maxTokens {
-			return candidate
-		}
-	}
-
-	return result
+	return analyzer.TrimToTokenBudget(content, maxTokens)
 }

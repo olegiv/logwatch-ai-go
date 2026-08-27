@@ -893,6 +893,56 @@ func TestSplitMessage_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestSplitMessage_EscapePairBoundary(t *testing.T) {
+	client := &TelegramClient{
+		hostname: "test-server",
+	}
+
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			// "a" + 3000 escaped dots -> "a" + 6000 bytes of `\.` pairs; the
+			// 4096-byte boundary lands between a backslash and its escaped char.
+			name: "boundary splits backslash-dot pair",
+			raw:  "a" + strings.Repeat(".", 3000),
+		},
+		{
+			// Raw `\.` escapes to `\\\.`; the boundary lands inside an odd run
+			// of three backslashes — the case a naive suffix check misses.
+			name: "boundary splits odd backslash run",
+			raw:  "a" + strings.Repeat(`\.`, 1500),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			escaped := escapeMarkdown(tt.raw)
+			parts := client.splitMessage(escaped)
+
+			if len(parts) < 2 {
+				t.Fatalf("expected at least 2 parts, got %d", len(parts))
+			}
+			for i, part := range parts {
+				if len(part) > maxMessageLength {
+					t.Errorf("part %d exceeds max length: %d > %d", i, len(part), maxMessageLength)
+				}
+				if part == "" {
+					t.Errorf("part %d is empty", i)
+				}
+				trimmed := strings.TrimRight(part, `\`)
+				if (len(part)-len(trimmed))%2 == 1 {
+					t.Errorf("part %d ends with an unpaired trailing backslash", i)
+				}
+			}
+			if joined := strings.Join(parts, ""); joined != escaped {
+				t.Error("joined chunks do not round-trip to the escaped input")
+			}
+		})
+	}
+}
+
 func TestFormatMessage_NoEntriesReport(t *testing.T) {
 	tests := []struct {
 		name           string

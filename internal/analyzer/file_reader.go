@@ -5,6 +5,7 @@ package analyzer
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 )
@@ -19,6 +20,10 @@ type FileReadOptions struct {
 // ReadSourceFileWithGuards reads a text source file after common safety checks.
 // It standardizes not-found/readability/size/age errors and then delegates
 // content validation to validateContent.
+//
+// The file is opened once and all guards run against the open handle, so the
+// metadata that is validated always describes the same inode that is read —
+// closing the stat-then-read TOCTOU window a path swap could otherwise exploit.
 func ReadSourceFileWithGuards(
 	sourcePath string,
 	opts FileReadOptions,
@@ -28,11 +33,20 @@ func ReadSourceFileWithGuards(
 		return "", fmt.Errorf("content validator is required")
 	}
 
-	fileInfo, err := os.Stat(sourcePath)
+	file, err := os.Open(sourcePath) // #nosec G304 -- operator-supplied source path (CLI flag/env config); this cron-invoked CLI has no untrusted input channel
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("%s file not found: %s: %w", opts.SourceLabel, sourcePath, err)
 		}
+		if os.IsPermission(err) {
+			return "", fmt.Errorf("%s file is not readable: %s", opts.SourceLabel, sourcePath)
+		}
+		return "", fmt.Errorf("failed to open %s file: %w", opts.SourceLabel, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
 		return "", fmt.Errorf("failed to stat %s file: %w", opts.SourceLabel, err)
 	}
 
@@ -53,7 +67,7 @@ func ReadSourceFileWithGuards(
 		}
 	}
 
-	content, err := os.ReadFile(sourcePath)
+	content, err := io.ReadAll(file)
 	if err != nil {
 		return "", fmt.Errorf("failed to read %s file: %w", opts.SourceLabel, err)
 	}

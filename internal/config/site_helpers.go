@@ -40,7 +40,7 @@ func loadFirstExistingFile(explicitPath, notFoundLabel string, searchPaths []str
 			continue
 		}
 
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- path comes from hardcoded search locations or an operator-supplied CLI flag
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue

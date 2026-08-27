@@ -47,7 +47,15 @@ func ResolvePricing(model string) (ModelPricing, bool) {
 }
 
 // Cost computes total USD cost for a request given token counts.
+// Counts are clamped to >= 0: a buggy or misbehaving endpoint could report
+// negative usage, which must never produce a negative cost_usd in the
+// database.
 func (p ModelPricing) Cost(inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens int) float64 {
+	inputTokens = max(inputTokens, 0)
+	outputTokens = max(outputTokens, 0)
+	cacheWriteTokens = max(cacheWriteTokens, 0)
+	cacheReadTokens = max(cacheReadTokens, 0)
+
 	const perMillion = 1_000_000.0
 	return float64(inputTokens)/perMillion*p.Input +
 		float64(outputTokens)/perMillion*p.Output +
