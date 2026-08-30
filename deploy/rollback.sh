@@ -27,14 +27,15 @@ set -euo pipefail
 
 # shellcheck source=lib.sh source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+REMOTE_LIB="$(dirname "${BASH_SOURCE[0]}")/remote-lib.sh"
 
-DO_BIN=0; DO_RUNNER=0; DO_SCRIPTS=0; DO_DB=0; HOST_ARG=""
+DO_BIN=0; DO_RUNNER=0; DO_SCRIPTS=0; DO_DB=0; LENIENT=0; HOST_ARG=""
 for arg in "$@"; do
   case "$arg" in
     --runner)  DO_RUNNER=1 ;;
     --scripts) DO_SCRIPTS=1 ;;
     --db)      DO_DB=1 ;;
-    --all)     DO_BIN=1; DO_RUNNER=1; DO_SCRIPTS=1 ;;
+    --all)     DO_BIN=1; DO_RUNNER=1; DO_SCRIPTS=1; LENIENT=1 ;;
     -*)        echo "error: unknown flag $arg" >&2; exit 2 ;;
     *)         HOST_ARG="$arg" ;;
   esac
@@ -47,15 +48,12 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
 
 echo "==> Rolling back on ${HOST}:${INSTALL_DIR}"
 ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" DO_BIN="$DO_BIN" DO_RUNNER="$DO_RUNNER" \
-            DO_SCRIPTS="$DO_SCRIPTS" DO_DB="$DO_DB" 'bash -s' <<'__REMOTE_ROLLBACK__'
+            DO_SCRIPTS="$DO_SCRIPTS" DO_DB="$DO_DB" LENIENT="$LENIENT" 'bash -s' \
+  < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_ROLLBACK__'
 set -euo pipefail
 cd "$INSTALL_DIR"
 
-if pgrep -f 'run-cron\.sh|logwatch-analyzer' >/dev/null 2>&1; then
-    echo "ABORT: a run is in flight — wait for it to finish" >&2
-    pgrep -a -f 'run-cron\.sh|logwatch-analyzer' >&2
-    exit 1
-fi
+acquire_cron_lock || exit 1
 
 if [ "$DO_BIN" = 1 ]; then
     # logwatch-analyzer is a symlink to a versioned regular file. Rolling back
@@ -86,9 +84,20 @@ fi
 
 if [ "$DO_RUNNER" = 1 ]; then
     if [ ! -f ./run-cron.sh.prev ]; then
-        echo "error: no run-cron.sh.prev to roll back to." >&2
-        exit 1
+        # deploy.sh only writes .prev for components it actually replaced, so
+        # a missing backup means this deployment left the runner alone. Under
+        # --all that must not abort the remaining components.
+        if [ "$LENIENT" = 1 ]; then
+            echo "  run-cron.sh unchanged by the deployment — skipping"
+            DO_RUNNER=0
+        else
+            echo "error: no run-cron.sh.prev to roll back to." >&2
+            exit 1
+        fi
     fi
+fi
+
+if [ "$DO_RUNNER" = 1 ]; then
     mv ./run-cron.sh ./run-cron.sh.failed
     mv ./run-cron.sh.prev ./run-cron.sh
     bash -n ./run-cron.sh && echo "runner rolled back, syntax OK"
@@ -106,34 +115,48 @@ if [ "$DO_SCRIPTS" = 1 ]; then
         echo "  restored scripts/$f (mode $mode)"
         restored=$((restored + 1))
     done
-    [ "$restored" -eq 0 ] && echo "  no scripts/*.prev backups to restore"
+    if [ "$restored" -eq 0 ]; then
+        echo "  no scripts/*.prev backups — helpers unchanged by the deployment"
+    fi
 fi
 
 if [ "$DO_DB" = 1 ]; then
-    cd ./data
-    backup=$(ls -1t summaries.db.pre-* 2>/dev/null | head -1)
-    if [ -z "$backup" ]; then
-        echo "error: no summaries.db.pre-* backup found" >&2
+    # Resolve the same path deploy.sh backed up: .env may set an absolute or
+    # non-default DATABASE_PATH, in which case the snapshot does not live in
+    # ./data at all.
+    if ! db=$(resolve_db); then
+        echo "error: database disabled in .env — nothing to restore" >&2
         exit 1
     fi
+    backup=$(ls -1t "$db".pre-* 2>/dev/null | head -1)
+    if [ -z "$backup" ]; then
+        echo "error: no $(basename "$db").pre-* backup found beside $db" >&2
+        exit 1
+    fi
+    cd "$(dirname "$db")"
+    db=$(basename "$db")
+    backup=$(basename "$backup")
     echo "restoring from $backup"
     # Move the ENTIRE suspect state aside, sidecars included. Leaving a stale
     # -wal/-shm/-journal beside the restored snapshot lets SQLite replay those
     # pages into it on the next open, silently reconstructing data from the
     # database we are trying to abandon — or corrupting the restore outright.
-    mv summaries.db summaries.db.suspect
+    # The live file may be absent precisely because a failed release removed
+    # it — that is a state where --db is most needed, so guard the move.
+    [ -f "$db" ] && mv "$db" "$db.suspect"
     for ext in -wal -shm -journal; do
-        [ -f "summaries.db$ext" ] && mv "summaries.db$ext" "summaries.db.suspect$ext"
+        [ -f "$db$ext" ] && mv "$db$ext" "$db.suspect$ext"
     done
-    cp -p "$backup" summaries.db
+    cp -p "$backup" "$db"
     # Restore the snapshot's own sidecars if the backup captured any; a
     # sqlite3 .backup produces a single consistent file and needs none.
     for ext in -wal -shm -journal; do
-        [ -f "$backup$ext" ] && cp -p "$backup$ext" "summaries.db$ext"
+        [ -f "$backup$ext" ] && cp -p "$backup$ext" "$db$ext"
     done
-    ls -l
+    ls -l "$db"*
 fi
 __REMOTE_ROLLBACK__
+)
 
 cat <<EOF
 

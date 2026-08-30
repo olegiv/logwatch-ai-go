@@ -46,6 +46,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REMOTE_LIB="$(dirname "${BASH_SOURCE[0]}")/remote-lib.sh"
 
 STAGE_ONLY=0
 HOST_ARG=""
@@ -181,48 +182,33 @@ if [[ $STAGE_ONLY == 1 ]]; then
   exit 0
 fi
 
-# ------------------------------- 4. guard + db backup + binary swap (atomic)
-# The in-flight guard, the database backup and the binary swap run in ONE
-# remote session, in that order, so the guard actually protects the backup.
-echo "==> Installing (guard, database backup, binary swap)"
+# ------------------------------- 4. lock + db backup + binary swap (atomic)
+# The cron lock, the database backup and the binary swap run in ONE remote
+# session so the lock is held across the entire critical section.
+echo "==> Installing (cron lock, database backup, binary swap)"
 ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" STAGE_DIR="$STAGE_DIR" \
-            REMOTE_BIN="$REMOTE_BIN" VERSION="$VERSION" 'bash -s' <<'__REMOTE_INSTALL__'
+            REMOTE_BIN="$REMOTE_BIN" VERSION="$VERSION" 'bash -s' \
+  < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_INSTALL__'
 set -euo pipefail
 cd "$INSTALL_DIR"
 
-# --- guard first: everything below assumes no writer is active -------------
-if pgrep -f 'run-cron\.sh|logwatch-analyzer' >/dev/null 2>&1; then
-    echo "ABORT: a run is in flight" >&2
-    pgrep -a -f 'run-cron\.sh|logwatch-analyzer' >&2
-    exit 1
-fi
+acquire_cron_lock || exit 1
 
 # --- database backup -------------------------------------------------------
-# Honour the deployment's own settings: a host may disable the database
-# entirely or point it somewhere other than the default path.
-enabled=true
-dbrel=./data/summaries.db
-if [ -r .env ]; then
-    v=$(sed -n 's/^[[:space:]]*ENABLE_DATABASE[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '"'"'"' \r' | tr 'A-Z' 'a-z')
-    [ -n "$v" ] && enabled="$v"
-    v=$(sed -n 's/^[[:space:]]*DATABASE_PATH[[:space:]]*=[[:space:]]*//p' .env | tail -1 | tr -d '"'"'"' \r')
-    [ -n "$v" ] && dbrel="$v"
-fi
-
-if [ "$enabled" != "true" ]; then
-    echo "  database disabled (ENABLE_DATABASE=$enabled) — skipping backup"
-elif [ ! -f "$dbrel" ]; then
-    echo "  no database at $dbrel — skipping backup"
+if ! db=$(resolve_db); then
+    echo "  database disabled in .env — skipping backup"
+elif [ ! -f "$db" ]; then
+    echo "  no database at $db — skipping backup"
 else
-    dst="$dbrel.pre-$VERSION"
+    dst="$db.pre-$VERSION"
     if command -v sqlite3 >/dev/null 2>&1; then
-        sqlite3 "$dbrel" ".backup '$dst'"        # WAL-aware, consistent
+        sqlite3 "$db" ".backup '$dst'"        # WAL-aware, consistent
     else
-        # No sqlite3: a plain copy is only safe because of the guard above.
+        # No sqlite3: a plain copy is only safe because we hold the lock.
         # Copy any sidecars too, so the snapshot is self-consistent.
-        cp -p "$dbrel" "$dst"
+        cp -p "$db" "$dst"
         for ext in -wal -shm -journal; do
-            [ -f "$dbrel$ext" ] && cp -p "$dbrel$ext" "$dst$ext"
+            [ -f "$db$ext" ] && cp -p "$db$ext" "$dst$ext"
         done
     fi
     ls -l "$dst"
@@ -236,30 +222,46 @@ if [ ! -e ./logwatch-analyzer ]; then
     exit 1
 fi
 
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+
 if [ -L ./logwatch-analyzer ]; then
     prev_target=$(readlink -f ./logwatch-analyzer)
 else
-    # A regular file here means the install predates this tooling (made by
-    # scripts/install.sh or `make install`). Move it aside to a versioned name
-    # BEFORE the symlink swap, otherwise the swap would delete the only copy
-    # and rollback would produce a self-referential symlink.
-    legacy="logwatch-analyzer-legacy-$(date -u +%Y%m%dT%H%M%SZ)"
-    mv ./logwatch-analyzer "./$legacy"
+    # A regular file here means the install predates this tooling. Hard-link
+    # it to a versioned name rather than moving it: the stable path keeps
+    # working right up to the final atomic rename, so a cron launch in the
+    # interval cannot hit ENOENT and a failure below leaves production intact.
+    legacy="logwatch-analyzer-legacy-$stamp"
+    ln ./logwatch-analyzer "./$legacy" 2>/dev/null || cp -p ./logwatch-analyzer "./$legacy"
     prev_target="$INSTALL_DIR/$legacy"
     echo "  legacy regular-file install preserved as $legacy"
 fi
+
+# Redeploying a version that is already live would otherwise write straight
+# through to the running inode (ETXTBSY) and leave prev-target aimed at the
+# artifact we just overwrote, making rollback a no-op. Preserve it first.
+if [ "$prev_target" = "$INSTALL_DIR/$REMOTE_BIN" ]; then
+    preserved="$REMOTE_BIN.prev-$stamp"
+    mv "./$REMOTE_BIN" "./$preserved"
+    prev_target="$INSTALL_DIR/$preserved"
+    echo "  same version already live — previous artifact kept as $preserved"
+fi
+
 echo "  rollback target: $prev_target"
 "$prev_target" -version 2>&1 | head -1 || true
-
 printf '%s\n' "$prev_target" > ./.logwatch-analyzer.prev-target
 
-install -m 0755 -o root -g root "$STAGE_DIR/logwatch-analyzer" "./$REMOTE_BIN"
+# Install under a unique name, then rename: never write into a live inode.
+install -m 0755 -o root -g root "$STAGE_DIR/logwatch-analyzer" "./$REMOTE_BIN.incoming.$$"
+mv -Tf "./$REMOTE_BIN.incoming.$$" "./$REMOTE_BIN"
+
 ln -sfn "$INSTALL_DIR/$REMOTE_BIN" ./logwatch-analyzer.new
 mv -Tf ./logwatch-analyzer.new ./logwatch-analyzer
 
 ls -la ./logwatch-analyzer ./"$REMOTE_BIN"
 ./logwatch-analyzer -version
 __REMOTE_INSTALL__
+)
 
 # ------------------------------------------------------ 5. scripts + runner
 if [[ $WITH_SCRIPTS == 0 ]]; then
@@ -290,10 +292,11 @@ else
       read -r -p "Install the updated scripts? [y/N] " reply
     fi
     if [[ ${reply:-n} =~ ^[Yy]$ ]]; then
-      ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" STAGE_DIR="$STAGE_DIR" 'bash -s' <<'__REMOTE_SCRIPTS__'
+      ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" STAGE_DIR="$STAGE_DIR" 'bash -s' \
+        < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_SCRIPTS__'
 set -euo pipefail
 cd "$INSTALL_DIR"
-pgrep -f 'run-cron\.sh|logwatch-analyzer' >/dev/null 2>&1 && { echo "ABORT: run in flight" >&2; exit 1; }
+acquire_cron_lock || exit 1
 mkdir -p ./scripts
 
 # run-cron.sh lives at the top level: that is the path cron invokes.
@@ -324,6 +327,7 @@ for f in generate-logwatch.sh generate-drupal-watchdog.sh helper.sh; do
 done
 ls -la ./run-cron.sh ./scripts/
 __REMOTE_SCRIPTS__
+)
     else
       echo "  skipped — scripts left as deployed"
     fi

@@ -26,6 +26,7 @@ set -euo pipefail
 
 # shellcheck source=lib.sh source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+REMOTE_LIB="$(dirname "${BASH_SOURCE[0]}")/remote-lib.sh"
 HOST=$(resolve_host "${1:-}") || exit 1
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
@@ -41,7 +42,8 @@ echo
 # script the moment a gate fails, before we could print the summary.
 rc=0
 ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" LOCK_FILE="$LOCK_FILE" \
-            OLD_LOCK_FILE="$OLD_LOCK_FILE" 'bash -s' <<'__REMOTE_PREFLIGHT__' || rc=$?
+            OLD_LOCK_FILE="$OLD_LOCK_FILE" 'bash -s' \
+  < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_PREFLIGHT__'
 set -u
 gate_fail=0
 
@@ -148,29 +150,45 @@ date '+  now: %H:%M %Z'
 
 echo
 echo "===== GATE 4: disk ====="
-# df is captured and tested explicitly: the remote script runs without
-# `pipefail`, so `df | tail | awk` would mask a df failure behind awk's
-# successful exit on zero records and let the gate report success.
-if ! df_out=$(df -Pk "$INSTALL_DIR" 2>&1); then
-    echo "  FAILED   df could not inspect $INSTALL_DIR: $df_out"
-    gate_fail=1
-else
-    df_line=$(printf '%s\n' "$df_out" | tail -1)
-    avail=$(printf '%s\n' "$df_line" | awk '{print $4}')
-    if ! [ "$avail" -ge 0 ] 2>/dev/null; then
-        echo "  FAILED   could not parse df output: $df_line"
-        gate_fail=1
-    else
-        printf '  %sK free on %s (%s)\n' "$avail" \
-            "$(printf '%s\n' "$df_line" | awk '{print $6}')" \
-            "$(printf '%s\n' "$df_line" | awk '{print $1}')"
-        if [ "$avail" -lt 102400 ]; then
-            echo "  FAILED   under 100MB free"
-            gate_fail=1
-        else
-            echo "  ok       >=100MB free"
-        fi
+# The gate must cover what the deploy actually allocates: a new binary in
+# INSTALL_DIR plus a full-size .pre-<version> database snapshot beside the
+# database. With a configured DATABASE_PATH those can be different
+# filesystems, so each is checked against its own.
+#
+# df is captured and tested explicitly rather than piped into awk: this
+# script runs without `pipefail`, so a df failure would otherwise be masked
+# by awk exiting cleanly on zero records and the gate would report success.
+check_free() {   # $1 = path, $2 = KiB required, $3 = label
+    local path="$1" need="$2" label="$3" out line avail
+    if ! out=$(df -Pk "$path" 2>&1); then
+        echo "  FAILED   df could not inspect $path: $out"; gate_fail=1; return
     fi
+    line=$(printf '%s\n' "$out" | tail -1)
+    avail=$(printf '%s\n' "$line" | awk '{print $4}')
+    if ! [ "$avail" -ge 0 ] 2>/dev/null; then
+        echo "  FAILED   could not parse df output for $path: $line"; gate_fail=1; return
+    fi
+    printf '  %s: %s KiB free on %s, needs %s KiB\n' \
+        "$label" "$avail" "$(printf '%s\n' "$line" | awk '{print $6}')" "$need"
+    if [ "$avail" -lt "$need" ]; then
+        echo "  FAILED   insufficient space for $label"; gate_fail=1
+    else
+        echo "  ok       $label"
+    fi
+}
+
+# Binary plus headroom: ~25 MiB covers a 12 MiB artifact kept alongside its
+# predecessor, with room for logs written during the run.
+check_free "$INSTALL_DIR" 25600 "install dir (binary + headroom)"
+
+if db=$(resolve_db) && [ -f "$db" ]; then
+    db_kib=$(du -k "$db" | awk '{print $1}')
+    # The snapshot is a full copy, so require its size again plus 10% slack.
+    need=$(( db_kib + db_kib / 10 + 1024 ))
+    echo "  database: $db (${db_kib} KiB)"
+    check_free "$(dirname "$db")" "$need" "database backup"
+else
+    echo "  database: disabled or absent — no snapshot space needed"
 fi
 du -sh "$INSTALL_DIR" "$INSTALL_DIR/logs" "$INSTALL_DIR/data" 2>&1
 
@@ -206,6 +224,7 @@ else
 fi
 exit "$gate_fail"
 __REMOTE_PREFLIGHT__
+) || rc=$?
 
 echo
 if [ "$rc" -eq 0 ]; then
