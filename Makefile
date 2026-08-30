@@ -11,7 +11,8 @@ GOFUMPT_VERSION       := v0.11.0
 
 .PHONY: all help build build-prod build-linux-amd64 build-darwin-arm64 build-all-platforms \
         test test-race coverage coverage-html fmt fmt-check vet lint lint-go check deps tidy clean install-tools \
-        install run
+        install run \
+        preflight deploy deploy-stage rollback status
 
 # Version info from git
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -120,6 +121,25 @@ install: build-prod ## Install optimized binary to system directory
 
 run: build ## Build and run the application
 	@$(BUILD_DIR)/$(BINARY_NAME)
+
+# --- Remote deployment -------------------------------------------------
+# Target host comes from deploy/deploy.env (gitignored); override with
+# HOST=... on the command line. Always run `make preflight` first.
+
+preflight: ## Inspect the production host read-only and check deploy gates
+	@./deploy/preflight.sh $(HOST)
+
+deploy-stage: ## Build and upload to the host's /tmp without touching the install
+	@./deploy/deploy.sh --stage-only $(HOST)
+
+deploy: ## Build, verify and install to the production host
+	@./deploy/deploy.sh $(HOST)
+
+rollback: ## Revert the deployed binary to the .prev backup
+	@./deploy/rollback.sh $(HOST)
+
+status: ## Show deployed version, schedule and recent run output
+	@./deploy/status.sh $(HOST)
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
