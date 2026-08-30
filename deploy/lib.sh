@@ -38,3 +38,24 @@ EOF
   [[ $host == *@* ]] || host="root@$host"
   printf '%s\n' "$host"
 }
+
+# require_root_target HOST
+#
+# The remote workflow is root-only: it writes under /opt, uses
+# `install -o root -g root`, reads a 0600 .env and takes a lock in /run,
+# and it never invokes sudo. Accepting a non-root target would let a
+# deploy build and upload before failing at install time, with a staging
+# directory that is not root-owned despite deploy.sh's guarantee.
+require_root_target() {
+  local host="$1"
+  if [[ ${host%%@*} != root ]]; then
+    cat >&2 <<EOF
+error: target '$host' is not root.
+
+  These scripts perform root-only operations on the remote host and do
+  not elevate. Deploy as root, or add an elevation mechanism first.
+EOF
+    return 1
+  fi
+  return 0
+}

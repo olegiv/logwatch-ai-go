@@ -51,8 +51,36 @@ resolve_db() {
 # could start immediately after the probe and overlap a database copy or a
 # script swap. pgrep is still checked afterwards to catch a manual run
 # started outside run-cron.sh, which holds no lock.
+# resolve_lock_file
+#
+# Prints the lock path the deployed runner will actually use. An explicit
+# LOCK_FILE in the environment wins; otherwise the crontab entry is
+# consulted, because pinning LOCK_FILE there is the documented workaround
+# when /run is unsuitable (rollback.sh recommends exactly that), and a
+# deploy that locked the default path would not exclude such a run. The
+# deployed script's own default is the next source, then the built-in.
+resolve_lock_file() {
+    local from_cron from_script
+    if [ -n "${LOCK_FILE:-}" ]; then printf '%s' "$LOCK_FILE"; return 0; fi
+
+    from_cron=$(crontab -l -u root 2>/dev/null \
+        | grep -F 'run-cron.sh' \
+        | grep -oE 'LOCK_FILE=[^[:space:]]+' \
+        | tail -1 | cut -d= -f2- | tr -d "\"'")
+    if [ -n "$from_cron" ]; then printf '%s' "$from_cron"; return 0; fi
+
+    # shellcheck disable=SC2016 # the ${...} here is literal text being matched
+    from_script=$(sed -n 's/^[[:space:]]*LOCK_FILE="\${LOCK_FILE:-\([^}]*\)}".*/\1/p' \
+        "$INSTALL_DIR/run-cron.sh" 2>/dev/null | tail -1)
+    if [ -n "$from_script" ]; then printf '%s' "$from_script"; return 0; fi
+
+    printf '%s' /run/logwatch-ai-cron.lock
+}
+
 acquire_cron_lock() {
-    local lock="${LOCK_FILE:-/run/logwatch-ai-cron.lock}"
+    local lock
+    lock=$(resolve_lock_file)
+    echo "  cron lock: $lock"
     if ! command -v flock >/dev/null 2>&1; then
         echo "WARN: flock(1) not on PATH — falling back to a pgrep check only" >&2
     else

@@ -44,6 +44,7 @@ done
 if [[ $DO_RUNNER == 0 && $DO_SCRIPTS == 0 && $DO_DB == 0 ]]; then DO_BIN=1; fi
 
 HOST=$(resolve_host "$HOST_ARG") || exit 1
+require_root_target "$HOST" || exit 1
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
 
 echo "==> Rolling back on ${HOST}:${INSTALL_DIR}"
@@ -128,7 +129,11 @@ if [ "$DO_DB" = 1 ]; then
         echo "error: database disabled in .env — nothing to restore" >&2
         exit 1
     fi
-    backup=$(ls -1t "$db".pre-* 2>/dev/null | head -1)
+    # Match only main snapshots: the glob also catches .pre-<v>-wal/-shm/
+    # -journal, and because cp -p preserves source mtimes a WAL is often the
+    # newest match — `ls -t | head -1` would then install WAL bytes as the
+    # database.
+    backup=$(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$' | head -1)
     if [ -z "$backup" ]; then
         echo "error: no $(basename "$db").pre-* backup found beside $db" >&2
         exit 1

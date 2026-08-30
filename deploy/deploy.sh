@@ -59,6 +59,7 @@ for arg in "$@"; do
 done
 
 HOST=$(resolve_host "$HOST_ARG") || exit 1
+require_root_target "$HOST" || exit 1
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
 REF="${REF:-}"
 WITH_SCRIPTS=1
@@ -77,7 +78,10 @@ trap cleanup EXIT
 
 # --------------------------------------------------------- 1. build source
 if [[ -n $REF ]]; then
-  WORKTREE=$(mktemp -d -t logwatch-deploy)
+  # GNU mktemp requires at least three X's in a template and rejects a
+  # bare -t prefix, so the documented REF workflow must not rely on the
+  # BSD/macOS form. This spelling works on both.
+  WORKTREE=$(mktemp -d "${TMPDIR:-/tmp}/logwatch-deploy.XXXXXXXXXX")
   rmdir "$WORKTREE"                       # git worktree add wants a fresh path
   echo "==> Building from a clean worktree at ${REF}"
   git -C "$REPO_ROOT" worktree add --detach --quiet "$WORKTREE" "$REF"
@@ -194,6 +198,13 @@ cd "$INSTALL_DIR"
 
 acquire_cron_lock || exit 1
 
+# --- clear stale component backups -----------------------------------------
+# rollback --all uses .prev existence as proof that THIS deployment replaced a
+# component. Backups left by an earlier deployment would otherwise make --all
+# roll an unchanged component back an extra release, so they are cleared up
+# front; the stages below recreate .prev only for what they actually replace.
+rm -f ./run-cron.sh.prev ./scripts/*.prev
+
 # --- database backup -------------------------------------------------------
 if ! db=$(resolve_db); then
     echo "  database disabled in .env — skipping backup"
@@ -206,6 +217,10 @@ else
     else
         # No sqlite3: a plain copy is only safe because we hold the lock.
         # Copy any sidecars too, so the snapshot is self-consistent.
+        # Redeploying the same version reuses $dst. Clear any sidecars left
+        # by an earlier snapshot first, or rollback --db would copy a stale
+        # -wal beside a fresh snapshot and replay it into the restore.
+        rm -f "$dst" "$dst"-wal "$dst"-shm "$dst"-journal
         cp -p "$db" "$dst"
         for ext in -wal -shm -journal; do
             [ -f "$db$ext" ] && cp -p "$db$ext" "$dst$ext"

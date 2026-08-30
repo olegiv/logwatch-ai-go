@@ -28,6 +28,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 REMOTE_LIB="$(dirname "${BASH_SOURCE[0]}")/remote-lib.sh"
 HOST=$(resolve_host "${1:-}") || exit 1
+require_root_target "$HOST" || exit 1
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
 LOCK_FILE="${LOCK_FILE:-/run/logwatch-ai-cron.lock}"
@@ -200,14 +201,27 @@ grep -aE 'done|FAILED' "$INSTALL_DIR/logs/cron.log" 2>/dev/null | tail -n 8 || e
 
 echo
 echo "===== 9. database ====="
-ls -l "$INSTALL_DIR/data/"summaries.db* 2>&1
-if command -v sqlite3 >/dev/null 2>&1; then
-    sqlite3 "$INSTALL_DIR/data/summaries.db" \
-      "select 'rows=' || count(*) from summaries;
-       select log_source_type || ' / ' || site_name || ' : ' || count(*) || '  last=' || max(timestamp)
-         from summaries group by log_source_type, site_name;" 2>&1
+# Resolve the configured path and never touch a database that is disabled or
+# absent: sqlite3 CREATES an empty file when handed a missing path, which
+# would make this supposedly read-only preflight mutate the installation.
+if ! db=$(resolve_db); then
+    echo "  database disabled in .env — skipped"
+elif [ ! -f "$db" ]; then
+    echo "  no database at $db — skipped (not creating one)"
 else
-    echo "(sqlite3 CLI absent — fine, the binary bundles modernc.org/sqlite)"
+    ls -l "$db"* 2>&1
+    if command -v sqlite3 >/dev/null 2>&1; then
+        # -readonly where supported; the file: URI is the portable fallback.
+        sqlite3 -readonly "$db" 'select 1;' >/dev/null 2>&1 \
+            && SQ=(sqlite3 -readonly "$db") \
+            || SQ=(sqlite3 "file:$db?mode=ro")
+        "${SQ[@]}" \
+          "select 'rows=' || count(*) from summaries;
+           select log_source_type || ' / ' || site_name || ' : ' || count(*) || '  last=' || max(timestamp)
+             from summaries group by log_source_type, site_name;" 2>&1
+    else
+        echo "  (sqlite3 CLI absent — fine, the binary bundles modernc.org/sqlite)"
+    fi
 fi
 
 echo
