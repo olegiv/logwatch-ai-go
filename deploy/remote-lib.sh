@@ -35,8 +35,15 @@ read_env() {
 # that is the working directory the analyzer runs from.
 resolve_db() {
     local enabled dbrel
-    enabled=$(read_env ENABLE_DATABASE true | tr '[:upper:]' '[:lower:]')
-    [ "$enabled" = "true" ] || return 1
+    enabled=$(read_env ENABLE_DATABASE true)
+    # The application reads this with viper.GetBool, i.e. strconv.ParseBool,
+    # which accepts 1/t/T/TRUE/true/True as true. Accepting only the literal
+    # "true" here would report a live database as disabled and silently skip
+    # its backup.
+    case "$enabled" in
+        1|t|T|true|TRUE|True) ;;
+        *) return 1 ;;
+    esac
     dbrel=$(read_env DATABASE_PATH ./data/summaries.db)
     case "$dbrel" in
         /*) printf '%s' "$dbrel" ;;
@@ -63,10 +70,18 @@ resolve_lock_file() {
     local from_cron from_script
     if [ -n "${LOCK_FILE:-}" ]; then printf '%s' "$LOCK_FILE"; return 0; fi
 
+    # `grep -v '^[[:space:]]*#'` matters: an operator who pins LOCK_FILE and
+    # leaves the previous entry commented out would otherwise have the dead
+    # line win, and the deploy would lock a path cron never touches.
+    # The sed alternation preserves a quoted path containing spaces, which a
+    # `[^[:space:]]+` match truncates.
     from_cron=$(crontab -l -u root 2>/dev/null \
+        | grep -v '^[[:space:]]*#' \
         | grep -F 'run-cron.sh' \
-        | grep -oE 'LOCK_FILE=[^[:space:]]+' \
-        | tail -1 | cut -d= -f2- | tr -d "\"'")
+        | sed -nE 's/.*LOCK_FILE="([^"]*)".*/\1/p;
+                   s/.*LOCK_FILE='"'"'([^'"'"']*)'"'"'.*/\1/p;
+                   s/.*LOCK_FILE=([^"'"'"'[:space:]][^[:space:]]*).*/\1/p' \
+        | tail -1)
     if [ -n "$from_cron" ]; then printf '%s' "$from_cron"; return 0; fi
 
     # shellcheck disable=SC2016 # the ${...} here is literal text being matched

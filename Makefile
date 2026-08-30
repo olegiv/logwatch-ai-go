@@ -12,7 +12,7 @@ GOFUMPT_VERSION       := v0.11.0
 .PHONY: all help build build-prod build-linux-amd64 build-darwin-arm64 build-all-platforms \
         test test-race coverage coverage-html fmt fmt-check vet lint lint-go check deps tidy clean install-tools \
         install run \
-        preflight deploy deploy-stage rollback status
+        preflight deploy deploy-stage rollback status lint-sh test-sh
 
 # Version info from git
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -86,9 +86,15 @@ vet: ## Run go vet
 lint-go: ## Run golangci-lint
 	golangci-lint run ./...
 
-lint: lint-go ## Run all linters
+lint-sh: ## Lint shell scripts with shellcheck
+	shellcheck -x deploy/*.sh
 
-check: fmt-check vet lint test ## Run the full local quality gate
+test-sh: ## Run shell unit tests for the deploy helpers
+	bash deploy/lib_test.sh
+
+lint: lint-go lint-sh ## Run all linters
+
+check: fmt-check vet lint test test-sh ## Run the full local quality gate
 
 deps: ## Download Go module dependencies
 	$(GO) mod download

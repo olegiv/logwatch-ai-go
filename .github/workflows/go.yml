@@ -28,3 +28,13 @@ jobs:
 
     - name: Test
       run: go test -v ./...
+
+    # The deploy/ scripts run on Linux but are authored on macOS, so the
+    # runner is the only place the GNU coreutils behaviour they depend on is
+    # actually exercised (a BSD-only mktemp template once made REF deploys
+    # fail on Linux while working locally). shellcheck is preinstalled here.
+    - name: Shell lint
+      run: shellcheck -x deploy/*.sh
+
+    - name: Shell tests
+      run: bash deploy/lib_test.sh

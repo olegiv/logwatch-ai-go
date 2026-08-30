@@ -6,9 +6,10 @@
 #
 #   binary  — a bad binary shows up as -version failing, SIGILL, or
 #             analyzer errors in the logs.
-#   runner  — a bad runner shows up as cron.log being EMPTY, because a
-#             failed `exec 9>"$LOCK_FILE"` kills the shell before it can
-#             log anything.
+#   runner  — a bad runner shows up as the nightly jobs never running. Note
+#             a failed `exec 9>"$LOCK_FILE"` does NOT kill the shell; the
+#             runner carries on, `flock -n 9` fails on the unopened fd, and
+#             it exits 0 claiming another run is in progress.
 #   scripts — a bad generate-* script shows up as that job alone failing
 #             while the rest of the run succeeds.
 #
@@ -99,10 +100,21 @@ if [ "$DO_RUNNER" = 1 ]; then
 fi
 
 if [ "$DO_RUNNER" = 1 ]; then
+    # Check the backup BEFORE installing it. run-cron.sh is gitignored and
+    # hand-maintained, so .prev is whatever the last deploy happened to copy
+    # and has never been syntax-checked. As the left side of `&&` a failing
+    # `bash -n` is exempt from errexit, so validating after the swap would
+    # print the error and still report success.
+    if ! bash -n ./run-cron.sh.prev; then
+        echo "ABORT: run-cron.sh.prev has a syntax error — not restoring it." >&2
+        echo "       The current runner is untouched. Fix the backup by hand." >&2
+        exit 1
+    fi
     mv ./run-cron.sh ./run-cron.sh.failed
     mv ./run-cron.sh.prev ./run-cron.sh
-    bash -n ./run-cron.sh && echo "runner rolled back, syntax OK"
-    grep -n 'LOCK_FILE=' ./run-cron.sh
+    echo "runner rolled back, syntax OK"
+    grep -n 'LOCK_FILE=' ./run-cron.sh \
+        || echo "WARN: restored runner pins no LOCK_FILE — it will use the built-in default"
 fi
 
 if [ "$DO_SCRIPTS" = 1 ]; then
@@ -133,7 +145,10 @@ if [ "$DO_DB" = 1 ]; then
     # -journal, and because cp -p preserves source mtimes a WAL is often the
     # newest match — `ls -t | head -1` would then install WAL bytes as the
     # database.
-    backup=$(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$' | head -1)
+    # `|| true` is required: with no match `ls` exits 2 and `grep -v` exits 1
+    # on empty input, so under `pipefail` the assignment itself trips errexit
+    # and the script dies here — before the guard below can explain why.
+    backup=$(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$' | head -1 || true)
     if [ -z "$backup" ]; then
         echo "error: no $(basename "$db").pre-* backup found beside $db" >&2
         exit 1

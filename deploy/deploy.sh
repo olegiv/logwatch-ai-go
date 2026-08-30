@@ -68,11 +68,31 @@ WITH_SCRIPTS=1
 WORKTREE=""
 STAGE_DIR=""
 cleanup() {
-  [[ -n $WORKTREE ]] && git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" 2>/dev/null
-  # shellcheck disable=SC2029 # STAGE_DIR is deliberately expanded client-side;
-  # it is validated against a strict pattern before ever being used here.
-  [[ -n $STAGE_DIR ]] && ssh "$HOST" "rm -rf -- '$STAGE_DIR'" 2>/dev/null
-  return 0
+  # Capture and re-return the real exit status first. Each step is guarded
+  # independently and reports failure: a bare `cmd1 && cmd2` here would abort
+  # the function on cmd1's failure (errexit DOES apply to the final command of
+  # an && list inside a function), skipping the remote cleanup and replacing
+  # the script's status with the trap's — a successful deploy exiting 128.
+  local rc=$?
+
+  if [[ -n $WORKTREE ]]; then
+    git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" 2>/dev/null \
+      || echo "WARN: could not remove worktree $WORKTREE — remove it by hand" >&2
+  fi
+
+  if [[ -n $STAGE_DIR ]]; then
+    # STAGE_DIR is validated at assignment, but the validation-failure path
+    # exits through this trap, so re-check before handing it to a root rm.
+    if valid_stage_dir "$STAGE_DIR"; then
+      # shellcheck disable=SC2029 # deliberately expanded client-side
+      ssh -n "$HOST" "rm -rf -- '$STAGE_DIR'" 2>/dev/null \
+        || echo "WARN: staging dir $STAGE_DIR left on $HOST — remove it by hand" >&2
+    else
+      echo "WARN: not removing unvalidated staging path: '$STAGE_DIR'" >&2
+    fi
+  fi
+
+  return "$rc"
 }
 trap cleanup EXIT
 
@@ -101,7 +121,7 @@ VERSION="$(git -C "$SRC" describe --tags --always --dirty)"
 # VERSION reaches remote shell commands and filesystem paths. git permits tags
 # containing shell metacharacters and slashes, so anything outside a strict
 # filename-safe set is rejected rather than quoted around.
-if [[ ! $VERSION =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+if ! valid_version "$VERSION"; then
   echo "error: refusing to deploy version string '$VERSION'" >&2
   echo "       Only [A-Za-z0-9._+-] are allowed (no slashes or metacharacters)." >&2
   exit 1
@@ -150,7 +170,7 @@ echo "    binary sha256: $BIN_SHA"
 # --------------------------------------------------------------- 3. stage
 echo "==> Creating a root-owned staging directory on ${HOST}"
 STAGE_DIR=$(ssh "$HOST" 'd=$(mktemp -d /tmp/logwatch-deploy.XXXXXXXXXX) && chmod 700 "$d" && printf %s "$d"')
-if [[ ! $STAGE_DIR =~ ^/tmp/logwatch-deploy\.[A-Za-z0-9]+$ ]]; then
+if ! valid_stage_dir "$STAGE_DIR"; then
   echo "error: unexpected staging directory from target: '$STAGE_DIR'" >&2
   exit 1
 fi
@@ -284,7 +304,9 @@ if [[ $WITH_SCRIPTS == 0 ]]; then
 else
   echo "==> Comparing deployed helper scripts against the built ref"
   # shellcheck disable=SC2029 # INSTALL_DIR is deliberately expanded client-side
-  deployed_sums=$(ssh "$HOST" "cd ${INSTALL_DIR} && sha256sum run-cron.sh scripts/*.sh 2>/dev/null" || true)
+  # -n is essential: without it ssh forwards this script's stdin to the remote
+  # command and consumes it, leaving the prompt below at EOF.
+  deployed_sums=$(ssh -n "$HOST" "cd ${INSTALL_DIR} && sha256sum run-cron.sh scripts/*.sh 2>/dev/null" || true)
   changed=0
   check_one() {  # $1 = remote path, $2 = local path
     [[ -f $2 ]] || return 0
@@ -303,8 +325,19 @@ else
     if [[ ${ASSUME_YES:-0} == 1 ]]; then
       reply=y
       echo "  ASSUME_YES=1 — installing the updated scripts"
-    else
-      read -r -p "Install the updated scripts? [y/N] " reply
+    elif [[ ! -t 0 ]]; then
+      # `read` returns 1 at EOF, which errexit turns into a silent abort — and
+      # by this point the binary is already swapped. Refuse explicitly instead
+      # of dying without a message.
+      cat >&2 <<EOF
+error: stdin is not a terminal, so the scripts prompt cannot be answered.
+       The binary was installed; scripts were NOT. Re-run with ASSUME_YES=1
+       to install them, or SKIP_SCRIPTS=1 to leave them alone deliberately.
+EOF
+      exit 1
+    elif ! read -r -p "Install the updated scripts? [y/N] " reply; then
+      echo "error: could not read a reply — scripts NOT installed." >&2
+      exit 1
     fi
     if [[ ${reply:-n} =~ ^[Yy]$ ]]; then
       ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" STAGE_DIR="$STAGE_DIR" 'bash -s' \

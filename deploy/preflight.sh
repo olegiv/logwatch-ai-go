@@ -8,10 +8,13 @@
 #
 #   GATE 1  CPU supports GOAMD64=v3 (build-linux-amd64 targets v3; a v3
 #           binary on a pre-Haswell CPU dies at exec).
-#   GATE 2  $LOCK_FILE's directory is writable. run-cron.sh does
-#           `exec 9>"$LOCK_FILE"`, and a failed exec redirection kills a
-#           non-interactive bash instantly — before the first log line — so
-#           the whole nightly run would vanish with an empty cron.log.
+#   GATE 2  $LOCK_FILE's directory is writable. If it is not, run-cron.sh's
+#           `exec 9>"$LOCK_FILE"` fails but the shell KEEPS GOING (verified:
+#           a failed exec redirection does not terminate non-interactive
+#           bash). `flock -n 9` then fails on the unopened fd, the runner
+#           treats that as "another run holds the lock" and exits 0. So cron
+#           reports success every night while nothing is analyzed, and
+#           cron.log gains only a plausible "already in progress" line.
 #   GATE 3  No analyzer/cron run currently in flight.
 #   GATE 4  At least 100 MB free on the install filesystem.
 #
@@ -47,6 +50,15 @@ ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" LOCK_FILE="$LOCK_FILE" \
   < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_PREFLIGHT__'
 set -u
 gate_fail=0
+
+# remote-lib.sh's read_env greps a RELATIVE .env, so every resolve_db call
+# below depends on this cd. Without it an `ssh host bash -s` payload runs in
+# /root, silently falls back to the built-in defaults, and GATE 4 measures the
+# wrong filesystem while reporting success.
+if ! cd "$INSTALL_DIR"; then
+    echo "FATAL: cannot cd to $INSTALL_DIR — is logwatch-ai installed on this host?"
+    exit 1
+fi
 
 echo "===== 1. host ====="
 hostname -f; uname -srm; date; uptime
@@ -132,7 +144,8 @@ if touch "$probe" 2>/dev/null; then
     echo "  ok       $lock_dir is writable"
     rm -f "$probe"
 else
-    echo "  FAILED   $lock_dir NOT writable — run-cron.sh would die silently at 'exec 9>'"
+    echo "  FAILED   $lock_dir NOT writable — run-cron.sh would skip every run,"
+    echo "           exiting 0 with a false 'already in progress' line"
     gate_fail=1
 fi
 echo "--- existing lock files ---"

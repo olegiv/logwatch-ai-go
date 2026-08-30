@@ -59,3 +59,23 @@ EOF
   fi
   return 0
 }
+
+# valid_version VERSION
+#
+# True when VERSION is safe to use as both a filename component and an
+# interpolated word in a remote command. git permits tags containing shell
+# metacharacters and slashes, and the version reaches both, so anything
+# outside a strict filename-safe set is rejected rather than quoted around.
+valid_version() {
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]
+}
+
+# valid_stage_dir PATH
+#
+# True when PATH is a staging directory this tooling created. The value comes
+# from the target's stdout, which can carry shell-profile banners, and it is
+# handed to `rm -rf` running as root — so it is matched against the exact
+# shape `mktemp -d /tmp/logwatch-deploy.XXXXXXXXXX` produces.
+valid_stage_dir() {
+  [[ $1 =~ ^/tmp/logwatch-deploy\.[A-Za-z0-9]+$ ]]
+}
