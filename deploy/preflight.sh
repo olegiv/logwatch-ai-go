@@ -148,11 +148,30 @@ date '+  now: %H:%M %Z'
 
 echo
 echo "===== GATE 4: disk ====="
-df -Pk "$INSTALL_DIR" | tail -1 | awk '{
-    printf "  %s free on %s (%s)\n", $4 "K", $6, $1
-    if ($4 < 102400) { print "  FAILED   under 100MB free"; exit 3 }
-    print "  ok       >=100MB free"
-}' || gate_fail=1
+# df is captured and tested explicitly: the remote script runs without
+# `pipefail`, so `df | tail | awk` would mask a df failure behind awk's
+# successful exit on zero records and let the gate report success.
+if ! df_out=$(df -Pk "$INSTALL_DIR" 2>&1); then
+    echo "  FAILED   df could not inspect $INSTALL_DIR: $df_out"
+    gate_fail=1
+else
+    df_line=$(printf '%s\n' "$df_out" | tail -1)
+    avail=$(printf '%s\n' "$df_line" | awk '{print $4}')
+    if ! [ "$avail" -ge 0 ] 2>/dev/null; then
+        echo "  FAILED   could not parse df output: $df_line"
+        gate_fail=1
+    else
+        printf '  %sK free on %s (%s)\n' "$avail" \
+            "$(printf '%s\n' "$df_line" | awk '{print $6}')" \
+            "$(printf '%s\n' "$df_line" | awk '{print $1}')"
+        if [ "$avail" -lt 102400 ]; then
+            echo "  FAILED   under 100MB free"
+            gate_fail=1
+        else
+            echo "  ok       >=100MB free"
+        fi
+    fi
+fi
 du -sh "$INSTALL_DIR" "$INSTALL_DIR/logs" "$INSTALL_DIR/data" 2>&1
 
 echo
