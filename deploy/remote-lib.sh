@@ -15,6 +15,7 @@
 # legitimate path such as DATABASE_PATH="/opt/logwatch ai/data/x.db".
 read_env() {
     local key="$1" def="${2-}" line val
+    local depth="${3:-0}"
     line=$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" .env 2>/dev/null | tail -1) || true
     if [ -z "$line" ]; then printf '%s' "$def"; return 0; fi
     val=${line#*=}
@@ -25,6 +26,22 @@ read_env() {
         *)    val=${val%%#*}
               val=${val%"${val##*[![:space:]]}"} ;;   # trim trailing whitespace
     esac
+
+    # godotenv expands $VAR and ${VAR} against earlier assignments, so a valid
+    # config like DATA_DIR=/var/lib/lw + DATABASE_PATH=${DATA_DIR}/x.db would
+    # otherwise be looked for under a literal "${DATA_DIR}" and its backup
+    # silently skipped. Substitution is by lookup, never eval; the depth guard
+    # stops a self-referential .env from looping.
+    if [ "$depth" -lt 5 ]; then
+        local out="" rest="$val" name
+        while [[ $rest =~ ^([^$]*)\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?(.*)$ ]]; do
+            out+="${BASH_REMATCH[1]}"
+            name="${BASH_REMATCH[2]}"
+            out+="$(read_env "$name" "" $((depth + 1)))"
+            rest="${BASH_REMATCH[3]}"
+        done
+        val="$out$rest"
+    fi
     printf '%s' "$val"
 }
 

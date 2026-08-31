@@ -211,7 +211,9 @@ if [[ $WITH_SCRIPTS == 1 ]]; then
 fi
 
 echo "==> Verifying transfer + proving this CPU can execute the binary"
-ssh "$HOST" BIN_SHA="$BIN_SHA" STAGE_DIR="$STAGE_DIR" 'bash -s' <<'__REMOTE_STAGE__'
+ssh "$HOST" 'bash -s' \
+  < <(remote_env BIN_SHA "$BIN_SHA" STAGE_DIR "$STAGE_DIR"
+      cat <<'__REMOTE_STAGE__'
 set -euo pipefail
 got=$(sha256sum "$STAGE_DIR/logwatch-analyzer" | awk '{print $1}')
 [ "$got" = "$BIN_SHA" ] || { echo "error: binary checksum mismatch" >&2; exit 1; }
@@ -223,6 +225,7 @@ echo "  --- executing the STAGED binary (catches GOAMD64/SIGILL, /opt untouched)
 for f in "$STAGE_DIR"/*.sh; do [ -e "$f" ] || continue; bash -n "$f" || exit 1; done
 echo "  staged scripts pass syntax check"
 __REMOTE_STAGE__
+)
 
 if [[ $STAGE_ONLY == 1 ]]; then
   echo
@@ -289,15 +292,23 @@ fi
 
 # --------------------------- 5. one locked session: backup, binary, scripts
 echo "==> Installing (cron lock, database backup, binary swap)"
-ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" STAGE_DIR="$STAGE_DIR" \
-            REMOTE_BIN="$REMOTE_BIN" VERSION="$VERSION" \
-            INSTALL_SCRIPTS="$INSTALL_SCRIPTS" TRACKED="${TRACKED_SCRIPTS[*]}" \
-            KEEP_VERSIONS="$KEEP_VERSIONS" 'bash -s' \
-  < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_INSTALL__'
+ssh "$HOST" 'bash -s' \
+  < <(remote_env INSTALL_DIR "$INSTALL_DIR" STAGE_DIR "$STAGE_DIR" \
+                 REMOTE_BIN "$REMOTE_BIN" VERSION "$VERSION" \
+                 INSTALL_SCRIPTS "$INSTALL_SCRIPTS" TRACKED "${TRACKED_SCRIPTS[*]}" \
+                 KEEP_VERSIONS "$KEEP_VERSIONS"
+      cat "$REMOTE_LIB"; cat <<'__REMOTE_INSTALL__'
 set -euo pipefail
 cd "$INSTALL_DIR"
 
 acquire_cron_lock || exit 1
+
+# Every artifact this tooling creates is recorded here. Pruning deletes only
+# names on this list, so an operator's own recovery copy — say
+# logwatch-analyzer-emergency — can never be swept up by a root rm just
+# because it shares the prefix. Defined before the first caller: the database
+# snapshot records itself, and that runs well before the binary swap.
+note_artifact() { printf '%s\n' "$1" >> ./.logwatch-artifacts; }
 
 # Record the protected files so stage 6 can prove they were not touched,
 # rather than printing state a human is asked to eyeball.
@@ -308,18 +319,6 @@ stat_protected() {
     done
 }
 stat_protected > "$STAGE_DIR/protected.before"
-
-# --- clear stale component backups -----------------------------------------
-# A .prev file must mean "this deployment replaced it", or rollback --all
-# rolls an unchanged component back an extra release. Only clear backups for
-# the components this run will actually replace: clearing them under
-# SKIP_SCRIPTS=1 would destroy the previous deployment's rollback material
-# for files this run does not touch.
-if [ "$INSTALL_SCRIPTS" = 1 ]; then
-    for p in ./run-cron.sh.prev ./scripts/*.prev; do
-        [ -e "$p" ] && echo "  clearing stale backup $p" && rm -f "$p"
-    done
-fi
 
 # --- database backup -------------------------------------------------------
 if ! db=$(resolve_db); then
@@ -341,6 +340,11 @@ else
         done
     fi
     ls -l "$dst"
+    # Record the exact snapshot. Selecting by mtime is unreliable: the cp -p
+    # fallback copies the database's mtime, so two deploys with no writes in
+    # between produce identically stamped snapshots.
+    printf '%s\n' "$dst" > ./.logwatch-analyzer.db-snapshot
+    note_artifact "$dst"
 fi
 
 # --- binary swap -----------------------------------------------------------
@@ -367,6 +371,7 @@ else
     # working right up to the final rename.
     legacy="logwatch-analyzer-legacy-$stamp"
     ln ./logwatch-analyzer "./$legacy" 2>/dev/null || cp -p ./logwatch-analyzer "./$legacy"
+    note_artifact "$legacy"
     prev_target="$INSTALL_DIR/$legacy"
     echo "  legacy regular-file install preserved as $legacy"
 fi
@@ -378,6 +383,7 @@ fi
 if [ "$prev_target" = "$INSTALL_DIR/$REMOTE_BIN" ]; then
     preserved="$REMOTE_BIN.prev-$stamp"
     ln "./$REMOTE_BIN" "./$preserved" 2>/dev/null || cp -p "./$REMOTE_BIN" "./$preserved"
+    note_artifact "$preserved"
     prev_target="$INSTALL_DIR/$preserved"
     echo "  same version already live — previous artifact kept as $preserved"
 fi
@@ -391,6 +397,7 @@ fi
 printf '%s\n' "$prev_target" > ./.logwatch-analyzer.prev-target
 
 mv -Tf "./$REMOTE_BIN.incoming.$$" "./$REMOTE_BIN"
+note_artifact "$REMOTE_BIN"
 ln -sfn "$INSTALL_DIR/$REMOTE_BIN" ./logwatch-analyzer.new
 mv -Tf ./logwatch-analyzer.new ./logwatch-analyzer
 
@@ -415,7 +422,14 @@ fi
 if [ "$INSTALL_SCRIPTS" = 1 ]; then
     mkdir -p ./scripts
     if [ -f "$STAGE_DIR/run-cron.sh" ] && ! cmp -s "$STAGE_DIR/run-cron.sh" ./run-cron.sh; then
-        cp -p ./run-cron.sh ./run-cron.sh.prev
+        # A .prev must mean "this deployment replaced it", so the stale one is
+        # cleared here — at the moment of replacement — rather than up front,
+        # where an unrelated later failure would have destroyed recoverable
+        # backups without replacing anything.
+        rm -f ./run-cron.sh.prev
+        # No live runner is exactly the state --runner must repair, so the
+        # backup is conditional rather than aborting the install.
+        [ -e ./run-cron.sh ] && cp -p ./run-cron.sh ./run-cron.sh.prev
         install -m 0755 -o root -g root "$STAGE_DIR/run-cron.sh" ./run-cron.sh.new
         mv -f ./run-cron.sh.new ./run-cron.sh
         bash -n ./run-cron.sh || { echo "ABORT: installed runner has a syntax error" >&2; exit 1; }
@@ -433,6 +447,7 @@ if [ "$INSTALL_SCRIPTS" = 1 ]; then
         cmp -s "$src" "$dst" && continue
         if [ -e "$dst" ]; then
             mode=$(stat -c '%a' "$dst")
+            rm -f "$dst.prev"
             cp -p "$dst" "$dst.prev"
         else
             mode=0755
@@ -462,7 +477,10 @@ if [ "$KEEP_VERSIONS" -gt 0 ]; then
     n=0
     while IFS= read -r f; do
         [ -n "$f" ] || continue
-        abs="$INSTALL_DIR/${f#./}"
+        base="${f#./}"
+        # Only ever delete something this tooling recorded creating.
+        grep -qxF "$base" ./.logwatch-artifacts 2>/dev/null || continue
+        abs="$INSTALL_DIR/$base"
         [ "$abs" = "$live" ] && continue
         [ "$abs" = "$keep_target" ] && continue
         n=$((n + 1))
@@ -478,8 +496,11 @@ if [ "$KEEP_VERSIONS" -gt 0 ]; then
         # must survive intact all the way to `rm` — an unquoted command
         # substitution here would hand root a list of path fragments.
         n=0
+        current_snap=$(cat ./.logwatch-analyzer.db-snapshot 2>/dev/null || echo "")
         while IFS= read -r f; do
             [ -n "$f" ] || continue
+            [ "$f" = "$current_snap" ] && continue
+            grep -qxF "$f" ./.logwatch-artifacts 2>/dev/null || continue
             n=$((n + 1))
             if [ "$n" -gt "$KEEP_VERSIONS" ]; then
                 rm -f "$f" "$f"-wal "$f"-shm "$f"-journal && echo "    removed $f"

@@ -213,6 +213,43 @@ for cmd in "vim /opt/logwatch-ai/run-cron.sh" \
     else ok "ignores a bystander: $cmd"; fi
 done
 
+# ---------------------------------------------- dotenv variable expansion
+# Regression: ${VAR} references were returned literally, so a config using
+# DATA_DIR=... + DATABASE_PATH=${DATA_DIR}/x.db resolved to a path that does
+# not exist and the database backup was silently skipped.
+echo "read_env variable expansion"
+cd "$WORK" || exit 1
+cat > .env <<'EOF'
+DATA_DIR=/var/lib/logwatch
+DATABASE_PATH=${DATA_DIR}/summaries.db
+BARE=$DATA_DIR/bare.db
+NESTED_A=/one
+NESTED_B=${NESTED_A}/two
+NESTED_C=${NESTED_B}/three
+NO_REFS=/plain/path.db
+EOF
+eq "expands \${VAR}"                "/var/lib/logwatch/summaries.db" "$(read_env DATABASE_PATH)"
+eq "expands bare \$VAR"             "/var/lib/logwatch/bare.db"      "$(read_env BARE)"
+eq "expands nested references"      "/one/two/three"                 "$(read_env NESTED_C)"
+eq "leaves a plain value alone"     "/plain/path.db"                 "$(read_env NO_REFS)"
+# shellcheck disable=SC2016 # literal, must not expand locally
+printf 'SELF=${SELF}/loop\n' > .env
+# The value is meaningless; what matters is that the depth guard returns.
+read_env SELF >/dev/null 2>&1
+ok "a self-reference terminates instead of looping"
+
+# --------------------------------------------------------- remote_env quoting
+# Regression: values were passed as `ssh host VAR=value bash -s`, which ssh
+# joins into one remote command string — a value containing a space made the
+# remote shell run its second word as a command and never read the payload,
+# exiting 0 so the failure was silent.
+echo "remote_env quoting"
+out=$(remote_env TRACKED "a.sh b.sh c.sh" DIR "/opt/logwatch ai")
+eq "emits one assignment per name" "2" "$(printf '%s\n' "$out" | grep -c '=')"
+# Round-trip it the way the payload does: source the preamble, read it back.
+vals=$(bash -c "eval \"\$1\"; printf '%s|%s' \"\$TRACKED\" \"\$DIR\"" _ "$out")
+eq "survives a round-trip intact" "a.sh b.sh c.sh|/opt/logwatch ai" "$vals"
+
 # ------------------------------------------------------------ prune safety
 # Regression: `for f in $(ls ...)` word-split the snapshot list, so a
 # DATABASE_PATH containing spaces produced path fragments — which were then

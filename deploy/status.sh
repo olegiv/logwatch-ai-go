@@ -30,8 +30,9 @@ valid_install_dir "$INSTALL_DIR" || {
 
 # No -n here: it would redirect stdin from /dev/null and discard the payload
 # fed in below. -n belongs only on ssh calls that do NOT read a script.
-ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" 'bash -s' \
-  < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_STATUS__'
+ssh "$HOST" 'bash -s' \
+  < <(remote_env INSTALL_DIR "$INSTALL_DIR"
+      cat "$REMOTE_LIB"; cat <<'__REMOTE_STATUS__'
 set -u
 cd "$INSTALL_DIR" || { echo "FATAL: cannot cd to $INSTALL_DIR"; exit 1; }
 

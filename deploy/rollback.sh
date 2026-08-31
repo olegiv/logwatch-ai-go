@@ -64,10 +64,11 @@ valid_install_dir "$INSTALL_DIR" || {
 }
 
 echo "==> Rolling back on ${HOST}:${INSTALL_DIR}"
-ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" DO_BIN="$DO_BIN" DO_RUNNER="$DO_RUNNER" \
-            DO_SCRIPTS="$DO_SCRIPTS" DO_DB="$DO_DB" LENIENT="$LENIENT" \
-            TRACKED="${TRACKED_SCRIPTS[*]}" FORCE="${FORCE:-0}" 'bash -s' \
-  < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_ROLLBACK__'
+ssh "$HOST" 'bash -s' \
+  < <(remote_env INSTALL_DIR "$INSTALL_DIR" DO_BIN "$DO_BIN" DO_RUNNER "$DO_RUNNER" \
+                 DO_SCRIPTS "$DO_SCRIPTS" DO_DB "$DO_DB" LENIENT "$LENIENT" \
+                 TRACKED "${TRACKED_SCRIPTS[*]}" FORCE "${FORCE:-0}"
+      cat "$REMOTE_LIB"; cat <<'__REMOTE_ROLLBACK__'
 set -euo pipefail
 cd "$INSTALL_DIR"
 
@@ -181,7 +182,15 @@ if [ "$DO_DB" = 1 ]; then
     # `|| true` is required: with no match `ls` exits 2 and `grep -v` exits 1
     # on empty input, so under `pipefail` the assignment itself trips errexit
     # and the script dies here — before the guard below can explain why.
-    backup=$(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$' | head -1 || true)
+    # Prefer the snapshot deploy.sh recorded. Sorting by mtime is unreliable:
+    # the cp -p fallback preserves the database's mtime, so two deploys with
+    # no writes between them yield identically stamped snapshots and `ls -t`
+    # can pick the older release's.
+    backup=$(cat ./.logwatch-analyzer.db-snapshot 2>/dev/null || echo "")
+    if [ -n "$backup" ] && [ ! -f "$backup" ]; then backup=""; fi
+    if [ -z "$backup" ]; then
+        backup=$(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$' | head -1 || true)
+    fi
     if [ -z "$backup" ]; then
         echo "error: no $(basename "$db").pre-* backup found beside $db" >&2
         exit 1

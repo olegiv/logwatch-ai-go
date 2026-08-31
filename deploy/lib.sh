@@ -96,3 +96,19 @@ TRACKED_SCRIPTS=(generate-logwatch.sh generate-drupal-watchdog.sh helper.sh)
 valid_install_dir() {
   [[ $1 =~ ^/[A-Za-z0-9._/-]+$ && $1 != *//* && $1 != */ ]]
 }
+
+# remote_env NAME VALUE [NAME VALUE ...]
+#
+# Emits shell-quoted assignments to prepend to a remote payload.
+#
+# Passing them as `ssh host NAME=value 'bash -s'` does NOT work: ssh joins its
+# arguments with spaces and hands the result to the remote *shell*, so a value
+# containing a space splits — `TRACKED="a b c" bash -s` arrives as
+# `TRACKED=a b c bash -s`, and the remote shell runs `b` as the command while
+# the payload is never read. It exits 0, so the failure is silent.
+remote_env() {
+  while [[ $# -gt 0 ]]; do
+    printf '%s=%q\n' "$1" "$2"
+    shift 2
+  done
+}

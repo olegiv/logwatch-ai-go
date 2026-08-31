@@ -55,8 +55,9 @@ rc=0
 # LOCK_FILE is deliberately NOT forwarded: resolve_lock_file short-circuits on
 # a set value, which would make the gate test the local default again instead
 # of discovering what the deployed runner uses.
-ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" OLD_LOCK_FILE="$OLD_LOCK_FILE" 'bash -s' \
-  < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_PREFLIGHT__'
+ssh "$HOST" 'bash -s' \
+  < <(remote_env INSTALL_DIR "$INSTALL_DIR" OLD_LOCK_FILE "$OLD_LOCK_FILE"
+      cat "$REMOTE_LIB"; cat <<'__REMOTE_PREFLIGHT__'
 set -u
 gate_fail=0
 
