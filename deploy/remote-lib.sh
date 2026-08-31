@@ -20,9 +20,12 @@ read_env() {
     if [ -z "$line" ]; then printf '%s' "$def"; return 0; fi
     val=${line#*=}
     val=${val#"${val%%[![:space:]]*}"}          # trim leading whitespace
+    # godotenv suppresses variable expansion inside SINGLE quotes, so track
+    # which quoting was used and skip substitution for that case.
+    local literal=0
     case "$val" in
         '"'*) val=${val#\"}; val=${val%%\"*} ;;
-        "'"*) val=${val#\'}; val=${val%%\'*} ;;
+        "'"*) val=${val#\'}; val=${val%%\'*}; literal=1 ;;
         *)    val=${val%%#*}
               val=${val%"${val##*[![:space:]]}"} ;;   # trim trailing whitespace
     esac
@@ -32,7 +35,7 @@ read_env() {
     # otherwise be looked for under a literal "${DATA_DIR}" and its backup
     # silently skipped. Substitution is by lookup, never eval; the depth guard
     # stops a self-referential .env from looping.
-    if [ "$depth" -lt 5 ]; then
+    if [ "$depth" -lt 5 ] && [ "$literal" -eq 0 ]; then
         local out="" rest="$val" name
         while [[ $rest =~ ^([^$]*)\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?(.*)$ ]]; do
             out+="${BASH_REMATCH[1]}"
@@ -52,6 +55,19 @@ read_env() {
 # that is the working directory the analyzer runs from.
 resolve_db() {
     local enabled dbrel
+    # godotenv.Load does not override an already-set variable and viper reads
+    # the environment first, so an exported DATABASE_PATH beats the file. The
+    # deploy session cannot see cron's environment, but it can see whether the
+    # crontab line or the runner exports one — and silently backing up a
+    # different database than the analyzer writes is the failure to avoid.
+    local override
+    override=$( { crontab -l -u root 2>/dev/null; cat "$INSTALL_DIR/run-cron.sh" 2>/dev/null; } \
+                | grep -v '^[[:space:]]*#' \
+                | grep -oE '(export[[:space:]]+)?DATABASE_PATH=[^[:space:]]+' | tail -1 )
+    if [ -n "$override" ]; then
+        echo "WARN: DATABASE_PATH is set outside .env ($override);" >&2
+        echo "      the analyzer will use that, and this tooling reads .env." >&2
+    fi
     enabled=$(read_env ENABLE_DATABASE true)
     # The application reads this with viper.GetBool, i.e. strconv.ParseBool,
     # which accepts 1/t/T/TRUE/true/True as true. Accepting only the literal
@@ -140,7 +156,10 @@ acquire_cron_lock() {
     # -source-type ocms`, which holds no cron lock — exactly the case this
     # check exists to catch — so omitting `./` would let a deploy proceed
     # alongside it and copy the database mid-write.
-    local pat="^(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
+    # `bash /opt/logwatch-ai/run-cron.sh` is how a shebang launch can appear,
+    # so allow an optional interpreter word before the path. This predicate is
+    # the only guard when flock is unavailable.
+    local pat="^((/usr)?/bin/(ba)?sh[[:space:]]+)?(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
     if pgrep -u root -f "$pat" >/dev/null 2>&1; then
         if [ "${FORCE:-0}" = 1 ]; then
             echo "WARN: an analyzer process is running; FORCE=1 given, continuing anyway" >&2

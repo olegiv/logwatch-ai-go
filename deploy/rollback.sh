@@ -203,18 +203,41 @@ if [ "$DO_DB" = 1 ]; then
     # -wal/-shm/-journal beside the restored snapshot lets SQLite replay those
     # pages into it on the next open, silently reconstructing data from the
     # database we are trying to abandon — or corrupting the restore outright.
-    # The live file may be absent precisely because a failed release removed
-    # it — that is a state where --db is most needed, so guard the move.
-    [ -f "$db" ] && mv "$db" "$db.suspect"
+    # Stage the restore FIRST. Moving the live database aside before the copy
+    # means a full filesystem or an unreadable backup leaves no database at
+    # the configured path at all, and the next analyzer run would create an
+    # empty one — losing the records this rollback was meant to protect.
+    staged="$db.restoring.$$"
+    rm -f "$staged" "$staged"-wal "$staged"-shm "$staged"-journal
+    if ! cp -p "$backup" "$staged"; then
+        echo "error: could not stage $backup — the live database is untouched." >&2
+        rm -f "$staged"
+        exit 1
+    fi
     for ext in -wal -shm -journal; do
-        [ -f "$db$ext" ] && mv "$db$ext" "$db.suspect$ext"
+        [ -f "$backup$ext" ] && cp -p "$backup$ext" "$staged$ext"
     done
-    cp -p "$backup" "$db"
-    # Restore the snapshot's own sidecars if the backup captured any; a
-    # sqlite3 .backup produces a single consistent file and needs none.
+    if command -v sqlite3 >/dev/null 2>&1; then
+        if ! sqlite3 -readonly "$staged" 'select count(*) from summaries;' >/dev/null 2>&1; then
+            echo "error: staged restore is not a readable database — aborting." >&2
+            echo "       The live database is untouched." >&2
+            rm -f "$staged" "$staged"-wal "$staged"-shm "$staged"-journal
+            exit 1
+        fi
+    fi
+
+    # A fixed .suspect name would destroy the evidence of an earlier failed
+    # rollback, which this script promises to retain.
+    suspect="$db.suspect-$(date -u +%Y%m%dT%H%M%SZ)"
+    [ -f "$db" ] && mv "$db" "$suspect"
     for ext in -wal -shm -journal; do
-        [ -f "$backup$ext" ] && cp -p "$backup$ext" "$db$ext"
+        [ -f "$db$ext" ] && mv "$db$ext" "$suspect$ext"
     done
+    mv -f "$staged" "$db"
+    for ext in -wal -shm -journal; do
+        if [ -f "$staged$ext" ]; then mv -f "$staged$ext" "$db$ext"; else rm -f "$db$ext"; fi
+    done
+    echo "  restored; previous state kept as $(basename "$suspect")"
     ls -l "$db"*
 fi
 __REMOTE_ROLLBACK__

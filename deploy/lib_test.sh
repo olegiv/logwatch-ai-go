@@ -194,10 +194,12 @@ eq "yields empty when no snapshot exists" "" "$missing"
 # open blocked both deploy and rollback — worst on rollback, the safety net.
 echo "in-flight process pattern"
 INSTALL_DIR=/opt/logwatch-ai
-pat="^(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
+pat="^((/usr)?/bin/(ba)?sh[[:space:]]+)?(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
 matches() { grep -qE "$pat" <<<"$1"; }
 
-for cmd in "/opt/logwatch-ai/run-cron.sh" \
+for cmd in "/bin/bash /opt/logwatch-ai/run-cron.sh" \
+           "/usr/bin/sh ./run-cron.sh" \
+           "/opt/logwatch-ai/run-cron.sh" \
            "/opt/logwatch-ai/logwatch-analyzer -source-type ocms" \
            "./logwatch-analyzer -source-type ocms -ocms-site it_digest" \
            "./run-cron.sh" \
@@ -232,6 +234,16 @@ eq "expands \${VAR}"                "/var/lib/logwatch/summaries.db" "$(read_env
 eq "expands bare \$VAR"             "/var/lib/logwatch/bare.db"      "$(read_env BARE)"
 eq "expands nested references"      "/one/two/three"                 "$(read_env NESTED_C)"
 eq "leaves a plain value alone"     "/plain/path.db"                 "$(read_env NO_REFS)"
+# godotenv suppresses expansion inside single quotes; the analyzer would use
+# the literal path, so backing up an expanded one would snapshot the wrong file.
+cat > .env <<'EOF'
+DATA_DIR=/var/lib/logwatch
+SQ='${DATA_DIR}/literal.db'
+DQ="${DATA_DIR}/expanded.db"
+EOF
+# shellcheck disable=SC2016 # the literal is the expected value
+eq "single quotes suppress expansion" '${DATA_DIR}/literal.db'          "$(read_env SQ)"
+eq "double quotes still expand"       "/var/lib/logwatch/expanded.db"   "$(read_env DQ)"
 # shellcheck disable=SC2016 # literal, must not expand locally
 printf 'SELF=${SELF}/loop\n' > .env
 # The value is meaningless; what matters is that the depth guard returns.

@@ -327,18 +327,28 @@ elif [ ! -f "$db" ]; then
     echo "  no database at $db — skipping backup"
 else
     dst="$db.pre-$VERSION"
+    # Build under a temporary name and publish with a rename. Writing $dst in
+    # place is not safe: redeploying a version reuses that name, and the
+    # metadata still advertises it, so an ENOSPC or a dropped session would
+    # leave a truncated file that rollback --db would happily restore over a
+    # working database.
+    tmp="$dst.incoming.$$"
+    rm -f "$tmp" "$tmp"-wal "$tmp"-shm "$tmp"-journal
     if command -v sqlite3 >/dev/null 2>&1; then
-        sqlite3 "$db" ".backup '$dst'"        # WAL-aware, consistent
+        sqlite3 "$db" ".backup '$tmp'"        # WAL-aware, consistent
     else
         # No sqlite3: a plain copy is only safe because we hold the lock.
-        # Redeploying the same version reuses $dst, so clear any sidecars an
-        # earlier snapshot left or rollback --db would replay stale pages.
-        rm -f "$dst" "$dst"-wal "$dst"-shm "$dst"-journal
-        cp -p "$db" "$dst"
+        cp -p "$db" "$tmp"
         for ext in -wal -shm -journal; do
-            [ -f "$db$ext" ] && cp -p "$db$ext" "$dst$ext"
+            [ -f "$db$ext" ] && cp -p "$db$ext" "$tmp$ext"
         done
     fi
+    # Publish: sidecars first, clearing any the new snapshot does not have,
+    # then the snapshot itself, so $dst never names a half-written file.
+    for ext in -wal -shm -journal; do
+        if [ -f "$tmp$ext" ]; then mv -f "$tmp$ext" "$dst$ext"; else rm -f "$dst$ext"; fi
+    done
+    mv -f "$tmp" "$dst"
     ls -l "$dst"
     # Record the exact snapshot. Selecting by mtime is unreliable: the cp -p
     # fallback copies the database's mtime, so two deploys with no writes in

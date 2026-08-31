@@ -199,18 +199,21 @@ echo "===== GATE 4: disk ====="
 # df is captured and tested explicitly rather than piped into awk: this
 # script runs without `pipefail`, so a df failure would otherwise be masked
 # by awk exiting cleanly on zero records and the gate would report success.
-check_free() {   # $1 = path, $2 = KiB required, $3 = label
-    local path="$1" need="$2" label="$3" out line avail
-    if ! out=$(df -Pk "$path" 2>&1); then
-        echo "  FAILED   df could not inspect $path: $out"; gate_fail=1; return
+check_free_dev() {   # $1 = device, $2 = KiB required, $3 = label
+    local dev="$1" need="$2" label="$3" out line avail
+    if ! out=$(df -Pk 2>/dev/null | awk -v d="$dev" '$1 == d'); then
+        echo "  FAILED   df could not inspect $dev"; gate_fail=1; return
     fi
     line=$(printf '%s\n' "$out" | tail -1)
+    if [ -z "$line" ]; then
+        echo "  FAILED   device $dev not found in df output"; gate_fail=1; return
+    fi
     avail=$(printf '%s\n' "$line" | awk '{print $4}')
     if ! [ "$avail" -ge 0 ] 2>/dev/null; then
-        echo "  FAILED   could not parse df output for $path: $line"; gate_fail=1; return
+        echo "  FAILED   could not parse df output for $dev: $line"; gate_fail=1; return
     fi
-    printf '  %s: %s KiB free on %s, needs %s KiB\n' \
-        "$label" "$avail" "$(printf '%s\n' "$line" | awk '{print $6}')" "$need"
+    printf '  %s KiB free on %s (%s), combined need %s KiB for: %s\n' \
+        "$avail" "$(printf '%s\n' "$line" | awk '{print $6}')" "$dev" "$need" "$label"
     if [ "$avail" -lt "$need" ]; then
         echo "  FAILED   insufficient space for $label"; gate_fail=1
     else
@@ -218,19 +221,35 @@ check_free() {   # $1 = path, $2 = KiB required, $3 = label
     fi
 }
 
+# Requirements are summed PER FILESYSTEM. With the default layout the binary
+# and the database snapshot land on the same device, so checking each against
+# the same free-space figure independently would pass a host that cannot fit
+# both together.
 # Binary plus headroom: ~25 MiB covers a 12 MiB artifact kept alongside its
 # predecessor, with room for logs written during the run.
-check_free "$INSTALL_DIR" 25600 "install dir (binary + headroom)"
+declare -A need_by_dev=() label_by_dev=()
+add_need() {  # $1 = path, $2 = KiB, $3 = label
+    local dev
+    dev=$(df -Pk "$1" 2>/dev/null | tail -1 | awk '{print $1}')
+    if [ -z "$dev" ]; then
+        echo "  FAILED   df could not inspect $1"; gate_fail=1; return
+    fi
+    need_by_dev[$dev]=$(( ${need_by_dev[$dev]:-0} + $2 ))
+    label_by_dev[$dev]="${label_by_dev[$dev]:+${label_by_dev[$dev]} + }$3"
+}
 
+add_need "$INSTALL_DIR" 25600 "binary+headroom"
 if db=$(resolve_db) && [ -f "$db" ]; then
     db_kib=$(du -k "$db" | awk '{print $1}')
     # The snapshot is a full copy, so require its size again plus 10% slack.
-    need=$(( db_kib + db_kib / 10 + 1024 ))
     echo "  database: $db (${db_kib} KiB)"
-    check_free "$(dirname "$db")" "$need" "database backup"
+    add_need "$(dirname "$db")" $(( db_kib + db_kib / 10 + 1024 )) "db snapshot"
 else
     echo "  database: disabled or absent — no snapshot space needed"
 fi
+for dev in "${!need_by_dev[@]}"; do
+    check_free_dev "$dev" "${need_by_dev[$dev]}" "${label_by_dev[$dev]}"
+done
 du -sh "$INSTALL_DIR" "$INSTALL_DIR/logs" "$INSTALL_DIR/data" 2>&1
 
 echo
@@ -250,7 +269,13 @@ elif [ ! -f "$db" ]; then
     echo "  no database at $db — skipped (not creating one)"
 else
     ls -l "$db"* 2>&1
-    if command -v sqlite3 >/dev/null 2>&1; then
+    # Opening a WAL-mode database can create its -shm even with -readonly,
+    # when the WAL exists but the shared-memory file does not. That would
+    # make this read-only inspection mutate the installation, so skip the
+    # query in exactly that state rather than risk it.
+    if [ -f "$db-wal" ] && [ ! -f "$db-shm" ]; then
+        echo "  (WAL present without -shm; skipping the query so nothing is created)"
+    elif command -v sqlite3 >/dev/null 2>&1; then
         # Only -readonly is used. The `file:...?mode=ro` URI form was the
         # fallback, but a sqlite3 built without URI filename support treats it
         # as a literal name and CREATES it in the cwd — which would break the
