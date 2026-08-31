@@ -173,6 +173,19 @@ echo "validate_lock_dir"
 rejects "rejects a relative lock path"  validate_lock_dir "relative/x.lock"
 rejects "rejects a bare filename"       validate_lock_dir "x.lock"
 
+# Cron lines can carry inline credentials, and these reports get pasted into
+# tickets and CI logs.
+echo "redact_assignments"
+eq "redacts an inline secret" \
+   "7 2 * * * TELEGRAM_BOT_TOKEN=<redacted> /opt/logwatch-ai/run-cron.sh" \
+   "$(printf '7 2 * * * TELEGRAM_BOT_TOKEN=123:AAEsecret /opt/logwatch-ai/run-cron.sh\n' | redact_assignments)"
+eq "redacts several on one line" \
+   "A=<redacted> B=<redacted> /run.sh" \
+   "$(printf 'A=one B=two /run.sh\n' | redact_assignments)"
+eq "leaves a plain schedule alone" \
+   "7 2 * * * /opt/logwatch-ai/run-cron.sh" \
+   "$(printf '7 2 * * * /opt/logwatch-ai/run-cron.sh\n' | redact_assignments)"
+
 # ----------------------------------------------------------- resolve_host
 echo "resolve_host / require_root_target"
 eq "prefixes root@ for a bare host"   "root@example.com"   "$(HOST='' DEPLOY_HOST=example.com resolve_host '')"

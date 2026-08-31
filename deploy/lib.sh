@@ -112,3 +112,13 @@ remote_env() {
     shift 2
   done
 }
+
+# redact_assignments
+#
+# Filter for cron lines. A cron entry can carry inline credentials
+# (TELEGRAM_BOT_TOKEN=... /opt/logwatch-ai/run-cron.sh), and these reports get
+# pasted into tickets and CI logs — the same reason .env is only ever read for
+# key names. Keeps the variable name, replaces the value.
+redact_assignments() {
+  sed -E 's/([A-Za-z_][A-Za-z0-9_]*)=([^[:space:]]+)/\1=<redacted>/g'
+}

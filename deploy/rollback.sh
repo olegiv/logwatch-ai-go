@@ -144,11 +144,14 @@ if [ "$DO_RUNNER" = 1 ]; then
         echo "       The current runner is untouched. Fix the backup by hand." >&2
         exit 1
     fi
-    # A failed deployment or manual recovery may have left no live runner —
-    # precisely when --runner is needed — so an unconditional mv would abort
-    # under errexit before the valid backup could be restored.
-    [ -e ./run-cron.sh ] && mv ./run-cron.sh ./run-cron.sh.failed
-    mv ./run-cron.sh.prev ./run-cron.sh
+    # Stage, then rename. Two moves left run-cron.sh absent in between, and
+    # every cron invocation in that window fails until someone repairs it.
+    # A failed deployment may also have left no live runner — precisely when
+    # --runner is needed — so keeping the .failed copy is conditional.
+    [ -e ./run-cron.sh ] && cp -p ./run-cron.sh ./run-cron.sh.failed
+    cp -p ./run-cron.sh.prev ./run-cron.sh.restoring.$$
+    mv -f ./run-cron.sh.restoring.$$ ./run-cron.sh
+    rm -f ./run-cron.sh.prev
     echo "runner rolled back, syntax OK"
     grep -n 'LOCK_FILE=' ./run-cron.sh \
         || echo "WARN: restored runner pins no LOCK_FILE — it will use the built-in default"

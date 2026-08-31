@@ -88,8 +88,16 @@ resolve_db() {
                 | grep -v '^[[:space:]]*#' \
                 | grep -oE '(export[[:space:]]+)?DATABASE_PATH=[^[:space:]]+' | tail -1 )
     if [ -n "$override" ]; then
-        echo "WARN: DATABASE_PATH is set outside .env ($override);" >&2
-        echo "      the analyzer will use that, and this tooling reads .env." >&2
+        # Warning was not enough: resolve_db still returned the .env value, so
+        # the deploy snapshotted one database while the analyzer wrote
+        # another, and rollback --db could not recover the real one. Refuse.
+        echo "ABORT: DATABASE_PATH is set outside .env ($override)." >&2
+        echo "       godotenv does not override an existing environment" >&2
+        echo "       variable and viper reads the environment first, so the" >&2
+        echo "       analyzer uses that value while this tooling reads .env." >&2
+        echo "       Backing up or restoring the wrong database is worse than" >&2
+        echo "       not doing it. Remove the override, or move it into .env." >&2
+        return 2
     fi
     enabled=$(read_env ENABLE_DATABASE true)
     # The application reads this with viper.GetBool, i.e. strconv.ParseBool,
@@ -147,9 +155,11 @@ resolve_lock_file() {
         | tail -1)
     if [ -n "$from_cron" ]; then printf '%s' "$from_cron"; return 0; fi
 
-    # shellcheck disable=SC2016 # the ${...} here is literal text being matched
-    from_script=$(sed -n 's/^[[:space:]]*LOCK_FILE="\${LOCK_FILE:-\([^}]*\)}".*/\1/p' \
-        "$INSTALL_DIR/run-cron.sh" 2>/dev/null | tail -1)
+    # Reuse lock_path_of rather than a second, narrower parser: keeping a
+    # template-only copy here meant a runner that assigns LOCK_FILE directly
+    # fell back to the built-in path, and a binary-only deploy or a default
+    # rollback then held a lock cron does not use.
+    from_script=$(lock_path_of "$INSTALL_DIR/run-cron.sh")
     if [ -n "$from_script" ]; then printf '%s' "$from_script"; return 0; fi
 
     printf '%s' /run/logwatch-ai-cron.lock

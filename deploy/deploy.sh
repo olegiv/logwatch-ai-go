@@ -334,8 +334,22 @@ stat_protected() {
 stat_protected > "$STAGE_DIR/protected.before"
 
 # --- database backup -------------------------------------------------------
+# The marker must describe THIS deployment. Leaving an older one meant that
+# if the database were later enabled or recreated, rollback --db would prefer
+# that stale snapshot and restore something unrelated to the release being
+# reverted.
+rm -f ./.logwatch-analyzer.db-snapshot
+db=""
 if ! db=$(resolve_db); then
+    rc=$?
+    # 2 = a runtime DATABASE_PATH override; resolve_db has already explained
+    # why continuing would snapshot the wrong database.
+    [ "$rc" -eq 2 ] && exit 1
     echo "  database disabled in .env — skipping backup"
+    db=""
+fi
+if [ -z "$db" ]; then
+    :
 elif [ ! -f "$db" ]; then
     echo "  no database at $db — skipping backup"
 else

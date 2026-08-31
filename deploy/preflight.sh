@@ -57,6 +57,7 @@ rc=0
 # of discovering what the deployed runner uses.
 ssh "$HOST" 'bash -s' \
   < <(remote_env INSTALL_DIR "$INSTALL_DIR" OLD_LOCK_FILE "$OLD_LOCK_FILE"
+      declare -f redact_assignments
       cat "$REMOTE_LIB"; cat <<'__REMOTE_PREFLIGHT__'
 set -u
 gate_fail=0
@@ -100,7 +101,8 @@ done
 
 echo
 echo "===== 4. crontab ====="
-crontab -l -u root 2>&1 | grep -n -iE 'logwatch|^SHELL|^PATH|^MAILTO' || echo "(no logwatch line in root crontab)"
+crontab -l -u root 2>&1 | grep -n -iE 'logwatch|^SHELL|^PATH|^MAILTO' \
+    | redact_assignments || echo "(no logwatch line in root crontab)"
 ls -la /etc/cron.d/ 2>/dev/null | grep -i logwatch || echo "(nothing logwatch-related in /etc/cron.d)"
 
 echo
@@ -276,14 +278,19 @@ add_need() {  # $1 = path, $2 = KiB, $3 = label
 add_need "$INSTALL_DIR" 25600 "binary+headroom"
 if db=$(resolve_db) && [ -f "$db" ]; then
     db_kib=$(du -k "$db" | awk '{print $1}')
-    # Without sqlite3 the deploy copies the sidecars too, so a large WAL must
-    # be counted or the snapshot can exhaust the filesystem after this passes.
-    if ! ssh_has_sqlite3; then
-        for ext in -wal -shm -journal; do
-            if [ -f "$db$ext" ]; then
-                db_kib=$(( db_kib + $(du -k "$db$ext" | awk '{print $1}') ))
-            fi
-        done
+    # The WAL counts either way. Without sqlite3 the deploy copies the
+    # sidecars verbatim; WITH sqlite3, .backup folds those pages into the
+    # destination, so a 4 KiB main file with a 20 MiB WAL still allocates
+    # ~20 MiB. Sizing only the main file let Gate 4 pass and the snapshot
+    # then fill the filesystem.
+    for ext in -wal -journal; do
+        if [ -f "$db$ext" ]; then
+            db_kib=$(( db_kib + $(du -k "$db$ext" | awk '{print $1}') ))
+        fi
+    done
+    # -shm is shared memory, only copied by the raw fallback.
+    if ! ssh_has_sqlite3 && [ -f "$db-shm" ]; then
+        db_kib=$(( db_kib + $(du -k "$db-shm" | awk '{print $1}') ))
     fi
     # The snapshot is a full copy, so require its size again plus 10% slack.
     echo "  database: $db (${db_kib} KiB incl. sidecars where they are copied)"

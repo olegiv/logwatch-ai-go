@@ -32,6 +32,7 @@ valid_install_dir "$INSTALL_DIR" || {
 # fed in below. -n belongs only on ssh calls that do NOT read a script.
 ssh "$HOST" 'bash -s' \
   < <(remote_env INSTALL_DIR "$INSTALL_DIR"
+      declare -f redact_assignments
       cat "$REMOTE_LIB"; cat <<'__REMOTE_STATUS__'
 set -u
 cd "$INSTALL_DIR" || { echo "FATAL: cannot cd to $INSTALL_DIR"; exit 1; }
@@ -64,7 +65,13 @@ echo "==> Schedule"
 sched=$( { crontab -l -u root 2>/dev/null | sed 's/^/[crontab] /';
            grep -H -iE 'logwatch|@desc' /etc/cron.d/* 2>/dev/null | sed 's/^/[cron.d] /'; } \
          | grep -iE 'logwatch|@desc' )
-if [ -n "$sched" ]; then printf '%s\n' "$sched"; else echo "(no logwatch schedule found)"; fi
+if [ -n "$sched" ]; then
+    # Cron lines can carry inline credentials and this output gets pasted
+    # into tickets and CI logs — the same reason .env is only read for keys.
+    printf '%s\n' "$sched" | redact_assignments
+else
+    echo "(no logwatch schedule found)"
+fi
 
 echo
 echo "==> Lock"
