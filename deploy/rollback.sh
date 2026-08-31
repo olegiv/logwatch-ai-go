@@ -242,21 +242,31 @@ if [ "$DO_DB" = 1 ]; then
             exit 1
         fi
         rm -f "$staged"-wal "$staged"-shm "$staged"-journal
+    elif [ -f "$backup-wal" ] || [ -f "$backup-journal" ]; then
+        # Without sqlite3 the WAL cannot be folded in, and publishing a
+        # main/sidecar pair in two steps can leave a mismatched set that
+        # SQLite may replay or reject. Refuse rather than risk it.
+        echo "error: $backup carries a WAL/journal and sqlite3 is not available" >&2
+        echo "       to consolidate it. Install sqlite3 and retry, or restore" >&2
+        echo "       the snapshot set by hand." >&2
+        rm -f "$staged" "$staged"-wal "$staged"-shm "$staged"-journal
+        exit 1
     fi
 
     # A fixed .suspect name would destroy the evidence of an earlier failed
     # rollback, which this script promises to retain.
     suspect="$db.suspect-$(date -u +%Y%m%dT%H%M%SZ)"
-    [ -f "$db" ] && mv "$db" "$suspect"
+    # Hard-link the suspect state aside rather than moving it: a move empties
+    # the live path, and an interruption before the rename below would leave
+    # no database at all, so the next analyzer run would create an empty one.
+    # A link keeps both names pointing at the same inode until the rename
+    # atomically replaces the live one.
+    [ -f "$db" ] && ln -f "$db" "$suspect"
     for ext in -wal -shm -journal; do
-        [ -f "$db$ext" ] && mv "$db$ext" "$suspect$ext"
+        [ -f "$db$ext" ] && ln -f "$db$ext" "$suspect$ext" && rm -f "$db$ext"
     done
-    # Sidecars first, main file last: with sqlite3 the staged set has been
-    # checkpointed to a single file, so this is one rename. Without it, the
-    # main file arriving last is the commit point.
-    for ext in -wal -shm -journal; do
-        if [ -f "$staged$ext" ]; then mv -f "$staged$ext" "$db$ext"; else rm -f "$db$ext"; fi
-    done
+    # The staged set is a single consolidated file (guaranteed above), so the
+    # publish is one atomic rename over a live path that never went missing.
     mv -f "$staged" "$db"
     echo "  restored; previous state kept as $(basename "$suspect")"
     ls -l "$db"*

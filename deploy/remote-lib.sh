@@ -50,11 +50,20 @@ read_env() {
     # silently skipped. Substitution is by lookup, never eval; the depth guard
     # stops a self-referential .env from looping.
     if [ "$depth" -lt 5 ] && [ "$literal" -eq 0 ]; then
-        local out="" rest="$val" name
+        local out="" rest="$val" name pre
         while [[ $rest =~ ^([^$]*)\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?(.*)$ ]]; do
-            out+="${BASH_REMATCH[1]}"
+            pre="${BASH_REMATCH[1]}"
             name="${BASH_REMATCH[2]}"
-            out+="$(read_env "$name" "" $((depth + 1)) "$lineno")"
+            if [[ $pre == *\\ ]]; then
+                # godotenv drops the backslash and leaves the reference
+                # literal, so expanding here would resolve a path the
+                # analyzer never uses.
+                out+="${pre%\\}"
+                out+="\${${name}}"
+            else
+                out+="$pre"
+                out+="$(read_env "$name" "" $((depth + 1)) "$lineno")"
+            fi
             rest="${BASH_REMATCH[3]}"
         done
         val="$out$rest"
@@ -122,7 +131,10 @@ resolve_lock_file() {
     # line win, and the deploy would lock a path cron never touches.
     # The sed alternation preserves a quoted path containing spaces, which a
     # `[^[:space:]]+` match truncates.
-    from_cron=$(crontab -l -u root 2>/dev/null \
+    # docs/CRON_SETUP.md documents /etc/cron.d/logwatch-ai as a supported
+    # location, so an override there must be honoured too — otherwise the
+    # documented cron job can start while the deploy holds a different lock.
+    from_cron=$( { crontab -l -u root 2>/dev/null; cat /etc/cron.d/* 2>/dev/null; } \
         | grep -v '^[[:space:]]*#' \
         | grep -F 'run-cron.sh' \
         | sed -nE 's/.*LOCK_FILE="([^"]*)".*/\1/p;
@@ -144,8 +156,18 @@ acquire_cron_lock() {
     lock=$(resolve_lock_file)
     echo "  cron lock: $lock"
     if ! command -v flock >/dev/null 2>&1; then
-        echo "WARN: flock(1) not on PATH — falling back to a pgrep check only" >&2
+        # A pgrep snapshot cannot hold anything: cron could start immediately
+        # after it and overlap the snapshot, the swap or the helper
+        # replacement. Without flock there is no way to keep the
+        # single-instance guarantee, so refuse rather than pretend.
+        echo "ABORT: flock(1) is not available on this host." >&2
+        echo "       It is required to hold the runner's lock across the" >&2
+        echo "       critical section. Install util-linux, or set FORCE=1 to" >&2
+        echo "       proceed with only an instantaneous process check." >&2
+        [ "${FORCE:-0}" = 1 ] || return 1
+        echo "WARN: FORCE=1 — proceeding with a pgrep check only" >&2
     else
+        validate_lock_dir "$lock" || return 1
         exec 9>"$lock" || { echo "ABORT: cannot open lock $lock" >&2; return 1; }
         if ! flock -n 9; then
             if [ "${FORCE:-0}" = 1 ]; then
@@ -199,6 +221,29 @@ inflight_pattern() {
         "$INSTALL_DIR"
 }
 
+# validate_lock_dir PATH
+#
+# A lock is opened by root with `exec N>`, which follows symlinks. Any
+# principal that can write the directory can plant the fixed lock name and
+# have root truncate the target, so the directory must be root-owned and not
+# writable by group or other. Applied to every lock this tooling opens, not
+# just the one preflight happens to gate.
+validate_lock_dir() {
+    local lock="$1" dir perm owner
+    dir=$(dirname "$lock")
+    perm=$(stat -c '%a' "$dir" 2>/dev/null) || { echo "ABORT: cannot stat $dir" >&2; return 1; }
+    owner=$(stat -c '%U' "$dir" 2>/dev/null)
+    if [ "$owner" != "root" ]; then
+        echo "ABORT: lock directory $dir is owned by '$owner', not root" >&2
+        return 1
+    fi
+    if [ "$((8#$perm & 0022))" -ne 0 ]; then
+        echo "ABORT: lock directory $dir is group- or world-writable (mode $perm)" >&2
+        return 1
+    fi
+    return 0
+}
+
 # acquire_extra_lock PATH
 #
 # Takes a second exclusive lock on fd 8. Replacing the runner can change the
@@ -209,6 +254,7 @@ acquire_extra_lock() {
     local lock="$1"
     [ -n "$lock" ] || return 0
     command -v flock >/dev/null 2>&1 || return 0
+    validate_lock_dir "$lock" || return 1
     exec 8>"$lock" || { echo "ABORT: cannot open incoming lock $lock" >&2; return 1; }
     if ! flock -n 8; then
         if [ "${FORCE:-0}" = 1 ]; then

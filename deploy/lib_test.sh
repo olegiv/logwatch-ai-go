@@ -77,6 +77,12 @@ eq "still strips a spaced comment" "/srv/db"                 "$(read_env SPACED)
 printf 'FWD=${LATER}/x.db\nLATER=/var/lib/lw\nBACK_A=/var/lib/lw\nBACK_B=${BACK_A}/y.db\n' > .env
 eq "does not resolve a forward reference" "/x.db"          "$(read_env FWD)"
 eq "still resolves a backward reference"  "/var/lib/lw/y.db" "$(read_env BACK_B)"
+# godotenv drops the backslash and leaves the reference literal, so expanding
+# it here would resolve a path the analyzer never opens.
+# shellcheck disable=SC2016 # writing a literal escape into the fixture
+printf 'DATA_DIR=/srv/db\nESCAPED=\\${DATA_DIR}/summaries.db\n' > .env
+# shellcheck disable=SC2016 # the literal is the expected value
+eq "leaves an escaped reference literal" '${DATA_DIR}/summaries.db' "$(read_env ESCAPED)"
 
 # ------------------------------------------------------------- resolve_db
 echo "resolve_db"

@@ -344,6 +344,12 @@ echo "===== 10. dependencies ====="
 for c in flock jq logwatch drush sqlite3; do
     printf '  %-10s %s\n' "$c" "$(command -v "$c" 2>/dev/null || echo 'NOT FOUND')"
 done
+# flock is not optional: without it nothing can hold the runner's lock across
+# the deploy's critical section, so deploy.sh refuses to run.
+if ! command -v flock >/dev/null 2>&1; then
+    echo "  FAILED   flock is required to hold the cron lock during a deploy"
+    gate_fail=1
+fi
 
 echo
 if [ "$gate_fail" -eq 0 ]; then
