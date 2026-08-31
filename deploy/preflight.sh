@@ -163,6 +163,18 @@ echo "  effective lock path: $effective_lock"
 lock_dir=$(dirname "$effective_lock")
 stat -c '%n  mode=%a  owner=%U:%G' "$lock_dir" 2>&1
 findmnt -no FSTYPE "$lock_dir" 2>&1 || true
+# Root can write anywhere, so writability alone says nothing about safety.
+# A world-writable lock directory lets a local user pre-create the fixed lock
+# name as a symlink, and `exec 9>"$lock"` running as root then truncates
+# whatever it points at — the L-06 finding that moved this path off /var/lock
+# in the first place.
+lock_perm=$(stat -c '%a' "$lock_dir" 2>/dev/null || echo "")
+if [ -n "$lock_perm" ] && [ "$((8#$lock_perm & 0002))" -ne 0 ]; then
+    echo "  FAILED   $lock_dir is world-writable (mode $lock_perm) — unsafe for a root lock"
+    echo "           point LOCK_FILE at a root-owned directory such as /run"
+    gate_fail=1
+fi
+
 probe="$lock_dir/.logwatch-preflight-probe.$$"
 if touch "$probe" 2>/dev/null; then
     echo "  ok       $lock_dir is writable"
@@ -199,6 +211,8 @@ echo "===== GATE 4: disk ====="
 # df is captured and tested explicitly rather than piped into awk: this
 # script runs without `pipefail`, so a df failure would otherwise be masked
 # by awk exiting cleanly on zero records and the gate would report success.
+ssh_has_sqlite3() { command -v sqlite3 >/dev/null 2>&1; }
+
 check_free_dev() {   # $1 = device, $2 = KiB required, $3 = label
     local dev="$1" need="$2" label="$3" out line avail
     if ! out=$(df -Pk 2>/dev/null | awk -v d="$dev" '$1 == d'); then
@@ -241,8 +255,17 @@ add_need() {  # $1 = path, $2 = KiB, $3 = label
 add_need "$INSTALL_DIR" 25600 "binary+headroom"
 if db=$(resolve_db) && [ -f "$db" ]; then
     db_kib=$(du -k "$db" | awk '{print $1}')
+    # Without sqlite3 the deploy copies the sidecars too, so a large WAL must
+    # be counted or the snapshot can exhaust the filesystem after this passes.
+    if ! ssh_has_sqlite3; then
+        for ext in -wal -shm -journal; do
+            if [ -f "$db$ext" ]; then
+                db_kib=$(( db_kib + $(du -k "$db$ext" | awk '{print $1}') ))
+            fi
+        done
+    fi
     # The snapshot is a full copy, so require its size again plus 10% slack.
-    echo "  database: $db (${db_kib} KiB)"
+    echo "  database: $db (${db_kib} KiB incl. sidecars where they are copied)"
     add_need "$(dirname "$db")" $(( db_kib + db_kib / 10 + 1024 )) "db snapshot"
 else
     echo "  database: disabled or absent — no snapshot space needed"

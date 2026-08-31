@@ -26,7 +26,13 @@ read_env() {
     case "$val" in
         '"'*) val=${val#\"}; val=${val%%\"*} ;;
         "'"*) val=${val#\'}; val=${val%%\'*}; literal=1 ;;
-        *)    val=${val%%#*}
+        *)    # godotenv only treats # as a comment when whitespace precedes
+              # it, so a path like /srv/db#blue/x.db keeps its hash.
+              if [[ $val =~ ^(.*[^[:space:]])[[:space:]]+#.*$ ]]; then
+                  val="${BASH_REMATCH[1]}"
+              elif [[ $val =~ ^[[:space:]]*#.*$ ]]; then
+                  val=""
+              fi
               val=${val%"${val##*[![:space:]]}"} ;;   # trim trailing whitespace
     esac
 

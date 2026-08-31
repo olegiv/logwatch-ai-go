@@ -65,6 +65,11 @@ eq "handles the export prefix and single quotes" "claude-haiku-4-5-20251001" "$(
 eq "last assignment wins" "second" "$(read_env DUPLICATE)"
 eq "returns the default for a missing key" "fallback" "$(read_env NOT_PRESENT fallback)"
 eq "returns the default when .env is absent" "fallback" "$(cd "$WORK" && rm -f .env && read_env ANY fallback)"
+# godotenv only treats # as a comment when whitespace precedes it, so a path
+# containing a hash must survive intact or the wrong database gets backed up.
+printf 'HASHPATH=/srv/db#blue/summaries.db\nSPACED=/srv/db   # a real comment\n' > .env
+eq "keeps a hash inside a path"  "/srv/db#blue/summaries.db" "$(read_env HASHPATH)"
+eq "still strips a spaced comment" "/srv/db"                 "$(read_env SPACED)"
 
 # ------------------------------------------------------------- resolve_db
 echo "resolve_db"

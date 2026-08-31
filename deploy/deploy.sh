@@ -309,6 +309,7 @@ acquire_cron_lock || exit 1
 # because it shares the prefix. Defined before the first caller: the database
 # snapshot records itself, and that runs well before the binary swap.
 note_artifact() { printf '%s\n' "$1" >> ./.logwatch-artifacts; }
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
 
 # Record the protected files so stage 6 can prove they were not touched,
 # rather than printing state a human is asked to eyeball.
@@ -326,33 +327,28 @@ if ! db=$(resolve_db); then
 elif [ ! -f "$db" ]; then
     echo "  no database at $db — skipping backup"
 else
-    dst="$db.pre-$VERSION"
-    # Build under a temporary name and publish with a rename. Writing $dst in
-    # place is not safe: redeploying a version reuses that name, and the
-    # metadata still advertises it, so an ENOSPC or a dropped session would
-    # leave a truncated file that rollback --db would happily restore over a
-    # working database.
-    tmp="$dst.incoming.$$"
-    rm -f "$tmp" "$tmp"-wal "$tmp"-shm "$tmp"-journal
+    # A unique basename per deploy. Reusing "$db.pre-$VERSION" meant a
+    # same-version redeploy rewrote the snapshot the metadata still points
+    # at, so an interruption mid-publication could pair an old main file with
+    # new sidecars. Nothing here ever touches an existing snapshot set, and
+    # the metadata is pointed at this one only once it is complete.
+    dst="$db.pre-$VERSION-$stamp"
+    rm -f "$dst" "$dst"-wal "$dst"-shm "$dst"-journal
     if command -v sqlite3 >/dev/null 2>&1; then
-        sqlite3 "$db" ".backup '$tmp'"        # WAL-aware, consistent
+        sqlite3 "$db" ".backup '$dst'"        # WAL-aware, consistent
+        # .backup creates a fresh file under root's umask, so a 0600 database
+        # would leave a 0644 snapshot beside it — and rollback restores with
+        # cp -p, installing those looser permissions at the live path.
+        chmod --reference="$db" "$dst" 2>/dev/null || true
+        chown --reference="$db" "$dst" 2>/dev/null || true
     else
         # No sqlite3: a plain copy is only safe because we hold the lock.
-        cp -p "$db" "$tmp"
+        cp -p "$db" "$dst"
         for ext in -wal -shm -journal; do
-            [ -f "$db$ext" ] && cp -p "$db$ext" "$tmp$ext"
+            [ -f "$db$ext" ] && cp -p "$db$ext" "$dst$ext"
         done
     fi
-    # Publish: sidecars first, clearing any the new snapshot does not have,
-    # then the snapshot itself, so $dst never names a half-written file.
-    for ext in -wal -shm -journal; do
-        if [ -f "$tmp$ext" ]; then mv -f "$tmp$ext" "$dst$ext"; else rm -f "$dst$ext"; fi
-    done
-    mv -f "$tmp" "$dst"
     ls -l "$dst"
-    # Record the exact snapshot. Selecting by mtime is unreliable: the cp -p
-    # fallback copies the database's mtime, so two deploys with no writes in
-    # between produce identically stamped snapshots.
     printf '%s\n' "$dst" > ./.logwatch-analyzer.db-snapshot
     note_artifact "$dst"
 fi
@@ -365,7 +361,6 @@ if [ ! -e ./logwatch-analyzer ]; then
     exit 1
 fi
 
-stamp=$(date -u +%Y%m%dT%H%M%SZ)
 
 # Stage the incoming artifact under a unique name FIRST. Nothing below
 # unlinks or renames anything the live symlink resolves through, so the
