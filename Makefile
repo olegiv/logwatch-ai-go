@@ -11,7 +11,8 @@ GOFUMPT_VERSION       := v0.11.0
 
 .PHONY: all help build build-prod build-linux-amd64 build-darwin-arm64 build-all-platforms \
         test test-race coverage coverage-html fmt fmt-check vet lint lint-go check deps tidy clean install-tools \
-        install run
+        install run \
+        deploy deploy-stage rollback lint-sh test-sh
 
 # Version info from git
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -85,9 +86,21 @@ vet: ## Run go vet
 lint-go: ## Run golangci-lint
 	golangci-lint run ./...
 
-lint: lint-go ## Run all linters
+lint-sh: ## Lint shell scripts with shellcheck (skipped if not installed)
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck -x deploy/*.sh; \
+	else \
+		echo "WARN: shellcheck not installed — skipping shell lint."; \
+		echo "      Install it (brew install shellcheck / apt-get install shellcheck)"; \
+		echo "      or see 'make install-tools'. CI enforces this regardless."; \
+	fi
 
-check: fmt-check vet lint test ## Run the full local quality gate
+test-sh: ## Run shell unit tests for the deploy helpers
+	bash deploy/lib_test.sh
+
+lint: lint-go lint-sh ## Run all linters
+
+check: fmt-check vet lint test test-sh ## Run the full local quality gate
 
 deps: ## Download Go module dependencies
 	$(GO) mod download
@@ -103,6 +116,17 @@ clean: ## Remove build artifacts
 install-tools: ## Install pinned developer tools
 	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	$(GO) install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
+	@# shellcheck is not a Go tool, so it cannot be `go install`ed. lint-sh
+	@# degrades to a warning without it; CI always enforces it.
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		echo "shellcheck: $$(shellcheck --version | awk '/version:/{print $$2}') (already installed)"; \
+	elif command -v brew >/dev/null 2>&1; then \
+		brew install shellcheck; \
+	elif command -v apt-get >/dev/null 2>&1; then \
+		echo "run: sudo apt-get install -y shellcheck"; \
+	else \
+		echo "install shellcheck manually: https://www.shellcheck.net/"; \
+	fi
 
 install: build-prod ## Install optimized binary to system directory
 	@echo "Installing to $(INSTALL_DIR)..."
@@ -120,6 +144,19 @@ install: build-prod ## Install optimized binary to system directory
 
 run: build ## Build and run the application
 	@$(BUILD_DIR)/$(BINARY_NAME)
+
+# --- Remote deployment -------------------------------------------------
+# Target host comes from deploy/deploy.env (gitignored); override with
+# HOST=... on the command line. See docs/DEPLOYMENT.md.
+
+deploy-stage: ## Build and verify on the host without installing
+	@./deploy/deploy.sh --stage-only $(HOST)
+
+deploy: ## Build, verify and install to the production host
+	@./deploy/deploy.sh $(HOST)
+
+rollback: ## Revert the binary to the recorded previous target
+	@./deploy/rollback.sh $(HOST)
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)

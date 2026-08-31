@@ -47,8 +47,14 @@ Choose the appropriate LLM provider for your deployment:
 4. **Verify credentials**: Test with actual API keys in isolated environment
 5. **Check cron configuration**: Ensure logwatch runs before analyzer
 6. **Monitor logs**: Watch `/opt/logwatch-ai/logs/` for first few runs
+7. **For an upgrade, run `make deploy-stage` first**: it builds, uploads and
+   executes the binary on the target without installing anything
 
-## Deployment Steps
+## First-Time Installation (bootstrap)
+
+Use this only for a host that has no existing install. To **upgrade** an
+existing one, use the section below instead — `install.sh` is a bootstrapper,
+not an upgrader.
 
 1. Build optimized static Linux AMD64 binary: `make build-linux-amd64`
 2. Transfer binary to target system
@@ -58,6 +64,57 @@ Choose the appropriate LLM provider for your deployment:
 6. Verify Telegram notifications received
 7. Set up cron jobs (see `docs/CRON_SETUP.md`)
 8. Monitor logs in `/opt/logwatch-ai/logs/`
+
+## Upgrading an Existing Install
+
+`deploy/` upgrades **the binary**. Everything else on the host — helper
+scripts, `run-cron.sh`, `.env`, the site configs, the database and the
+crontab — belongs to the operator; copy those with `scp` when they change.
+
+Set the target once in `deploy/deploy.env` (copy `deploy.env.example`), then:
+
+```bash
+make deploy-stage           # build and verify on the host, install nothing
+make deploy                 # build, verify, install under the cron lock
+make rollback               # revert to the recorded previous binary
+```
+
+Build a specific release rather than the worktree — this stamps the artifact
+with that version instead of whatever you have checked out:
+
+```bash
+REF=v0.15.0 ./deploy/deploy.sh
+```
+
+`deploy.sh` runs `make check`, builds a static Linux binary, copies it to a
+root-owned temporary directory on the host and **runs it there** (which
+catches a CPU-instruction mismatch while `/opt` is untouched). It then takes
+the cron runner's own `flock`, installs the binary under a versioned name,
+and re-points the `logwatch-analyzer` symlink with an atomic rename. If the
+new binary fails `-version` after the swap, it reverts on the spot.
+
+Flags: `REF=<tag>`, `--stage-only`, `SKIP_TESTS=1`, `FORCE=1` (proceed with
+the cron lock held — needed to roll back a wedged run), `INSTALL_DIR=`,
+`HOST=` or a positional host argument.
+
+`rollback.sh` re-points the symlink at the target recorded by the last
+deploy, checks it actually runs first, and then consumes the record — so a
+second rollback refuses rather than silently doing nothing. Nothing is
+deleted; the binary rolled away from keeps its versioned name.
+
+**Do not use `scripts/install.sh` to upgrade.** It looks for the host-arch
+binary name (so it cannot place a cross-built Linux binary), replaces
+`scripts/` wholesale, and finishes with a recursive `chown` across `.env` and
+`data/summaries.db`.
+
+**Not covered, deliberately.** No database snapshot is taken — a binary swap
+does not touch the database, and the machinery to locate and safely copy a
+live SQLite file was a large share of this tooling's complexity. Take one by
+hand before a risky upgrade:
+
+```bash
+ssh <host> 'sqlite3 /opt/logwatch-ai/data/summaries.db ".backup /opt/logwatch-ai/data/summaries.db.bak"'
+```
 
 ## Environment-Specific Configuration
 

@@ -27,7 +27,7 @@ make fmt            # Format with gofumpt
 make fmt-check      # Fail if gofumpt would reformat files
 make vet            # Run go vet
 make lint           # Run all linters
-make check          # fmt-check + vet + lint + test
+make check          # fmt-check + vet + lint (Go, shell, payloads) + tests
 make deps           # go mod download
 make tidy           # go mod tidy
 make install-tools  # Install pinned golangci-lint + gofumpt
@@ -37,7 +37,14 @@ make build-prod           # Optimized host production build
 make build-linux-amd64    # Optimized static Linux AMD64 production build
 make build-darwin-arm64   # Optimized Darwin ARM64 production build
 make build-all-platforms  # Linux AMD64 + Darwin ARM64 production builds
-make install              # Install to /opt/logwatch-ai (requires sudo)
+make install              # Install to /opt/logwatch-ai (requires sudo, local host)
+
+# Remote deployment — binary only (target from deploy/deploy.env)
+make deploy-stage         # Build and verify on the host without installing
+make deploy               # Build, verify and install to the production host
+make rollback             # Revert the binary to the recorded previous target
+make lint-sh              # shellcheck the deploy/ scripts
+make test-sh              # Shell unit tests for the deploy helpers
 ```
 
 ## Package Structure
@@ -55,7 +62,11 @@ internal/
   ├── notification/- Telegram client and message formatting
   ├── ocms/        - OCMS reader, preprocessor, prompts
   └── storage/     - SQLite operations (summaries table)
-scripts/           - Shell scripts (install.sh, generate-*.sh)
+deploy/            - Binary deployment: deploy.sh, rollback.sh, lib.sh.
+                     Use this to UPGRADE an install; scripts/install.sh
+                     bootstraps a new one.
+scripts/           - Shell scripts (install.sh for first-time bootstrap only,
+                     generate-*.sh, run-cron.sh)
 configs/           - Configuration templates (.env.example, drupal-sites.json.example, ocms-sites.json.example)
 testdata/          - Test fixtures
 docs/              - Extended documentation (DEPLOYMENT.md, COST_OPTIMIZATION.md)
@@ -192,6 +203,9 @@ package <name>
 - **Cost Optimization**: See `docs/COST_OPTIMIZATION.md`
 - **Cron Setup**: See `docs/CRON_SETUP.md`
 - **Troubleshooting**: See `docs/TROUBLESHOOTING.md`
+- **Deploying an upgrade**: `docs/DEPLOYMENT.md` — "Upgrading an Existing
+  Install". `scripts/install.sh` bootstraps a new host; it must not be used
+  to upgrade one.
 
 ## Codex Extensions
 

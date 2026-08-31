@@ -534,13 +534,18 @@ make fmt                  # Format with gofumpt
 make fmt-check            # Fail if gofumpt would reformat files
 make vet                  # Run go vet
 make lint                 # Run all linters
-make check                # fmt-check + vet + lint + test
+make check                # fmt-check + vet + lint (Go, shell, payloads) + tests
 make deps                 # Download Go module dependencies
 make tidy                 # Tidy Go modules
 make install-tools        # Install pinned developer tools
 make help                 # Show Makefile targets
 make clean                # Clean build artifacts
-make install              # Install to /opt/logwatch-ai
+make install              # Install to /opt/logwatch-ai (local host)
+
+# Remote deployment — see docs/DEPLOYMENT.md, "Upgrading an Existing Install"
+make deploy-stage         # Build and verify on the host without installing
+make deploy               # Build, verify and install to the production host
+make rollback             # Revert the binary to the recorded previous target
 ```
 
 ### Cross-Platform Builds
@@ -589,6 +594,8 @@ logwatch-ai-go/
 │   ├── ocms/               # OCMS log reader, prompt, and preprocessing adapters
 │   ├── notification/       # Telegram notifications
 │   └── storage/            # SQLite database operations
+├── deploy/                 # Binary deployment (deploy.sh, rollback.sh) —
+│                           # use this to UPGRADE an install
 ├── scripts/                # Helper scripts
 ├── configs/                # Configuration templates
 ├── docs/                   # Documentation
