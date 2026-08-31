@@ -399,12 +399,16 @@ if ! "$prev_target" -version >/dev/null 2>&1; then
 else
     "$prev_target" -version 2>&1 | head -1
 fi
-printf '%s\n' "$prev_target" > ./.logwatch-analyzer.prev-target
-
 mv -Tf "./$REMOTE_BIN.incoming.$$" "./$REMOTE_BIN"
 note_artifact "$REMOTE_BIN"
 ln -sfn "$INSTALL_DIR/$REMOTE_BIN" ./logwatch-analyzer.new
 mv -Tf ./logwatch-analyzer.new ./logwatch-analyzer
+
+# Only now is the previous binary actually "previous". Writing this before
+# the swap meant a failure in between left the record pointing at the binary
+# that is still live, turning a later rollback into a no-op and discarding
+# the older valid target.
+printf '%s\n' "$prev_target" > ./.logwatch-analyzer.prev-target
 
 ls -la ./logwatch-analyzer ./"$REMOTE_BIN"
 
@@ -425,6 +429,12 @@ fi
 
 # --- scripts + runner (same lock) ------------------------------------------
 if [ "$INSTALL_SCRIPTS" = 1 ]; then
+    # If the staged runner pins a different lock path, cron could start the
+    # NEW runner on that path the moment it lands. Hold both across the swap.
+    incoming_lock=$(lock_path_of "$STAGE_DIR/run-cron.sh")
+    if [ -n "$incoming_lock" ] && [ "$incoming_lock" != "$(resolve_lock_file)" ]; then
+        acquire_extra_lock "$incoming_lock" || exit 1
+    fi
     mkdir -p ./scripts
     if [ -f "$STAGE_DIR/run-cron.sh" ] && ! cmp -s "$STAGE_DIR/run-cron.sh" ./run-cron.sh; then
         # A .prev must mean "this deployment replaced it", so the stale one is
@@ -455,7 +465,14 @@ if [ "$INSTALL_SCRIPTS" = 1 ]; then
             rm -f "$dst.prev"
             cp -p "$dst" "$dst.prev"
         else
-            mode=0755
+            # Repairing a deleted helper must not hand it a blanket 0755:
+            # generate-logwatch.sh runs logwatch as root and helper.sh is
+            # sourced, not executed.
+            case "$f" in
+                helper.sh)            mode=0640 ;;
+                generate-logwatch.sh) mode=0750 ;;
+                *)                    mode=0755 ;;
+            esac
         fi
         install -m "$mode" -o root -g root "$src" "$dst.new"
         mv -f "$dst.new" "$dst"

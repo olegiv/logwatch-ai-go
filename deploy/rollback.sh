@@ -127,6 +127,13 @@ if [ "$DO_RUNNER" = 1 ]; then
 fi
 
 if [ "$DO_RUNNER" = 1 ]; then
+    # The restored runner may pin a different lock than the one currently
+    # deployed; cron could enter through it the moment it lands — worse with
+    # --runner --db, where the database is being swapped at the same time.
+    incoming_lock=$(lock_path_of ./run-cron.sh.prev)
+    if [ -n "$incoming_lock" ] && [ "$incoming_lock" != "$(resolve_lock_file)" ]; then
+        acquire_extra_lock "$incoming_lock" || exit 1
+    fi
     # Check the backup BEFORE installing it. run-cron.sh is gitignored and
     # hand-maintained, so .prev is whatever the last deploy happened to copy
     # and has never been syntax-checked. As the left side of `&&` a failing
@@ -224,6 +231,17 @@ if [ "$DO_DB" = 1 ]; then
             rm -f "$staged" "$staged"-wal "$staged"-shm "$staged"-journal
             exit 1
         fi
+        # Fold any WAL into the main file so the publish below is a single
+        # rename. Otherwise the main file becomes live before its WAL is
+        # moved, and an interruption in between drops rows that exist only in
+        # that WAL — rows the validation above just confirmed were there.
+        sqlite3 "$staged" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null 2>&1 || true
+        if ! sqlite3 -readonly "$staged" 'select count(*) from summaries;' >/dev/null 2>&1; then
+            echo "error: staged restore became unreadable after checkpoint — aborting." >&2
+            rm -f "$staged" "$staged"-wal "$staged"-shm "$staged"-journal
+            exit 1
+        fi
+        rm -f "$staged"-wal "$staged"-shm "$staged"-journal
     fi
 
     # A fixed .suspect name would destroy the evidence of an earlier failed
@@ -233,10 +251,13 @@ if [ "$DO_DB" = 1 ]; then
     for ext in -wal -shm -journal; do
         [ -f "$db$ext" ] && mv "$db$ext" "$suspect$ext"
     done
-    mv -f "$staged" "$db"
+    # Sidecars first, main file last: with sqlite3 the staged set has been
+    # checkpointed to a single file, so this is one rename. Without it, the
+    # main file arriving last is the commit point.
     for ext in -wal -shm -journal; do
         if [ -f "$staged$ext" ]; then mv -f "$staged$ext" "$db$ext"; else rm -f "$db$ext"; fi
     done
+    mv -f "$staged" "$db"
     echo "  restored; previous state kept as $(basename "$suspect")"
     ls -l "$db"*
 fi

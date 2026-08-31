@@ -86,8 +86,14 @@ vet: ## Run go vet
 lint-go: ## Run golangci-lint
 	golangci-lint run ./...
 
-lint-sh: ## Lint shell scripts with shellcheck
-	shellcheck -x deploy/*.sh
+lint-sh: ## Lint shell scripts with shellcheck (skipped if not installed)
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		shellcheck -x deploy/*.sh; \
+	else \
+		echo "WARN: shellcheck not installed — skipping shell lint."; \
+		echo "      Install it (brew install shellcheck / apt-get install shellcheck)"; \
+		echo "      or see 'make install-tools'. CI enforces this regardless."; \
+	fi
 
 test-sh: ## Run shell unit tests for the deploy helpers
 	bash deploy/lib_test.sh
@@ -110,6 +116,17 @@ clean: ## Remove build artifacts
 install-tools: ## Install pinned developer tools
 	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	$(GO) install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
+	@# shellcheck is not a Go tool, so it cannot be `go install`ed. lint-sh
+	@# degrades to a warning without it; CI always enforces it.
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		echo "shellcheck: $$(shellcheck --version | awk '/version:/{print $$2}') (already installed)"; \
+	elif command -v brew >/dev/null 2>&1; then \
+		brew install shellcheck; \
+	elif command -v apt-get >/dev/null 2>&1; then \
+		echo "run: sudo apt-get install -y shellcheck"; \
+	else \
+		echo "install shellcheck manually: https://www.shellcheck.net/"; \
+	fi
 
 install: build-prod ## Install optimized binary to system directory
 	@echo "Installing to $(INSTALL_DIR)..."

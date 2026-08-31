@@ -78,7 +78,12 @@ echo "===== 2. installed binary ====="
 if [ -x "$INSTALL_DIR/logwatch-analyzer" ]; then
     "$INSTALL_DIR/logwatch-analyzer" -version 2>&1 || echo "!! -version exited $?"
 else
-    echo "!! no executable at $INSTALL_DIR/logwatch-analyzer"
+    # An upgrade has nothing to upgrade. Without failing here, preflight says
+    # ALL GATES PASSED and the deploy builds, uploads and snapshots before
+    # hitting its own "nothing installed" guard.
+    echo "  FAILED   no executable at $INSTALL_DIR/logwatch-analyzer"
+    echo "           use scripts/install.sh to bootstrap before deploying"
+    gate_fail=1
 fi
 
 echo

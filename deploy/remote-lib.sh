@@ -179,3 +179,32 @@ acquire_cron_lock() {
     fi
     return 0
 }
+
+# acquire_extra_lock PATH
+#
+# Takes a second exclusive lock on fd 8. Replacing the runner can change the
+# lock path it will use, and cron starting the NEW runner would then take a
+# different lock than the deploy holds — so both must be held across the
+# swap to keep the single-instance invariant.
+acquire_extra_lock() {
+    local lock="$1"
+    [ -n "$lock" ] || return 0
+    command -v flock >/dev/null 2>&1 || return 0
+    exec 8>"$lock" || { echo "ABORT: cannot open incoming lock $lock" >&2; return 1; }
+    if ! flock -n 8; then
+        if [ "${FORCE:-0}" = 1 ]; then
+            echo "WARN: incoming lock $lock is held; FORCE=1 given, proceeding" >&2
+            return 0
+        fi
+        echo "ABORT: the incoming runner's lock $lock is held" >&2
+        return 1
+    fi
+    echo "  also holding incoming runner lock: $lock"
+    return 0
+}
+
+# lock_path_of FILE — the LOCK_FILE default a run-cron.sh script would use.
+lock_path_of() {
+    # shellcheck disable=SC2016 # the ${...} here is literal text being matched
+    sed -n 's/^[[:space:]]*LOCK_FILE="\${LOCK_FILE:-\([^}]*\)}".*/\1/p' "$1" 2>/dev/null | tail -1
+}
