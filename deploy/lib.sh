@@ -28,12 +28,13 @@ EOF
   printf '%s\n' "$host"
 }
 
-# format_rollback_command HOST
+# format_rollback_command HOST INSTALL_DIR LOCK_FILE
 #
-# Include the already-resolved deployment target in operator instructions.
-# %q keeps the printed command safe to paste even for unusual SSH host syntax.
+# Include every resolved target setting in operator instructions. CLI flags
+# take precedence over deploy.env when the printed command is pasted later.
 format_rollback_command() {
-  printf './deploy/rollback.sh %q\n' "$1"
+  printf './deploy/rollback.sh --install-dir %q --lock-file %q %q\n' \
+    "$2" "$3" "$1"
 }
 
 # require_root_target HOST

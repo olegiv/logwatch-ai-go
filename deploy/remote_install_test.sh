@@ -6,6 +6,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REMOTE_INSTALL="$SCRIPT_DIR/remote-install.sh"
 REMOTE_ROLLBACK="$SCRIPT_DIR/remote-rollback.sh"
+ROLLBACK_SCRIPT="$SCRIPT_DIR/rollback.sh"
 
 pass=0
 fail=0
@@ -27,6 +28,15 @@ no_install_temps() {
         ok "$2"
     fi
 }
+no_rollback_temps() {
+    if compgen -G "$1/logwatch-analyzer.rollback.*" >/dev/null \
+        || compgen -G "$1/logwatch-analyzer.restore.*" >/dev/null \
+        || compgen -G "$1/.logwatch-analyzer.prev-target.consumed.*" >/dev/null; then
+        bad "$2" "temporary rollback files remain"
+    else
+        ok "$2"
+    fi
+}
 
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/logwatch-remote-test.XXXXXXXXXX")
 case "$TEST_ROOT" in
@@ -39,7 +49,8 @@ REAL_BASH=$(command -v bash)
 REAL_INSTALL=$(command -v install)
 REAL_LN=$(command -v ln)
 REAL_MV=$(command -v mv)
-export REAL_INSTALL REAL_LN REAL_MV
+REAL_RM=$(command -v rm)
+export REAL_INSTALL REAL_LN REAL_MV REAL_RM
 
 SHIM_DIR="$TEST_ROOT/bin"
 NO_FLOCK_DIR="$TEST_ROOT/no-flock-bin"
@@ -99,7 +110,23 @@ make_script "$SHIM_DIR/mv" \
     '  kill -TERM "$PPID"' \
     '  exit 0' \
     'fi' \
+    'if [[ ${TEST_SIGNAL_AFTER_RECORD_HIDE:-0} == 1 && $last == ./.logwatch-analyzer.prev-target.consumed.* ]]; then' \
+    '  "$REAL_MV" "${args[@]}"' \
+    '  kill -TERM "$PPID"' \
+    '  exit 0' \
+    'fi' \
     'exec "$REAL_MV" "${args[@]}"'
+
+# shellcheck disable=SC2016 # these are literal lines for the generated shim
+make_script "$SHIM_DIR/ssh" \
+    'printf "host=%s\ncommand=%s\n" "$1" "$2"' \
+    'cat >/dev/null'
+
+# shellcheck disable=SC2016 # these are literal lines for the generated shim
+make_script "$SHIM_DIR/rm" \
+    'last=${!#}' \
+    'if [[ ${TEST_FAIL_RECORD_CONSUME:-0} == 1 && $last == ./.logwatch-analyzer.prev-target.consumed.* ]]; then exit 78; fi' \
+    'exec "$REAL_RM" "$@"'
 
 TEST_PATH="$SHIM_DIR:$PATH"
 
@@ -116,6 +143,24 @@ make_analyzer() {
             'if [[ ${1:-} == -version ]]; then' \
             '  printf "%s\n" "$label"' \
             '  exit "$version_rc"' \
+            'fi' \
+            'exit 2'
+    } > "$path"
+    chmod 0755 "$path"
+}
+
+make_symlink_sensitive_analyzer() {
+    local path=$1
+    local label=$2
+    {
+        printf '%s\n' '#!/usr/bin/env bash'
+        printf 'label=%q\n' "$label"
+        # shellcheck disable=SC2016 # literal lines for the generated analyzer
+        printf '%s\n' \
+            'if [[ ${1:-} == -version ]]; then' \
+            '  [[ $0 != */logwatch-analyzer ]] || exit 1' \
+            '  printf "%s\n" "$label"' \
+            '  exit 0' \
             'fi' \
             'exit 2'
     } > "$path"
@@ -155,9 +200,24 @@ run_install() {
 run_rollback() {
     local force=$1
     INSTALL_DIR="$INSTALL_PATH" LOCK_FILE="$LOCK_PATH" FORCE="$force" \
-    TEST_FLOCK_RC="${TEST_FLOCK_RC:-0}" PATH="$TEST_PATH" \
+    TEST_FLOCK_RC="${TEST_FLOCK_RC:-0}" \
+    TEST_FAIL_RECORD_CONSUME="${TEST_FAIL_RECORD_CONSUME:-0}" \
+    TEST_SIGNAL_AFTER_RECORD_HIDE="${TEST_SIGNAL_AFTER_RECORD_HIDE:-0}" \
+    PATH="$TEST_PATH" \
     "$REAL_BASH" "$REMOTE_ROLLBACK"
 }
+
+echo "rollback CLI preserves explicit target settings"
+if output=$(_deploy_env_loaded=1 INSTALL_DIR=/wrong LOCK_FILE=/wrong PATH="$TEST_PATH" \
+    "$REAL_BASH" "$ROLLBACK_SCRIPT" \
+    --install-dir /srv/logwatch --lock-file /run/custom.lock root@override.example 2>&1); then
+    ok "rollback CLI accepts explicit target settings"
+else
+    bad "rollback CLI accepts explicit target settings" "$output"
+fi
+contains "rollback CLI keeps the resolved host" "$output" "host=root@override.example"
+contains "rollback CLI keeps the install root" "$output" "INSTALL_DIR=/srv/logwatch"
+contains "rollback CLI keeps the lock path" "$output" "LOCK_FILE=/run/custom.lock"
 
 echo "same-version redeploy preserves the outgoing inode"
 new_case same-version
@@ -431,6 +491,72 @@ if [[ ! -e $INSTALL_PATH/.logwatch-analyzer.prev-target ]]; then
 else
     bad "rollback consumes its record"
 fi
+
+echo "rollback interruption restores the hidden record"
+new_case rollback-record-signal
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v1" v1
+seed_live v2
+printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v1" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+TEST_SIGNAL_AFTER_RECORD_HIDE=1
+if output=$(run_rollback 0 2>&1); then
+    bad "record-hide signal interrupts rollback"
+else
+    ok "record-hide signal interrupts rollback"
+fi
+unset TEST_SIGNAL_AFTER_RECORD_HIDE
+same_file "record-hide signal leaves v2 live" "$INSTALL_PATH/logwatch-analyzer" \
+    "$INSTALL_PATH/logwatch-analyzer-v2"
+recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
+if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v1" ]]; then
+    ok "record-hide signal restores the rollback record"
+else
+    bad "record-hide signal restores the rollback record" "$recorded"
+fi
+no_rollback_temps "$INSTALL_PATH" "record-hide signal cleans rollback temporaries"
+
+echo "failed rollback smoke restores the original live target"
+new_case rollback-smoke-failure
+make_symlink_sensitive_analyzer "$INSTALL_PATH/logwatch-analyzer-v1" v1
+seed_live v2
+printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v1" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+if output=$(run_rollback 0 2>&1); then
+    bad "rollback smoke failure returns nonzero"
+else
+    ok "rollback smoke failure returns nonzero"
+fi
+same_file "rollback smoke failure restores v2" "$INSTALL_PATH/logwatch-analyzer" \
+    "$INSTALL_PATH/logwatch-analyzer-v2"
+recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
+if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v1" ]]; then
+    ok "rollback smoke failure restores the rollback record"
+else
+    bad "rollback smoke failure restores the rollback record" "$recorded"
+fi
+contains "rollback smoke recovery is reported" "$output" "restored the original live target"
+no_rollback_temps "$INSTALL_PATH" "rollback smoke recovery cleans temporaries"
+
+echo "failed record consumption restores an honest retry state"
+new_case rollback-consume-failure
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v1" v1
+seed_live v2
+printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v1" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+TEST_FAIL_RECORD_CONSUME=1
+if output=$(run_rollback 0 2>&1); then
+    ok "record-consumption failure keeps the successful rollback"
+else
+    bad "record-consumption failure keeps the successful rollback" "$output"
+fi
+unset TEST_FAIL_RECORD_CONSUME
+same_file "record-consumption failure leaves v1 live" "$INSTALL_PATH/logwatch-analyzer" \
+    "$INSTALL_PATH/logwatch-analyzer-v1"
+recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
+if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v1" ]]; then
+    ok "record-consumption failure restores the retry record"
+else
+    bad "record-consumption failure restores the retry record" "$recorded"
+fi
+contains "retained record is reported honestly" "$output" "record retained"
+no_rollback_temps "$INSTALL_PATH" "record-consumption failure cleans temporaries"
 
 echo
 if [[ $fail -eq 0 ]]; then

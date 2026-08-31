@@ -109,8 +109,8 @@ trap cleanup_rollback_temps EXIT
 
 # Hide the record atomically before the swap. Any failure below restores it;
 # success consumes the hidden copy so a second rollback cannot silently no-op.
-mv -Tf "$record" "$consumed_record"
 restore_record=1
+mv -Tf "$record" "$consumed_record"
 if ! ln -sfn "$prev" "$rollback_link"; then
     echo "error: could not create the rollback link; current binary is untouched" >&2
     exit 1
@@ -124,9 +124,14 @@ rollback_link=""
 if ! ./logwatch-analyzer -version; then
     echo "CRITICAL: rollback target failed through the stable symlink: $prev" >&2
     if [[ $failed == /* && -x $failed ]] && "$failed" -version >/dev/null 2>&1; then
+        rollback_link="./logwatch-analyzer.restore.$$"
         if ln -sfn "$failed" "$rollback_link" && mv -Tf "$rollback_link" ./logwatch-analyzer; then
             rollback_link=""
-            echo "restored the original live target: $failed" >&2
+            if ./logwatch-analyzer -version >&2; then
+                echo "restored the original live target: $failed" >&2
+            else
+                echo "CRITICAL: the original target also failed through the stable symlink: $failed" >&2
+            fi
         else
             echo "CRITICAL: could not restore the original live target: $failed" >&2
         fi
@@ -134,9 +139,16 @@ if ! ./logwatch-analyzer -version; then
     exit 1
 fi
 
-restore_record=0
+record_consumed=1
 if ! rm -f -- "$consumed_record"; then
-    echo "WARN: rollback succeeded, but remove the consumed record manually: $consumed_record" >&2
+    record_consumed=0
+    echo "WARN: rollback succeeded, but its record could not be consumed; restoring it for retry" >&2
+else
+    restore_record=0
 fi
 echo "  rolled away from $failed (kept when resolvable)"
-echo "  record consumed; a further rollback needs an explicit target"
+if [[ $record_consumed == 1 ]]; then
+    echo "  record consumed; a further rollback needs an explicit target"
+else
+    echo "  record retained; a repeated rollback is safe"
+fi

@@ -144,4 +144,5 @@ ssh "$HOST" \
 
 echo
 echo "==> Deployed $VERSION to $HOST"
-printf '    Roll back:  %s\n' "$(format_rollback_command "$HOST")"
+printf '    Roll back:  %s\n' \
+  "$(format_rollback_command "$HOST" "$INSTALL_DIR" "$LOCK_FILE")"

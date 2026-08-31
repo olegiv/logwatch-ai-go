@@ -107,6 +107,12 @@ Flags and overrides:
   `LOCK_FILE` must match the cron runner's lock path.
 - `HOST=` or a positional host argument overrides `DEPLOY_HOST`.
 
+After a successful install, `deploy.sh` prints a copy-paste rollback command
+that includes the resolved host, install root and lock path. `rollback.sh`
+accepts those values explicitly as `--install-dir <path>`,
+`--lock-file <path>` and a positional host, so later changes to `deploy.env`
+cannot redirect that recovery command.
+
 `make check` requires ShellCheck and includes hermetic tests for same-version
 redeployment, auto-revert, rollback-record failures, lock handling, dangling
 links and rollback consumption. CI runs this exact gate on GNU/Linux and then
