@@ -47,7 +47,10 @@ for arg in "$@"; do
     --db)      DO_DB=1 ;;
     --all)     DO_BIN=1; DO_RUNNER=1; DO_SCRIPTS=1; LENIENT=1 ;;
     -*)        echo "error: unknown flag $arg" >&2; exit 2 ;;
-    *)         HOST_ARG="$arg" ;;
+    *)         if [[ -n $HOST_ARG ]]; then
+                 echo "error: more than one host given ('$HOST_ARG' and '$arg')" >&2; exit 2
+               fi
+               HOST_ARG="$arg" ;;
   esac
 done
 # Default: binary only.
@@ -56,10 +59,14 @@ if [[ $DO_RUNNER == 0 && $DO_SCRIPTS == 0 && $DO_DB == 0 ]]; then DO_BIN=1; fi
 HOST=$(resolve_host "$HOST_ARG") || exit 1
 require_root_target "$HOST" || exit 1
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
+valid_install_dir "$INSTALL_DIR" || {
+  echo "error: refusing to use INSTALL_DIR='$INSTALL_DIR'" >&2; exit 1
+}
 
 echo "==> Rolling back on ${HOST}:${INSTALL_DIR}"
 ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" DO_BIN="$DO_BIN" DO_RUNNER="$DO_RUNNER" \
-            DO_SCRIPTS="$DO_SCRIPTS" DO_DB="$DO_DB" LENIENT="$LENIENT" 'bash -s' \
+            DO_SCRIPTS="$DO_SCRIPTS" DO_DB="$DO_DB" LENIENT="$LENIENT" \
+            TRACKED="${TRACKED_SCRIPTS[*]}" 'bash -s' \
   < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_ROLLBACK__'
 set -euo pipefail
 cd "$INSTALL_DIR"
@@ -128,7 +135,7 @@ fi
 
 if [ "$DO_SCRIPTS" = 1 ]; then
     restored=0
-    for f in generate-logwatch.sh generate-drupal-watchdog.sh helper.sh; do
+    for f in $TRACKED; do
         [ -f "./scripts/$f.prev" ] || continue
         # .prev was made with `cp -p`, so it already carries the mode the file
         # had when the deploy replaced it. Re-applying the CURRENT file's mode

@@ -24,6 +24,9 @@ HOST=$(resolve_host "${1:-}") || exit 1
 require_root_target "$HOST" || exit 1
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
+valid_install_dir "$INSTALL_DIR" || {
+  echo "error: refusing to use INSTALL_DIR='$INSTALL_DIR'" >&2; exit 1
+}
 
 # No -n here: it would redirect stdin from /dev/null and discard the payload
 # fed in below. -n belongs only on ssh calls that do NOT read a script.

@@ -6,10 +6,12 @@
 #   ./deploy/deploy.sh                     # uses DEPLOY_HOST from deploy.env
 #   ./deploy/deploy.sh <host>              # explicit (overrides env)
 #   REF=v0.15.0 ./deploy/deploy.sh         # build that git ref, not the worktree
-#   ./deploy/deploy.sh --stage-only        # build + upload, touch nothing in /opt
+#   ./deploy/deploy.sh --stage-only        # build + verify on the target, then
+#                                          # clean up; nothing in /opt is touched
 #   SKIP_TESTS=1 ./deploy/deploy.sh        # emergency bypass of make check
 #   SKIP_SCRIPTS=1 ./deploy/deploy.sh      # binary only; leave scripts/ and run-cron.sh
 #   ASSUME_YES=1 ./deploy/deploy.sh        # answer the scripts prompt automatically
+#   KEEP_VERSIONS=5 ./deploy/deploy.sh     # retain more old artifacts (default 3, 0 = keep all)
 #
 # Run ./deploy/preflight.sh FIRST — this script assumes its gates passed.
 #
@@ -58,14 +60,24 @@ for arg in "$@"; do
   case "$arg" in
     --stage-only) STAGE_ONLY=1 ;;
     -*) echo "error: unknown flag $arg" >&2; exit 2 ;;
-    *)  HOST_ARG="$arg" ;;
+    *)  if [[ -n $HOST_ARG ]]; then
+          echo "error: more than one host given ('$HOST_ARG' and '$arg')" >&2; exit 2
+        fi
+        HOST_ARG="$arg" ;;
   esac
 done
 
 HOST=$(resolve_host "$HOST_ARG") || exit 1
 require_root_target "$HOST" || exit 1
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
+valid_install_dir "$INSTALL_DIR" || {
+  echo "error: refusing to use INSTALL_DIR='$INSTALL_DIR'" >&2
+  echo "       Expected an absolute path of [A-Za-z0-9._/-] with no trailing slash." >&2
+  exit 1
+}
 REF="${REF:-}"
+KEEP_VERSIONS="${KEEP_VERSIONS:-3}"
+[[ $KEEP_VERSIONS =~ ^[0-9]+$ ]] || { echo "error: KEEP_VERSIONS must be a number" >&2; exit 1; }
 WITH_SCRIPTS=1
 [[ ${SKIP_SCRIPTS:-0} == 1 ]] && WITH_SCRIPTS=0
 
@@ -134,7 +146,6 @@ fi
 LOCAL_BIN="$SRC/bin/logwatch-analyzer-linux-amd64"
 # Tracked helpers follow the built ref; the gitignored runner cannot.
 LOCAL_RUNNER="$REPO_ROOT/scripts/run-cron.sh"
-TRACKED_SCRIPTS=(generate-logwatch.sh generate-drupal-watchdog.sh helper.sh)
 REMOTE_BIN="logwatch-analyzer-${VERSION}"
 
 echo "==> Deploying ${VERSION} to ${HOST}:${INSTALL_DIR}"
@@ -280,7 +291,8 @@ fi
 echo "==> Installing (cron lock, database backup, binary swap)"
 ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" STAGE_DIR="$STAGE_DIR" \
             REMOTE_BIN="$REMOTE_BIN" VERSION="$VERSION" \
-            INSTALL_SCRIPTS="$INSTALL_SCRIPTS" TRACKED="${TRACKED_SCRIPTS[*]}" 'bash -s' \
+            INSTALL_SCRIPTS="$INSTALL_SCRIPTS" TRACKED="${TRACKED_SCRIPTS[*]}" \
+            KEEP_VERSIONS="$KEEP_VERSIONS" 'bash -s' \
   < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_INSTALL__'
 set -euo pipefail
 cd "$INSTALL_DIR"
@@ -430,6 +442,43 @@ if [ "$INSTALL_SCRIPTS" = 1 ]; then
         echo "  updated $dst (mode $mode)"
     done
     ls -la ./run-cron.sh ./scripts/
+fi
+
+# --- prune old artifacts ---------------------------------------------------
+# Versioned binaries, legacy copies and database snapshots otherwise
+# accumulate forever (~12 MiB per redeploy) while GATE 4 only demands 25 MiB,
+# on a box shared with other tenants. Deletion is deliberately conservative:
+# only names this tooling generates, never the live target, and never the
+# recorded rollback target.
+if [ "$KEEP_VERSIONS" -gt 0 ]; then
+    live=$(readlink -f ./logwatch-analyzer)
+    keep_target=$(cat ./.logwatch-analyzer.prev-target 2>/dev/null || echo "")
+    echo "  pruning old artifacts (keeping $KEEP_VERSIONS, plus live and rollback target)"
+
+    # Binaries: newest first, skip the two that must survive, drop the rest
+    # past the keep count.
+    n=0
+    for f in $(ls -1t ./logwatch-analyzer-* 2>/dev/null); do
+        abs="$INSTALL_DIR/${f#./}"
+        [ "$abs" = "$live" ] && continue
+        [ "$abs" = "$keep_target" ] && continue
+        n=$((n + 1))
+        if [ "$n" -gt "$KEEP_VERSIONS" ]; then
+            rm -f "$f" && echo "    removed $f"
+        fi
+    done
+
+    # Database snapshots: prune the main files and take their sidecars along,
+    # so a restore can never pick up a WAL whose snapshot is gone.
+    if db=$(resolve_db); then
+        n=0
+        for f in $(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$'); do
+            n=$((n + 1))
+            if [ "$n" -gt "$KEEP_VERSIONS" ]; then
+                rm -f "$f" "$f"-wal "$f"-shm "$f"-journal && echo "    removed $f"
+            fi
+        done
+    fi
 fi
 
 # --- prove the protected files are unchanged -------------------------------

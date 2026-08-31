@@ -79,3 +79,20 @@ valid_version() {
 valid_stage_dir() {
   [[ $1 =~ ^/tmp/logwatch-deploy\.[A-Za-z0-9]+$ ]]
 }
+
+# Tracked helper scripts deployed into $INSTALL_DIR/scripts/. Defined once:
+# deploy.sh uploads and diffs them and rollback.sh restores them, and a list
+# that disagreed between the two would upload a script, report it changed,
+# then never install or restore it.
+# shellcheck disable=SC2034 # consumed by deploy.sh and rollback.sh
+TRACKED_SCRIPTS=(generate-logwatch.sh generate-drupal-watchdog.sh helper.sh)
+
+# valid_install_dir PATH
+#
+# True when PATH is safe to interpolate into a remote command. INSTALL_DIR is
+# passed through `ssh host VAR=... bash -s`, where the remote login shell
+# re-parses the argument, so a space or a metacharacter would break or inject.
+# VERSION and STAGE_DIR are already validated; this closes the same hole.
+valid_install_dir() {
+  [[ $1 =~ ^/[A-Za-z0-9._/-]+$ && $1 != *//* && $1 != */ ]]
+}

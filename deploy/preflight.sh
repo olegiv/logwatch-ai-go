@@ -2,7 +2,8 @@
 #
 # Read-only pre-deployment inspection of the logwatch-ai production host.
 #
-# Touches nothing: every remote command reads state or probes a permission.
+# Read-only, with one exception: GATE 2 creates and immediately removes a
+# probe file to prove the lock directory is writable. Nothing else is written.
 # Prints a captured snapshot, then evaluates four hard gates that must pass
 # before deploy.sh is allowed to mutate /opt/logwatch-ai.
 #
@@ -39,6 +40,9 @@ HOST=$(resolve_host "${1:-}") || exit 1
 require_root_target "$HOST" || exit 1
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
+valid_install_dir "$INSTALL_DIR" || {
+  echo "error: refusing to use INSTALL_DIR='$INSTALL_DIR'" >&2; exit 1
+}
 OLD_LOCK_FILE="${OLD_LOCK_FILE:-/var/lock/logwatch-ai-cron.lock}"
 
 echo "==> Pre-flight inspection of ${HOST} (read-only)"
@@ -97,8 +101,16 @@ echo
 echo "===== 5. L-06 drift: LOCK_FILE default in deployed runners ====="
 echo "--- top-level runner (THIS is the file cron executes) ---"
 grep -Hn 'LOCK_FILE' "$INSTALL_DIR/run-cron.sh" 2>&1 || echo "!! no run-cron.sh at top level"
-echo "--- scripts/ copy (never executed; kept consistent only to avoid misleading auditors) ---"
-grep -Hn 'LOCK_FILE' "$INSTALL_DIR/scripts/run-cron.sh" 2>&1 || echo "(absent)"
+# deploy.sh installs the runner only at the top level, which is the path cron
+# invokes. A scripts/run-cron.sh here is a leftover from an old `cp -r
+# scripts`: it is never executed and never updated, so it can only drift and
+# mislead whoever reads it next.
+if [ -e "$INSTALL_DIR/scripts/run-cron.sh" ]; then
+    echo "--- scripts/run-cron.sh: STALE COPY PRESENT (never executed; safe to delete) ---"
+    grep -Hn 'LOCK_FILE' "$INSTALL_DIR/scripts/run-cron.sh" 2>&1
+else
+    echo "--- scripts/run-cron.sh: absent (correct — the runner lives at the top level) ---"
+fi
 echo "--- checksums (compare against local) ---"
 sha256sum "$INSTALL_DIR/logwatch-analyzer" "$INSTALL_DIR/run-cron.sh" "$INSTALL_DIR"/scripts/*.sh 2>&1
 
@@ -235,11 +247,17 @@ elif [ ! -f "$db" ]; then
 else
     ls -l "$db"* 2>&1
     if command -v sqlite3 >/dev/null 2>&1; then
-        # -readonly where supported; the file: URI is the portable fallback.
-        sqlite3 -readonly "$db" 'select 1;' >/dev/null 2>&1 \
-            && SQ=(sqlite3 -readonly "$db") \
-            || SQ=(sqlite3 "file:$db?mode=ro")
-        "${SQ[@]}" \
+        # Only -readonly is used. The `file:...?mode=ro` URI form was the
+        # fallback, but a sqlite3 built without URI filename support treats it
+        # as a literal name and CREATES it in the cwd — which would break the
+        # read-only guarantee this section exists to keep.
+        if ! sqlite3 -readonly "$db" 'select 1;' >/dev/null 2>&1; then
+            echo "  (sqlite3 here has no -readonly; skipping rather than risk a write)"
+            SQ=()
+        else
+            SQ=(sqlite3 -readonly "$db")
+        fi
+        [ ${#SQ[@]} -gt 0 ] && "${SQ[@]}" \
           "select 'rows=' || count(*) from summaries;
            select log_source_type || ' / ' || site_name || ' : ' || count(*) || '  last=' || max(timestamp)
              from summaries group by log_source_type, site_name;" 2>&1
