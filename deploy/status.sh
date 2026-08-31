@@ -58,7 +58,13 @@ done
 
 echo
 echo "==> Schedule"
-crontab -l -u root 2>/dev/null | grep -iE 'logwatch|@desc' || echo "(no logwatch crontab line)"
+# docs/CRON_SETUP.md documents /etc/cron.d/logwatch-ai as a supported
+# location, so reporting only root's personal crontab could claim there is no
+# schedule while the lock section below shows that same entry's lock path.
+sched=$( { crontab -l -u root 2>/dev/null | sed 's/^/[crontab] /';
+           grep -H -iE 'logwatch|@desc' /etc/cron.d/* 2>/dev/null | sed 's/^/[cron.d] /'; } \
+         | grep -iE 'logwatch|@desc' )
+if [ -n "$sched" ]; then printf '%s\n' "$sched"; else echo "(no logwatch schedule found)"; fi
 
 echo
 echo "==> Lock"

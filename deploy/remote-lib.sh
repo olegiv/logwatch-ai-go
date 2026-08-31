@@ -134,9 +134,13 @@ resolve_lock_file() {
     # docs/CRON_SETUP.md documents /etc/cron.d/logwatch-ai as a supported
     # location, so an override there must be honoured too — otherwise the
     # documented cron job can start while the deploy holds a different lock.
+    # Filter on the configured runner path, not the bare basename: a second
+    # installation or a stale cron.d entry would otherwise contribute its
+    # LOCK_FILE and leave this deploy holding an unrelated lock while the real
+    # runner starts during a snapshot or swap.
     from_cron=$( { crontab -l -u root 2>/dev/null; cat /etc/cron.d/* 2>/dev/null; } \
         | grep -v '^[[:space:]]*#' \
-        | grep -F 'run-cron.sh' \
+        | grep -F "$INSTALL_DIR/run-cron.sh" \
         | sed -nE 's/.*LOCK_FILE="([^"]*)".*/\1/p;
                    s/.*LOCK_FILE='"'"'([^'"'"']*)'"'"'.*/\1/p;
                    s/.*LOCK_FILE=([^"'"'"'[:space:]][^[:space:]]*).*/\1/p' \
@@ -230,6 +234,17 @@ inflight_pattern() {
 # just the one preflight happens to gate.
 validate_lock_dir() {
     local lock="$1" dir perm owner
+    # A relative LOCK_FILE is opened by the runner before it cd's to
+    # INSTALL_DIR, so cron resolves it against ITS starting directory while
+    # this tooling — already cd'd — would resolve it somewhere else. The two
+    # would flock different files and could overlap.
+    case "$lock" in
+        /*) ;;
+        *)  echo "ABORT: LOCK_FILE '$lock' is relative." >&2
+            echo "       cron and this tooling would resolve it to different" >&2
+            echo "       files and could run concurrently. Use an absolute path." >&2
+            return 1 ;;
+    esac
     dir=$(dirname "$lock")
     perm=$(stat -c '%a' "$dir" 2>/dev/null) || { echo "ABORT: cannot stat $dir" >&2; return 1; }
     owner=$(stat -c '%U' "$dir" 2>/dev/null)

@@ -202,6 +202,19 @@ if [ "$DO_DB" = 1 ]; then
         echo "error: no $(basename "$db").pre-* backup found beside $db" >&2
         exit 1
     fi
+    # A symlinked DATABASE_PATH would be REPLACED by the rename below, so the
+    # analyzer would then write beside the link instead of to its target,
+    # silently splitting future data from the configured storage. Refuse
+    # rather than guess which the operator meant.
+    if [ -L "$db" ]; then
+        echo "error: $db is a symlink to $(readlink -f "$db")." >&2
+        echo "       Restoring would replace the link with a regular file." >&2
+        echo "       Restore to the link's target by hand, or point" >&2
+        echo "       DATABASE_PATH at the real path." >&2
+        rm -f "$staged"
+        exit 1
+    fi
+
     # Keep absolute paths. Changing into the database directory and reducing
     # both to basenames breaks when DATABASE_PATH has moved since the
     # snapshot was recorded: the backup would be looked for beside the new
@@ -295,11 +308,25 @@ if [ "$DO_DB" = 1 ]; then
     # rename releases the lock with a live database missing rows that existed
     # only in its WAL.
     if [ -f "$db-wal" ] || [ -f "$db-journal" ]; then
+        # As with the staged copy: sqlite3 can exit 0 while reporting a busy
+        # checkpoint in the first result column. Unlinking the live WAL on
+        # that basis would leave the configured database missing committed
+        # frames if the rename below never happened.
         ck=$(sqlite3 "$db" 'PRAGMA wal_checkpoint(TRUNCATE);' 2>&1) || {
             echo "error: could not checkpoint the live database before replacing it: $ck" >&2
             echo "       Nothing has been changed." >&2
             rm -f "$staged"; exit 1
         }
+        if [ "${ck%%|*}" != "0" ]; then
+            echo "error: live checkpoint did not complete (result: $ck)." >&2
+            echo "       Another connection may hold the database. Nothing changed." >&2
+            rm -f "$staged"; exit 1
+        fi
+        if [ -s "$db-wal" ]; then
+            echo "error: live WAL still holds frames after a TRUNCATE checkpoint." >&2
+            echo "       Nothing has been changed." >&2
+            rm -f "$staged"; exit 1
+        fi
     fi
     [ -f "$db" ] && ln -f "$db" "$suspect"
     for ext in -wal -shm -journal; do

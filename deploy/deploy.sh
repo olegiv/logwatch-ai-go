@@ -435,7 +435,10 @@ mv -Tf ./logwatch-analyzer.new ./logwatch-analyzer
 # Only now is the previous binary actually "previous". Writing this before
 # the swap meant a failure in between left the record pointing at the binary
 # that is still live, turning a later rollback into a no-op and discarding
-# the older valid target.
+# the older valid target. Keep the old record so the revert below can put it
+# back: reverting to B while recording B as its own predecessor would make
+# the next rollback a no-op and lose the path back to A.
+prior_meta=$(cat ./.logwatch-analyzer.prev-target 2>/dev/null || echo "")
 printf '%s\n' "$prev_target" > ./.logwatch-analyzer.prev-target
 
 ls -la ./logwatch-analyzer ./"$REMOTE_BIN"
@@ -447,6 +450,13 @@ if ! ./logwatch-analyzer -version; then
     echo "ABORT: the new binary failed -version AFTER the swap. Reverting." >&2
     ln -sfn "$prev_target" ./logwatch-analyzer.rb
     mv -Tf ./logwatch-analyzer.rb ./logwatch-analyzer
+    # The symlink is back where it was, so the rollback record must be too.
+    if [ -n "$prior_meta" ]; then
+        printf '%s\n' "$prior_meta" > ./.logwatch-analyzer.prev-target
+        echo "  rollback target restored to $prior_meta" >&2
+    else
+        rm -f ./.logwatch-analyzer.prev-target
+    fi
     if ./logwatch-analyzer -version >&2; then
         echo "reverted to $prev_target" >&2
     else

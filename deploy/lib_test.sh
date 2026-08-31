@@ -131,18 +131,24 @@ stub_crontab() {  # stub_crontab <content>
 
 # shellcheck disable=SC2016 # writing a literal shell default, not expanding it
 printf 'LOCK_FILE="${LOCK_FILE:-/run/logwatch-ai-cron.lock}"\n' > run-cron.sh
-stub_crontab '7 2 * * * /opt/logwatch-ai/run-cron.sh >> /x.log 2>&1'
+stub_crontab "7 2 * * * $INSTALL_DIR/run-cron.sh >> /x.log 2>&1"
 eq "falls back to the deployed script's default" "/run/logwatch-ai-cron.lock" "$(LOCK_FILE='' resolve_lock_file)"
 
-stub_crontab '7 2 * * * LOCK_FILE=/opt/logwatch-ai/.cron.lock /opt/logwatch-ai/run-cron.sh'
-eq "honours a crontab-pinned lock path" "/opt/logwatch-ai/.cron.lock" "$(LOCK_FILE='' resolve_lock_file)"
+stub_crontab "7 2 * * * LOCK_FILE=/opt/pinned.lock $INSTALL_DIR/run-cron.sh"
+eq "honours a crontab-pinned lock path" "/opt/pinned.lock" "$(LOCK_FILE='' resolve_lock_file)"
 
-stub_crontab '7 2 * * * LOCK_FILE=/opt/logwatch-ai/.cron.lock /opt/logwatch-ai/run-cron.sh
-#OLD 7 2 * * * LOCK_FILE=/var/lock/DISABLED.lock /opt/logwatch-ai/run-cron.sh'
-eq "ignores a commented-out crontab line" "/opt/logwatch-ai/.cron.lock" "$(LOCK_FILE='' resolve_lock_file)"
+stub_crontab "7 2 * * * LOCK_FILE=/opt/pinned.lock $INSTALL_DIR/run-cron.sh
+#OLD 7 2 * * * LOCK_FILE=/var/lock/DISABLED.lock $INSTALL_DIR/run-cron.sh"
+eq "ignores a commented-out crontab line" "/opt/pinned.lock" "$(LOCK_FILE='' resolve_lock_file)"
 
-stub_crontab '7 2 * * * LOCK_FILE="/var/lock/quoted path.lock" /opt/logwatch-ai/run-cron.sh'
+stub_crontab "7 2 * * * LOCK_FILE=\"/var/lock/quoted path.lock\" $INSTALL_DIR/run-cron.sh"
 eq "keeps a space inside a quoted lock path" "/var/lock/quoted path.lock" "$(LOCK_FILE='' resolve_lock_file)"
+
+# Discovery is scoped to THIS installation: another install's cron entry must
+# not contribute its lock, or the deploy would hold an unrelated one while
+# the configured runner starts.
+stub_crontab "7 2 * * * LOCK_FILE=/opt/other.lock /opt/other-logwatch/run-cron.sh"
+eq "ignores another installation's entry" "/run/logwatch-ai-cron.lock" "$(LOCK_FILE='' resolve_lock_file)"
 
 eq "an explicit LOCK_FILE wins over everything" "/tmp/explicit.lock" "$(LOCK_FILE=/tmp/explicit.lock resolve_lock_file)"
 
@@ -160,6 +166,12 @@ eq "reads a double-quoted value"  "/opt/logwatch-ai/.cron.lock" "$(lock_path_of 
 eq "reads a single-quoted value"  "/opt/sq.lock"               "$(lock_path_of r3.sh)"
 eq "reads a bare value"           "/opt/bare.lock"             "$(lock_path_of r4.sh)"
 eq "reads an exported value"      "/opt/exported.lock"         "$(lock_path_of r5.sh)"
+
+# A relative LOCK_FILE resolves against the runner's starting directory for
+# cron and against INSTALL_DIR here, so the two would lock different files.
+echo "validate_lock_dir"
+rejects "rejects a relative lock path"  validate_lock_dir "relative/x.lock"
+rejects "rejects a bare filename"       validate_lock_dir "x.lock"
 
 # ----------------------------------------------------------- resolve_host
 echo "resolve_host / require_root_target"
