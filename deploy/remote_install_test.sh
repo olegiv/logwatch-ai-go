@@ -137,7 +137,8 @@ run_install() {
 }
 
 run_rollback() {
-    INSTALL_DIR="$INSTALL_PATH" LOCK_FILE="$LOCK_PATH" FORCE="${1:-0}" \
+    local force=$1
+    INSTALL_DIR="$INSTALL_PATH" LOCK_FILE="$LOCK_PATH" FORCE="$force" \
     TEST_FLOCK_RC="${TEST_FLOCK_RC:-0}" PATH="$TEST_PATH" \
     "$REAL_BASH" "$REMOTE_ROLLBACK"
 }
@@ -276,7 +277,7 @@ fi
 echo "rollback diagnostics and record consumption"
 new_case missing-record
 ln -s /usr/bin/true "$INSTALL_PATH/logwatch-analyzer"
-if output=$(run_rollback 2>&1); then
+if output=$(run_rollback 0 2>&1); then
     bad "rollback without a record fails"
 else
     ok "rollback without a record fails"
@@ -288,7 +289,7 @@ new_case rollback-success
 make_analyzer "$INSTALL_PATH/logwatch-analyzer-v1" v1
 seed_live v2
 printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v1" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
-if output=$(run_rollback 2>&1); then
+if output=$(run_rollback 0 2>&1); then
     ok "rollback succeeds"
 else
     bad "rollback succeeds" "$output"
