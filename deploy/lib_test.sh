@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 #
-# Unit tests for the pure helpers in lib.sh. Small on purpose: these three
-# functions guard values that reach a remote command line and a root `rm -rf`,
-# so they are the part worth pinning. Everything else needs a real host and is
-# covered by `./deploy/deploy.sh --stage-only`.
+# Unit tests for the pure helpers in lib.sh. These helpers guard values that
+# reach a remote command line and a root `rm -rf`; remote_install_test.sh
+# exercises the swap and rollback state machines without a real host.
 #
 #   bash deploy/lib_test.sh    (or: make test-sh)
 
@@ -40,6 +39,25 @@ for v in "/tmp/logwatch-deploy.a; rm -rf /" "/tmp/logwatch-deploy.a'b" /tmp/othe
          /tmp/logwatch-deploy. /etc '' 'banner
 /tmp/logwatch-deploy.abc'; do
   no "rejects ${v:-<empty>}" valid_stage_dir "$v"; done
+
+echo "valid_absolute_path (reaches a remote root shell)"
+for v in /opt/logwatch-ai /opt/logwatch-ai/ /run/logwatch-ai.lock /srv/app_v2/data+old; do
+  yes "accepts $v" valid_absolute_path "$v"
+done
+# shellcheck disable=SC2016 # hostile literals; expansion is the bug
+for v in 'relative/path' '/opt/app;id' '/opt/app path' '/opt/$(id)' '/opt/app`id`' '';
+do
+  no "rejects ${v:-<empty>}" valid_absolute_path "$v"
+done
+
+echo "valid_boolean"
+for v in 0 1; do yes "accepts $v" valid_boolean "$v"; done
+for v in true yes '1;id' ''; do no "rejects ${v:-<empty>}" valid_boolean "$v"; done
+
+echo "valid_sha256"
+yes "accepts 64 hexadecimal characters" valid_sha256 \
+  0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+no "rejects a short digest" valid_sha256 deadbeef
 
 echo
 [[ $fail -eq 0 ]] && { echo "PASS — $pass assertions"; exit 0; }

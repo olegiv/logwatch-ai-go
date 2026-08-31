@@ -86,17 +86,17 @@ vet: ## Run go vet
 lint-go: ## Run golangci-lint
 	golangci-lint run ./...
 
-lint-sh: ## Lint shell scripts with shellcheck (skipped if not installed)
-	@if command -v shellcheck >/dev/null 2>&1; then \
-		shellcheck -x deploy/*.sh; \
-	else \
-		echo "WARN: shellcheck not installed — skipping shell lint."; \
-		echo "      Install it (brew install shellcheck / apt-get install shellcheck)"; \
-		echo "      or see 'make install-tools'. CI enforces this regardless."; \
-	fi
+lint-sh: ## Lint deployment shell scripts (requires shellcheck)
+	@command -v shellcheck >/dev/null 2>&1 || { \
+		echo "error: shellcheck is required; run 'make install-tools'" >&2; \
+		exit 127; \
+	}
+	shellcheck -x deploy/*.sh
+	bash -n deploy/*.sh
 
-test-sh: ## Run shell unit tests for the deploy helpers
+test-sh: ## Run shell helper and deployment state-machine tests
 	bash deploy/lib_test.sh
+	bash deploy/remote_install_test.sh
 
 lint: lint-go lint-sh ## Run all linters
 
@@ -113,19 +113,24 @@ clean: ## Remove build artifacts
 	@rm -rf $(BUILD_DIR)
 	@rm -f coverage.out coverage.html
 
-install-tools: ## Install pinned developer tools
+install-tools: ## Install required Go and shell quality tools
 	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	$(GO) install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
-	@# shellcheck is not a Go tool, so it cannot be `go install`ed. lint-sh
-	@# degrades to a warning without it; CI always enforces it.
+	@# shellcheck is not a Go tool, so install it with the host package manager.
 	@if command -v shellcheck >/dev/null 2>&1; then \
 		echo "shellcheck: $$(shellcheck --version | awk '/version:/{print $$2}') (already installed)"; \
 	elif command -v brew >/dev/null 2>&1; then \
 		brew install shellcheck; \
 	elif command -v apt-get >/dev/null 2>&1; then \
-		echo "run: sudo apt-get install -y shellcheck"; \
+		if [ "$$(id -u)" -eq 0 ]; then \
+			apt-get update && apt-get install -y shellcheck; \
+		elif command -v sudo >/dev/null 2>&1; then \
+			sudo apt-get update && sudo apt-get install -y shellcheck; \
+		else \
+			echo "error: installing shellcheck requires root or sudo" >&2; exit 1; \
+		fi; \
 	else \
-		echo "install shellcheck manually: https://www.shellcheck.net/"; \
+		echo "error: install shellcheck manually: https://www.shellcheck.net/" >&2; exit 1; \
 	fi
 
 install: build-prod ## Install optimized binary to system directory

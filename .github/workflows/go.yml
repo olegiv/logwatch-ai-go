@@ -23,18 +23,17 @@ jobs:
       with:
         go-version-file: 'go.mod'
 
-    - name: Build
-      run: go build -v ./...
+    - name: Install quality tools
+      run: |
+        make install-tools
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-    - name: Test
-      run: go test -v ./...
+    # Use the same fail-closed gate that deploy.sh runs. This includes Go
+    # formatting, vet, pinned linting, Go tests, shellcheck and both deployment
+    # test suites. On Linux the state-machine tests exercise real GNU mv -T,
+    # readlink -f and the production shell semantics.
+    - name: Quality gate
+      run: make check
 
-    # The deploy/ scripts run on Linux but are authored on macOS, so the
-    # runner is the only place they are linted and unit-tested under GNU
-    # userland (a BSD-only mktemp template once made REF deploys fail on
-    # Linux while working locally). shellcheck is preinstalled here.
-    - name: Shell lint
-      run: shellcheck -x deploy/*.sh
-
-    - name: Shell tests
-      run: bash deploy/lib_test.sh
+    - name: Production Linux AMD64 build
+      run: make build-linux-amd64

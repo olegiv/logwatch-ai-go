@@ -534,10 +534,10 @@ make fmt                  # Format with gofumpt
 make fmt-check            # Fail if gofumpt would reformat files
 make vet                  # Run go vet
 make lint                 # Run all linters
-make check                # fmt-check + vet + lint (Go, shell, payloads) + tests
+make check                # fmt-check + vet + Go/shell lint + Go/deployment tests
 make deps                 # Download Go module dependencies
 make tidy                 # Tidy Go modules
-make install-tools        # Install pinned developer tools
+make install-tools        # Install required Go and shell quality tools
 make help                 # Show Makefile targets
 make clean                # Clean build artifacts
 make install              # Install to /opt/logwatch-ai (local host)

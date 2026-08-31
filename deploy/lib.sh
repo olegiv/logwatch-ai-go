@@ -57,3 +57,26 @@ valid_version() {
 valid_stage_dir() {
   [[ $1 =~ ^/tmp/logwatch-deploy\.[A-Za-z0-9]+$ ]]
 }
+
+# valid_absolute_path PATH
+#
+# INSTALL_DIR and LOCK_FILE are serialized into an SSH remote command. Keep
+# their grammar deliberately narrow so the remote login shell cannot reparse a
+# configuration value as shell syntax. Canonicalization still happens on the
+# target because an allowlisted path may contain a trailing slash, `.` or `..`.
+valid_absolute_path() {
+  [[ $1 =~ ^/[A-Za-z0-9._+/-]+$ ]]
+}
+
+# valid_boolean VALUE
+#
+# Deployment escape hatches are intentionally binary. Rejecting all other
+# values also prevents them from becoming remote-shell syntax.
+valid_boolean() {
+  [[ $1 == 0 || $1 == 1 ]]
+}
+
+# valid_sha256 DIGEST
+valid_sha256() {
+  [[ $1 =~ ^[A-Fa-f0-9]{64}$ ]]
+}

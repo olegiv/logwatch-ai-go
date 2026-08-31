@@ -27,10 +27,10 @@ make fmt            # Format with gofumpt
 make fmt-check      # Fail if gofumpt would reformat files
 make vet            # Run go vet
 make lint           # Run all linters
-make check          # fmt-check + vet + lint (Go, shell, payloads) + tests
+make check          # fmt-check + vet + Go/shell lint + Go/deployment tests
 make deps           # go mod download
 make tidy           # go mod tidy
-make install-tools  # Install pinned golangci-lint + gofumpt
+make install-tools  # Install required Go and shell quality tools
 
 # Production
 make build-prod           # Optimized host production build
@@ -43,8 +43,8 @@ make install              # Install to /opt/logwatch-ai (requires sudo, local ho
 make deploy-stage         # Build and verify on the host without installing
 make deploy               # Build, verify and install to the production host
 make rollback             # Revert the binary to the recorded previous target
-make lint-sh              # shellcheck the deploy/ scripts
-make test-sh              # Shell unit tests for the deploy helpers
+make lint-sh              # ShellCheck + syntax-check deploy/ scripts
+make test-sh              # Helper + deployment state-machine tests
 ```
 
 ## Package Structure

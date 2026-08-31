@@ -86,16 +86,31 @@ with that version instead of whatever you have checked out:
 REF=v0.15.0 ./deploy/deploy.sh
 ```
 
-`deploy.sh` runs `make check`, builds a static Linux binary, copies it to a
-root-owned temporary directory on the host and **runs it there** (which
-catches a CPU-instruction mismatch while `/opt` is untouched). It then takes
-the cron runner's own `flock`, installs the binary under a versioned name,
-and re-points the `logwatch-analyzer` symlink with an atomic rename. If the
-new binary fails `-version` after the swap, it reverts on the spot.
+`deploy.sh` runs the fail-closed `make check` gate, builds a static Linux
+binary, copies it to a root-owned temporary directory on the host and **runs
+it there** (which catches a CPU-instruction mismatch while `/opt` is
+untouched). It then requires the cron runner's own `flock`, installs the
+binary under a versioned name, and re-points the `logwatch-analyzer` symlink
+with an atomic rename. The rollback record is not published until the new
+binary passes `-version`; any later metadata failure restores the previous
+binary and preserves the earlier rollback record.
 
-Flags: `REF=<tag>`, `--stage-only`, `SKIP_TESTS=1`, `FORCE=1` (proceed with
-the cron lock held — needed to roll back a wedged run), `INSTALL_DIR=`,
-`HOST=` or a positional host argument.
+Flags and overrides:
+
+- `REF=<tag>` builds a detached worktree for that tag or commit.
+- `--stage-only` uploads and executes the artifact without installing it.
+- `SKIP_TESTS=1` skips `make check` and emits a prominent warning.
+- `FORCE=1` explicitly overrides a held/missing `flock` and, for deployment,
+  a non-runnable predecessor. Every override is reported. Use it only for
+  recovery, because a failed new binary may then have no automatic way back.
+- `INSTALL_DIR=` and `LOCK_FILE=` accept shell-safe absolute paths;
+  `LOCK_FILE` must match the cron runner's lock path.
+- `HOST=` or a positional host argument overrides `DEPLOY_HOST`.
+
+`make check` requires ShellCheck and includes hermetic tests for same-version
+redeployment, auto-revert, rollback-record failures, lock handling, dangling
+links and rollback consumption. CI runs this exact gate on GNU/Linux and then
+builds the exact production target.
 
 `rollback.sh` re-points the symlink at the target recorded by the last
 deploy, checks it actually runs first, and then consumes the record — so a
@@ -103,9 +118,9 @@ second rollback refuses rather than silently doing nothing. Nothing is
 deleted; the binary rolled away from keeps its versioned name.
 
 **Do not use `scripts/install.sh` to upgrade.** It looks for the host-arch
-binary name (so it cannot place a cross-built Linux binary), replaces
-`scripts/` wholesale, and finishes with a recursive `chown` across `.env` and
-`data/summaries.db`.
+binary name (so it cannot place a cross-built Linux binary), overwrites
+repository-managed files under `scripts/`, and finishes with a recursive
+`chown` across `.env` and `data/summaries.db`.
 
 **Not covered, deliberately.** No database snapshot is taken — a binary swap
 does not touch the database, and the machinery to locate and safely copy a
