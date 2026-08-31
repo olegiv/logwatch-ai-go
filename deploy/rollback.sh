@@ -23,12 +23,21 @@
 #   ./deploy/rollback.sh --all              # binary + runner + helper scripts
 #   ./deploy/rollback.sh --db               # restore the pre-deploy database
 #   ./deploy/rollback.sh <host> [--flags]
+#   FORCE=1 ./deploy/rollback.sh            # proceed even if a run is active
+#
+# FORCE=1 exists because the case that most needs a rollback — a wedged or
+# runaway analyzer — is also the case where the running-process check would
+# otherwise refuse to act.
 
 set -euo pipefail
 
 # shellcheck source=lib.sh source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 REMOTE_LIB="$(dirname "${BASH_SOURCE[0]}")/remote-lib.sh"
+# A missing remote-lib.sh would otherwise ship a payload with no resolve_db
+# or acquire_cron_lock. Process substitution hides `cat`'s failure, so in
+# preflight that degrades silently all the way to "ALL GATES PASSED".
+[[ -r $REMOTE_LIB ]] || { echo "error: $REMOTE_LIB is missing or unreadable" >&2; exit 1; }
 
 DO_BIN=0; DO_RUNNER=0; DO_SCRIPTS=0; DO_DB=0; LENIENT=0; HOST_ARG=""
 for arg in "$@"; do
@@ -121,11 +130,15 @@ if [ "$DO_SCRIPTS" = 1 ]; then
     restored=0
     for f in generate-logwatch.sh generate-drupal-watchdog.sh helper.sh; do
         [ -f "./scripts/$f.prev" ] || continue
-        mode=$(stat -c '%a' "./scripts/$f")
-        mv "./scripts/$f" "./scripts/$f.failed"
+        # .prev was made with `cp -p`, so it already carries the mode the file
+        # had when the deploy replaced it. Re-applying the CURRENT file's mode
+        # would faithfully restore an operator's later chmod — e.g. a
+        # helper.sh loosened from 0640 to 0644 — which is the opposite of a
+        # rollback. Guarding the move also matters: a missing live file must
+        # not abort the loop half-way through the restore.
+        [ -e "./scripts/$f" ] && mv "./scripts/$f" "./scripts/$f.failed"
         mv "./scripts/$f.prev" "./scripts/$f"
-        chmod "$mode" "./scripts/$f"
-        echo "  restored scripts/$f (mode $mode)"
+        echo "  restored scripts/$f (mode $(stat -c '%a' "./scripts/$f"))"
         restored=$((restored + 1))
     done
     if [ "$restored" -eq 0 ]; then

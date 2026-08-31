@@ -188,6 +188,29 @@ rm -f -- *.pre-*
 missing=$(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$' | head -1 || true)
 eq "yields empty when no snapshot exists" "" "$missing"
 
+# ------------------------------------------------ in-flight process matching
+# Regression: an unanchored `pgrep -f 'run-cron\.sh|logwatch-analyzer'` matched
+# any command line merely mentioning those names, so an editor holding the file
+# open blocked both deploy and rollback — worst on rollback, the safety net.
+echo "in-flight process pattern"
+INSTALL_DIR=/opt/logwatch-ai
+pat="^(${INSTALL_DIR}/)?(run-cron\.sh|logwatch-analyzer)"
+matches() { grep -qE "$pat" <<<"$1"; }
+
+for cmd in "/opt/logwatch-ai/run-cron.sh" \
+           "/opt/logwatch-ai/logwatch-analyzer -source-type ocms" \
+           "run-cron.sh"; do
+    if matches "$cmd"; then ok "matches a real job: $cmd"
+    else bad "matches a real job: $cmd" "match" "no match"; fi
+done
+for cmd in "vim /opt/logwatch-ai/run-cron.sh" \
+           "less /opt/logwatch-ai/logs/cron.log" \
+           "grep logwatch-analyzer /var/log/syslog" \
+           "tail -f /opt/logwatch-ai/logs/analyzer.log"; do
+    if matches "$cmd"; then bad "ignores a bystander: $cmd" "no match" "match"
+    else ok "ignores a bystander: $cmd"; fi
+done
+
 # ------------------------------------------------------------------ result
 echo
 if [[ $fail -eq 0 ]]; then

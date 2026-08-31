@@ -105,9 +105,20 @@ acquire_cron_lock() {
             return 1
         fi
     fi
-    if pgrep -f 'run-cron\.sh|logwatch-analyzer' >/dev/null 2>&1; then
+    # Anchor on the install path so an editor or pager holding the file open
+    # ("vim /opt/logwatch-ai/run-cron.sh") does not look like a running job:
+    # pgrep -f matches the whole command line, so ^ requires the process to BE
+    # the runner or the analyzer, not merely to mention it.
+    local pat="^(${INSTALL_DIR}/)?(run-cron\.sh|logwatch-analyzer)"
+    if pgrep -u root -f "$pat" >/dev/null 2>&1; then
+        if [ "${FORCE:-0}" = 1 ]; then
+            echo "WARN: an analyzer process is running; FORCE=1 given, continuing anyway" >&2
+            pgrep -u root -a -f "$pat" >&2
+            return 0
+        fi
         echo "ABORT: an analyzer process is running outside the lock" >&2
-        pgrep -a -f 'run-cron\.sh|logwatch-analyzer' >&2
+        pgrep -u root -a -f "$pat" >&2
+        echo "       (set FORCE=1 to override — needed if a wedged run must be rolled back)" >&2
         return 1
     fi
     return 0

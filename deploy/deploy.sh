@@ -47,6 +47,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE_LIB="$(dirname "${BASH_SOURCE[0]}")/remote-lib.sh"
+# A missing remote-lib.sh would otherwise ship a payload with no resolve_db
+# or acquire_cron_lock. Process substitution hides `cat`'s failure, so in
+# preflight that degrades silently all the way to "ALL GATES PASSED".
+[[ -r $REMOTE_LIB ]] || { echo "error: $REMOTE_LIB is missing or unreadable" >&2; exit 1; }
 
 STAGE_ONLY=0
 HOST_ARG=""
@@ -155,11 +159,21 @@ make -C "$SRC" build-linux-amd64
 
 echo "==> Verifying the artifact"
 file "$LOCAL_BIN"
-go version -m "$LOCAL_BIN" | grep -E '^[[:space:]]+(mod|build[[:space:]]+(GOOS|GOARCH|GOAMD64|CGO_ENABLED|vcs))' || true
+
+# Read the build info once and fail closed. Inside an `if` condition a failing
+# pipeline is not an error, so testing `go version -m ... | grep -q` directly
+# would treat an unreadable binary as "clean" — silently disarming the one
+# check that stops a non-release artifact from shipping.
+if ! buildinfo=$(go version -m "$LOCAL_BIN"); then
+  echo "error: could not read build info from $LOCAL_BIN — refusing to deploy" >&2
+  exit 1
+fi
+printf '%s\n' "$buildinfo" \
+  | grep -E '^[[:space:]]+(mod|build[[:space:]]+(GOOS|GOARCH|GOAMD64|CGO_ENABLED|vcs))' || true
 
 # A dirty stamp means we are about to ship something that is not the tagged
 # release. This is the exact failure the REF mechanism exists to prevent.
-if go version -m "$LOCAL_BIN" | grep -q 'vcs.modified=true'; then
+if printf '%s\n' "$buildinfo" | grep -q 'vcs.modified=true'; then
   echo "error: binary stamped vcs.modified=true — not a clean release build" >&2
   exit 1
 fi
@@ -205,25 +219,95 @@ if [[ $STAGE_ONLY == 1 ]]; then
   echo "Staged artifacts are removed on exit; re-run without --stage-only to install."
   exit 0
 fi
+# ------------------------------------------ 4. compare scripts + confirm
+# The comparison and the prompt happen BEFORE the lock is taken, so a human
+# is never the reason the lock is held: stage 5 then performs the binary and
+# script swaps in one locked session. Asking after the binary swap would
+# leave cron free to fire mid-deploy and run a mixed tree.
+INSTALL_SCRIPTS=0
+if [[ $WITH_SCRIPTS == 0 ]]; then
+  echo "==> SKIP_SCRIPTS=1 — leaving scripts/ and run-cron.sh as deployed"
+else
+  echo "==> Comparing deployed helper scripts against the built ref"
+  # -n is essential: without it ssh forwards this script's stdin to the remote
+  # command and consumes it, leaving the prompt below at EOF.
+  # shellcheck disable=SC2029 # INSTALL_DIR is deliberately expanded client-side
+  if ! deployed_sums=$(ssh -n "$HOST" "cd ${INSTALL_DIR} && sha256sum run-cron.sh scripts/*.sh 2>/dev/null"); then
+    echo "WARN: could not read deployed checksums (ssh rc=$?) — treating every" >&2
+    echo "      script as changed; the comparison below is not trustworthy." >&2
+    deployed_sums=""
+  fi
+  changed=0
+  check_one() {  # $1 = remote path, $2 = local path
+    if [[ ! -f $2 ]]; then
+      printf '  MISSING   %s (not in the source tree — will not be deployed)\n' "$1"
+      return 0
+    fi
+    local lsum rsum
+    lsum=$(shasum -a 256 "$2" | awk '{print $1}')
+    rsum=$(awk -v p="$1" '$2 == p {print $1}' <<<"$deployed_sums")
+    if [[ $lsum == "$rsum" ]]; then printf '  same      %s\n' "$1"
+    else printf '  DIFFERENT %s\n' "$1"; changed=1; fi
+  }
+  check_one run-cron.sh "$LOCAL_RUNNER"
+  for s in "${TRACKED_SCRIPTS[@]}"; do check_one "scripts/$s" "$SRC/scripts/$s"; done
 
-# ------------------------------- 4. lock + db backup + binary swap (atomic)
-# The cron lock, the database backup and the binary swap run in ONE remote
-# session so the lock is held across the entire critical section.
+  if [[ $changed == 0 ]]; then
+    echo "  nothing to update"
+  elif [[ ${ASSUME_YES:-0} == 1 ]]; then
+    INSTALL_SCRIPTS=1
+    echo "  ASSUME_YES=1 — the updated scripts will be installed"
+  elif [[ ! -t 0 ]]; then
+    # `read` returns 1 at EOF, which errexit turns into a silent abort.
+    # Refuse before anything is mutated rather than dying without a message.
+    cat >&2 <<EOF
+error: stdin is not a terminal, so the scripts prompt cannot be answered.
+       Nothing has been changed on the target. Re-run with ASSUME_YES=1 to
+       install the scripts, or SKIP_SCRIPTS=1 to leave them alone.
+EOF
+    exit 1
+  elif ! read -r -p "Install the updated scripts too? [y/N] " reply; then
+    echo "error: could not read a reply — nothing was changed." >&2
+    exit 1
+  elif [[ ${reply:-n} =~ ^[Yy]$ ]]; then
+    INSTALL_SCRIPTS=1
+  else
+    echo "  scripts will be left as deployed"
+  fi
+fi
+
+# --------------------------- 5. one locked session: backup, binary, scripts
 echo "==> Installing (cron lock, database backup, binary swap)"
 ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" STAGE_DIR="$STAGE_DIR" \
-            REMOTE_BIN="$REMOTE_BIN" VERSION="$VERSION" 'bash -s' \
+            REMOTE_BIN="$REMOTE_BIN" VERSION="$VERSION" \
+            INSTALL_SCRIPTS="$INSTALL_SCRIPTS" TRACKED="${TRACKED_SCRIPTS[*]}" 'bash -s' \
   < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_INSTALL__'
 set -euo pipefail
 cd "$INSTALL_DIR"
 
 acquire_cron_lock || exit 1
 
+# Record the protected files so stage 6 can prove they were not touched,
+# rather than printing state a human is asked to eyeball.
+stat_protected() {
+    for f in .env drupal-sites.json ocms-sites.json exclusions.json data/summaries.db; do
+        if [ -e "$f" ]; then stat -c '%n mode=%a owner=%U:%G size=%s mtime=%Y' "$f"
+        else echo "$f ABSENT"; fi
+    done
+}
+stat_protected > "$STAGE_DIR/protected.before"
+
 # --- clear stale component backups -----------------------------------------
-# rollback --all uses .prev existence as proof that THIS deployment replaced a
-# component. Backups left by an earlier deployment would otherwise make --all
-# roll an unchanged component back an extra release, so they are cleared up
-# front; the stages below recreate .prev only for what they actually replace.
-rm -f ./run-cron.sh.prev ./scripts/*.prev
+# A .prev file must mean "this deployment replaced it", or rollback --all
+# rolls an unchanged component back an extra release. Only clear backups for
+# the components this run will actually replace: clearing them under
+# SKIP_SCRIPTS=1 would destroy the previous deployment's rollback material
+# for files this run does not touch.
+if [ "$INSTALL_SCRIPTS" = 1 ]; then
+    for p in ./run-cron.sh.prev ./scripts/*.prev; do
+        [ -e "$p" ] && echo "  clearing stale backup $p" && rm -f "$p"
+    done
+fi
 
 # --- database backup -------------------------------------------------------
 if ! db=$(resolve_db); then
@@ -236,10 +320,8 @@ else
         sqlite3 "$db" ".backup '$dst'"        # WAL-aware, consistent
     else
         # No sqlite3: a plain copy is only safe because we hold the lock.
-        # Copy any sidecars too, so the snapshot is self-consistent.
-        # Redeploying the same version reuses $dst. Clear any sidecars left
-        # by an earlier snapshot first, or rollback --db would copy a stale
-        # -wal beside a fresh snapshot and replay it into the restore.
+        # Redeploying the same version reuses $dst, so clear any sidecars an
+        # earlier snapshot left or rollback --db would replay stale pages.
         rm -f "$dst" "$dst"-wal "$dst"-shm "$dst"-journal
         cp -p "$db" "$dst"
         for ext in -wal -shm -journal; do
@@ -259,139 +341,107 @@ fi
 
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 
+# Stage the incoming artifact under a unique name FIRST. Nothing below
+# unlinks or renames anything the live symlink resolves through, so the
+# stable path stays valid for the whole sequence and the final rename is the
+# only visible transition.
+install -m 0755 -o root -g root "$STAGE_DIR/logwatch-analyzer" "./$REMOTE_BIN.incoming.$$"
+
 if [ -L ./logwatch-analyzer ]; then
     prev_target=$(readlink -f ./logwatch-analyzer)
 else
     # A regular file here means the install predates this tooling. Hard-link
-    # it to a versioned name rather than moving it: the stable path keeps
-    # working right up to the final atomic rename, so a cron launch in the
-    # interval cannot hit ENOENT and a failure below leaves production intact.
+    # it to a versioned name rather than moving it, so the stable path keeps
+    # working right up to the final rename.
     legacy="logwatch-analyzer-legacy-$stamp"
     ln ./logwatch-analyzer "./$legacy" 2>/dev/null || cp -p ./logwatch-analyzer "./$legacy"
     prev_target="$INSTALL_DIR/$legacy"
     echo "  legacy regular-file install preserved as $legacy"
 fi
 
-# Redeploying a version that is already live would otherwise write straight
-# through to the running inode (ETXTBSY) and leave prev-target aimed at the
-# artifact we just overwrote, making rollback a no-op. Preserve it first.
+# Redeploying a version that is already live would otherwise leave
+# prev-target aimed at the artifact this deploy replaces, making rollback a
+# no-op. Hard-link (never move) the live artifact aside: a rename here would
+# leave ./logwatch-analyzer dangling until the swap below completes.
 if [ "$prev_target" = "$INSTALL_DIR/$REMOTE_BIN" ]; then
     preserved="$REMOTE_BIN.prev-$stamp"
-    mv "./$REMOTE_BIN" "./$preserved"
+    ln "./$REMOTE_BIN" "./$preserved" 2>/dev/null || cp -p "./$REMOTE_BIN" "./$preserved"
     prev_target="$INSTALL_DIR/$preserved"
     echo "  same version already live — previous artifact kept as $preserved"
 fi
 
 echo "  rollback target: $prev_target"
-"$prev_target" -version 2>&1 | head -1 || true
+if ! "$prev_target" -version >/dev/null 2>&1; then
+    echo "  WARN: $prev_target does not execute — rollback.sh would refuse it." >&2
+else
+    "$prev_target" -version 2>&1 | head -1
+fi
 printf '%s\n' "$prev_target" > ./.logwatch-analyzer.prev-target
 
-# Install under a unique name, then rename: never write into a live inode.
-install -m 0755 -o root -g root "$STAGE_DIR/logwatch-analyzer" "./$REMOTE_BIN.incoming.$$"
 mv -Tf "./$REMOTE_BIN.incoming.$$" "./$REMOTE_BIN"
-
 ln -sfn "$INSTALL_DIR/$REMOTE_BIN" ./logwatch-analyzer.new
 mv -Tf ./logwatch-analyzer.new ./logwatch-analyzer
 
 ls -la ./logwatch-analyzer ./"$REMOTE_BIN"
-./logwatch-analyzer -version
+
+# Smoke-test the live path. On failure revert immediately: this is the only
+# point where aborting would leave production running a broken binary, and
+# the caller's rollback instructions are printed after this session ends.
+if ! ./logwatch-analyzer -version; then
+    echo "ABORT: the new binary failed -version AFTER the swap. Reverting." >&2
+    ln -sfn "$prev_target" ./logwatch-analyzer.rb
+    mv -Tf ./logwatch-analyzer.rb ./logwatch-analyzer
+    if ./logwatch-analyzer -version >&2; then
+        echo "reverted to $prev_target" >&2
+    else
+        echo "REVERT ALSO FAILED — $INSTALL_DIR needs manual attention" >&2
+    fi
+    exit 1
+fi
+
+# --- scripts + runner (same lock) ------------------------------------------
+if [ "$INSTALL_SCRIPTS" = 1 ]; then
+    mkdir -p ./scripts
+    if [ -f "$STAGE_DIR/run-cron.sh" ] && ! cmp -s "$STAGE_DIR/run-cron.sh" ./run-cron.sh; then
+        cp -p ./run-cron.sh ./run-cron.sh.prev
+        install -m 0755 -o root -g root "$STAGE_DIR/run-cron.sh" ./run-cron.sh.new
+        mv -f ./run-cron.sh.new ./run-cron.sh
+        bash -n ./run-cron.sh || { echo "ABORT: installed runner has a syntax error" >&2; exit 1; }
+        echo "  run-cron.sh updated, syntax OK"
+        grep -n 'LOCK_FILE=' ./run-cron.sh \
+            || echo "  WARN: runner pins no LOCK_FILE — it will use the built-in default"
+    fi
+
+    # Preserve each file's existing mode rather than flattening them to 0755
+    # (generate-logwatch.sh is 0750, helper.sh is 0640).
+    for f in $TRACKED; do
+        src="$STAGE_DIR/$f"
+        dst="./scripts/$f"
+        [ -f "$src" ] || continue
+        cmp -s "$src" "$dst" && continue
+        if [ -e "$dst" ]; then
+            mode=$(stat -c '%a' "$dst")
+            cp -p "$dst" "$dst.prev"
+        else
+            mode=0755
+        fi
+        install -m "$mode" -o root -g root "$src" "$dst.new"
+        mv -f "$dst.new" "$dst"
+        echo "  updated $dst (mode $mode)"
+    done
+    ls -la ./run-cron.sh ./scripts/
+fi
+
+# --- prove the protected files are unchanged -------------------------------
+stat_protected > "$STAGE_DIR/protected.after"
+if diff -u "$STAGE_DIR/protected.before" "$STAGE_DIR/protected.after"; then
+    echo "  protected files unchanged (verified, not just displayed)"
+else
+    echo "ABORT: a protected file changed during the deploy — see the diff above." >&2
+    exit 1
+fi
 __REMOTE_INSTALL__
 )
-
-# ------------------------------------------------------ 5. scripts + runner
-if [[ $WITH_SCRIPTS == 0 ]]; then
-  echo "==> SKIP_SCRIPTS=1 — leaving scripts/ and run-cron.sh as deployed"
-else
-  echo "==> Comparing deployed helper scripts against the built ref"
-  # shellcheck disable=SC2029 # INSTALL_DIR is deliberately expanded client-side
-  # -n is essential: without it ssh forwards this script's stdin to the remote
-  # command and consumes it, leaving the prompt below at EOF.
-  deployed_sums=$(ssh -n "$HOST" "cd ${INSTALL_DIR} && sha256sum run-cron.sh scripts/*.sh 2>/dev/null" || true)
-  changed=0
-  check_one() {  # $1 = remote path, $2 = local path
-    [[ -f $2 ]] || return 0
-    local lsum rsum
-    lsum=$(shasum -a 256 "$2" | awk '{print $1}')
-    rsum=$(awk -v p="$1" '$2 == p {print $1}' <<<"$deployed_sums")
-    if [[ $lsum == "$rsum" ]]; then printf '  same      %s\n' "$1"
-    else printf '  DIFFERENT %s\n' "$1"; changed=1; fi
-  }
-  check_one run-cron.sh "$LOCAL_RUNNER"
-  for s in "${TRACKED_SCRIPTS[@]}"; do check_one "scripts/$s" "$SRC/scripts/$s"; done
-
-  if [[ $changed == 0 ]]; then
-    echo "  nothing to update"
-  else
-    if [[ ${ASSUME_YES:-0} == 1 ]]; then
-      reply=y
-      echo "  ASSUME_YES=1 — installing the updated scripts"
-    elif [[ ! -t 0 ]]; then
-      # `read` returns 1 at EOF, which errexit turns into a silent abort — and
-      # by this point the binary is already swapped. Refuse explicitly instead
-      # of dying without a message.
-      cat >&2 <<EOF
-error: stdin is not a terminal, so the scripts prompt cannot be answered.
-       The binary was installed; scripts were NOT. Re-run with ASSUME_YES=1
-       to install them, or SKIP_SCRIPTS=1 to leave them alone deliberately.
-EOF
-      exit 1
-    elif ! read -r -p "Install the updated scripts? [y/N] " reply; then
-      echo "error: could not read a reply — scripts NOT installed." >&2
-      exit 1
-    fi
-    if [[ ${reply:-n} =~ ^[Yy]$ ]]; then
-      ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" STAGE_DIR="$STAGE_DIR" 'bash -s' \
-        < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_SCRIPTS__'
-set -euo pipefail
-cd "$INSTALL_DIR"
-acquire_cron_lock || exit 1
-mkdir -p ./scripts
-
-# run-cron.sh lives at the top level: that is the path cron invokes.
-if [ -f "$STAGE_DIR/run-cron.sh" ] && ! cmp -s "$STAGE_DIR/run-cron.sh" ./run-cron.sh; then
-    cp -p ./run-cron.sh ./run-cron.sh.prev
-    install -m 0755 -o root -g root "$STAGE_DIR/run-cron.sh" ./run-cron.sh.new
-    mv -f ./run-cron.sh.new ./run-cron.sh
-    bash -n ./run-cron.sh && echo "  run-cron.sh updated, syntax OK"
-    grep -n 'LOCK_FILE=' ./run-cron.sh
-fi
-
-# Preserve each file's existing mode rather than flattening them all to 0755
-# (generate-logwatch.sh is 0750, helper.sh is 0640).
-for f in generate-logwatch.sh generate-drupal-watchdog.sh helper.sh; do
-    src="$STAGE_DIR/$f"
-    dst="./scripts/$f"
-    [ -f "$src" ] || continue
-    cmp -s "$src" "$dst" && continue
-    if [ -e "$dst" ]; then
-        mode=$(stat -c '%a' "$dst")
-        cp -p "$dst" "$dst.prev"
-    else
-        mode=0755
-    fi
-    install -m "$mode" -o root -g root "$src" "$dst.new"
-    mv -f "$dst.new" "$dst"
-    echo "  updated $dst (mode $mode)"
-done
-ls -la ./run-cron.sh ./scripts/
-__REMOTE_SCRIPTS__
-)
-    else
-      echo "  skipped — scripts left as deployed"
-    fi
-  fi
-fi
-
-# ---------------------------------------------------------- 6. blast radius
-echo "==> Confirming the protected files are untouched"
-ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" 'bash -s' <<'__REMOTE_CONFIRM__'
-set -u
-for f in .env drupal-sites.json ocms-sites.json exclusions.json data/summaries.db; do
-    [ -e "$INSTALL_DIR/$f" ] \
-      && stat -c '%n  mode=%a  owner=%U:%G  size=%s  mtime=%y' "$INSTALL_DIR/$f" \
-      || echo "$INSTALL_DIR/$f  ABSENT"
-done
-__REMOTE_CONFIRM__
 
 cat <<EOF
 

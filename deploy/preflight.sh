@@ -8,7 +8,8 @@
 #
 #   GATE 1  CPU supports GOAMD64=v3 (build-linux-amd64 targets v3; a v3
 #           binary on a pre-Haswell CPU dies at exec).
-#   GATE 2  $LOCK_FILE's directory is writable. If it is not, run-cron.sh's
+#   GATE 2  The directory of the runner's EFFECTIVE lock path (a crontab
+#           override is honoured) is writable. If it is not, run-cron.sh's
 #           `exec 9>"$LOCK_FILE"` fails but the shell KEEPS GOING (verified:
 #           a failed exec redirection does not terminate non-interactive
 #           bash). `flock -n 9` then fails on the unopened fd, the runner
@@ -30,23 +31,27 @@ set -euo pipefail
 # shellcheck source=lib.sh source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 REMOTE_LIB="$(dirname "${BASH_SOURCE[0]}")/remote-lib.sh"
+# A missing remote-lib.sh would otherwise ship a payload with no resolve_db
+# or acquire_cron_lock. Process substitution hides `cat`'s failure, so in
+# preflight that degrades silently all the way to "ALL GATES PASSED".
+[[ -r $REMOTE_LIB ]] || { echo "error: $REMOTE_LIB is missing or unreadable" >&2; exit 1; }
 HOST=$(resolve_host "${1:-}") || exit 1
 require_root_target "$HOST" || exit 1
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
-LOCK_FILE="${LOCK_FILE:-/run/logwatch-ai-cron.lock}"
 OLD_LOCK_FILE="${OLD_LOCK_FILE:-/var/lock/logwatch-ai-cron.lock}"
 
 echo "==> Pre-flight inspection of ${HOST} (read-only)"
 echo "    install dir: ${INSTALL_DIR}"
-echo "    lock file:   ${LOCK_FILE}"
 echo
 
 # rc is captured via `|| rc=$?` because `set -e` would otherwise abort the
 # script the moment a gate fails, before we could print the summary.
 rc=0
-ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" LOCK_FILE="$LOCK_FILE" \
-            OLD_LOCK_FILE="$OLD_LOCK_FILE" 'bash -s' \
+# LOCK_FILE is deliberately NOT forwarded: resolve_lock_file short-circuits on
+# a set value, which would make the gate test the local default again instead
+# of discovering what the deployed runner uses.
+ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" OLD_LOCK_FILE="$OLD_LOCK_FILE" 'bash -s' \
   < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_PREFLIGHT__'
 set -u
 gate_fail=0
@@ -136,7 +141,13 @@ done
 
 echo
 echo "===== GATE 2: lock directory writable ====="
-lock_dir=$(dirname "$LOCK_FILE")
+# Probe the path the runner will actually use, not the built-in default: an
+# operator who pins LOCK_FILE in the crontab (which rollback.sh recommends
+# when /run is unsuitable) would otherwise have this gate vouch for a
+# directory nothing touches.
+effective_lock=$(resolve_lock_file)
+echo "  effective lock path: $effective_lock"
+lock_dir=$(dirname "$effective_lock")
 stat -c '%n  mode=%a  owner=%U:%G' "$lock_dir" 2>&1
 findmnt -no FSTYPE "$lock_dir" 2>&1 || true
 probe="$lock_dir/.logwatch-preflight-probe.$$"
@@ -256,6 +267,8 @@ __REMOTE_PREFLIGHT__
 echo
 if [ "$rc" -eq 0 ]; then
     echo "==> Pre-flight OK. Next: review the .env key diff below, then ./deploy/deploy.sh"
+elif [ "$rc" -eq 255 ]; then
+    echo "==> Could not connect to ${HOST} (ssh rc=255). No gates were evaluated." >&2
 else
     echo "==> Pre-flight FAILED (rc=$rc). Resolve the gate above before deploying." >&2
 fi
