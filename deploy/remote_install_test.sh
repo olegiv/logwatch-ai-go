@@ -72,20 +72,28 @@ make_script "$SHIM_DIR/flock" 'exit "${TEST_FLOCK_RC:-0}"'
 make_script "$SHIM_DIR/ln" \
     'last=${!#}' \
     'if [[ ${TEST_FAIL_REVERT_LINK:-0} == 1 && $last == *logwatch-analyzer.revert.* ]]; then exit 73; fi' \
+    'if [[ ${TEST_FAIL_NEXT_LINK:-0} == 1 && $last == *logwatch-analyzer.new.* ]]; then exit 75; fi' \
     'exec "$REAL_LN" "$@"'
 
 # shellcheck disable=SC2016 # these are literal lines for the generated shim
 make_script "$SHIM_DIR/mv" \
     'last=${!#}' \
     'if [[ ${TEST_FAIL_RECORD_PUBLISH:-0} == 1 && $last == ./.logwatch-analyzer.prev-target ]]; then exit 74; fi' \
+    'if [[ ${TEST_FAIL_LIVE_PUBLISH:-0} == 1 && $last == ./logwatch-analyzer ]]; then exit 77; fi' \
     'args=()' \
+    'treat_dest_as_file=0' \
     'for arg in "$@"; do' \
     '  if [[ $(uname -s) == Darwin ]]; then' \
-    '    case "$arg" in -Tf|-fT) args+=(-f) ;; -T) continue ;; *) args+=("$arg") ;; esac' \
+    '    case "$arg" in' \
+    '      -Tf|-fT) args+=(-f); treat_dest_as_file=1 ;;' \
+    '      -T) treat_dest_as_file=1; continue ;;' \
+    '      *) args+=("$arg") ;;' \
+    '    esac' \
     '  else' \
     '    args+=("$arg")' \
     '  fi' \
     'done' \
+    'if [[ $treat_dest_as_file == 1 && -d $last ]]; then exit 76; fi' \
     'exec "$REAL_MV" "${args[@]}"'
 
 TEST_PATH="$SHIM_DIR:$PATH"
@@ -130,6 +138,8 @@ run_install() {
     local force=${2:-0}
     TEST_FLOCK_RC="${TEST_FLOCK_RC:-0}" \
     TEST_FAIL_REVERT_LINK="${TEST_FAIL_REVERT_LINK:-0}" \
+    TEST_FAIL_NEXT_LINK="${TEST_FAIL_NEXT_LINK:-0}" \
+    TEST_FAIL_LIVE_PUBLISH="${TEST_FAIL_LIVE_PUBLISH:-0}" \
     TEST_FAIL_RECORD_PUBLISH="${TEST_FAIL_RECORD_PUBLISH:-0}" \
     INSTALL_DIR="${INSTALL_OVERRIDE:-$INSTALL_PATH}" STAGE_DIR="$STAGE_PATH" \
     REMOTE_BIN="$remote_bin" LOCK_FILE="$LOCK_PATH" FORCE="$force" \
@@ -154,17 +164,68 @@ else
 fi
 unset INSTALL_OVERRIDE
 recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
-if [[ $recorded != "$INSTALL_PATH/logwatch-analyzer-v1" ]]; then
-    ok "rollback record names the preserved inode"
+if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v1" ]]; then
+    ok "rollback record keeps the immutable outgoing artifact"
 else
-    bad "rollback record names the preserved inode" "record points at the overwritten path"
+    bad "rollback record keeps the immutable outgoing artifact" "$recorded"
 fi
-if [[ -e $recorded && ! $recorded -ef "$INSTALL_PATH/logwatch-analyzer-v1" ]]; then
-    ok "preserved inode differs from the replacement"
+same_file "outgoing artifact is not overwritten" "$recorded" "$INSTALL_PATH/logwatch-analyzer-v1"
+if [[ ! "$INSTALL_PATH/logwatch-analyzer" -ef "$INSTALL_PATH/logwatch-analyzer-v1" ]]; then
+    ok "live symlink points at a unique redeploy artifact"
 else
-    bad "preserved inode differs from the replacement"
+    bad "live symlink points at a unique redeploy artifact"
 fi
 no_install_temps "$INSTALL_PATH" "same-version deployment cleans temporary files"
+
+echo "failure before the symlink swap leaves the live artifact untouched"
+new_case pre-swap-failure
+seed_live v1
+TEST_FAIL_NEXT_LINK=1
+if output=$(run_install logwatch-analyzer-v1 2>&1); then
+    bad "pre-swap link failure aborts deployment"
+else
+    ok "pre-swap link failure aborts deployment"
+fi
+unset TEST_FAIL_NEXT_LINK
+same_file "pre-swap failure leaves v1 live" "$INSTALL_PATH/logwatch-analyzer" "$INSTALL_PATH/logwatch-analyzer-v1"
+if compgen -G "$INSTALL_PATH/logwatch-analyzer-v1.redeploy-*" >/dev/null; then
+    bad "pre-swap failure removes the unpublished artifact"
+else
+    ok "pre-swap failure removes the unpublished artifact"
+fi
+contains "pre-swap failure is visible" "$output" "could not create the candidate live symlink"
+
+echo "failure to publish the symlink leaves the live artifact untouched"
+new_case publish-failure
+seed_live v1
+TEST_FAIL_LIVE_PUBLISH=1
+if output=$(run_install logwatch-analyzer-v1 2>&1); then
+    bad "live-link publication failure aborts deployment"
+else
+    ok "live-link publication failure aborts deployment"
+fi
+unset TEST_FAIL_LIVE_PUBLISH
+same_file "publication failure leaves v1 live" "$INSTALL_PATH/logwatch-analyzer" "$INSTALL_PATH/logwatch-analyzer-v1"
+if compgen -G "$INSTALL_PATH/logwatch-analyzer-v1.redeploy-*" >/dev/null; then
+    bad "publication failure removes the unpublished artifact"
+else
+    ok "publication failure removes the unpublished artifact"
+fi
+contains "publication failure is visible" "$output" "could not publish the candidate live symlink"
+no_install_temps "$INSTALL_PATH" "publication failure cleans temporary files"
+
+echo "a directory cannot absorb the rollback record"
+new_case record-directory
+seed_live v1
+mkdir "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+if output=$(run_install logwatch-analyzer-v2 2>&1); then
+    bad "record directory aborts deployment"
+else
+    ok "record directory aborts deployment"
+fi
+same_file "record directory leaves v1 live" "$INSTALL_PATH/logwatch-analyzer" "$INSTALL_PATH/logwatch-analyzer-v1"
+contains "record directory is diagnosed" "$output" "rollback-record path is a directory"
+no_install_temps "$INSTALL_PATH" "record-directory failure creates no temporary files"
 
 echo "failed smoke test restores both live state and rollback history"
 new_case auto-revert

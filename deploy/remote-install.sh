@@ -50,15 +50,31 @@ if [[ ! -e ./logwatch-analyzer && ! -L ./logwatch-analyzer ]]; then
     exit 1
 fi
 
+record=./.logwatch-analyzer.prev-target
+if [[ -d $record ]]; then
+    echo "ABORT: rollback-record path is a directory: $INSTALL_DIR/${record#./}" >&2
+    echo "       Move or remove that directory before deploying." >&2
+    exit 1
+fi
+
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-incoming="./$REMOTE_BIN.incoming.$$"
+install_name=$REMOTE_BIN
+if [[ -e ./$install_name || -L ./$install_name ]]; then
+    install_name="$REMOTE_BIN.redeploy-$stamp-$$"
+    if [[ -e ./$install_name || -L ./$install_name ]]; then
+        echo "ABORT: immutable deployment artifact already exists: $INSTALL_DIR/$install_name" >&2
+        exit 1
+    fi
+fi
+incoming="./$install_name.incoming.$$"
 next_link="./logwatch-analyzer.new.$$"
 revert_link="./logwatch-analyzer.revert.$$"
 next_record="./.logwatch-analyzer.prev-target.new.$$"
+published_artifact=""
 
 cleanup_install_temps() {
     local temp
-    for temp in "$incoming" "$next_link" "$revert_link" "$next_record"; do
+    for temp in "$incoming" "$next_link" "$revert_link" "$next_record" "$published_artifact"; do
         [[ -n $temp ]] || continue
         rm -f -- "$temp" || echo "WARN: remove temporary deployment file manually: $temp" >&2
     done
@@ -84,14 +100,6 @@ else
     prev="$INSTALL_DIR/${legacy#./}"
 fi
 
-# Compare file identity, not path spelling: INSTALL_DIR may have reached this
-# host through a symlink, a trailing slash, or an equivalent `..` path.
-if [[ -e ./$REMOTE_BIN && $prev -ef ./$REMOTE_BIN ]]; then
-    preserved="./$REMOTE_BIN.prev-$stamp-$$"
-    ln "./$REMOTE_BIN" "$preserved"
-    prev="$INSTALL_DIR/${preserved#./}"
-fi
-
 prev_valid=1
 if ! "$prev" -version >/dev/null 2>&1; then
     prev_valid=0
@@ -111,11 +119,19 @@ if [[ $prev_valid == 1 ]]; then
     printf '%s\n' "$prev" > "$next_record"
 fi
 
-mv -Tf "$incoming" "./$REMOTE_BIN"
+mv -Tf "$incoming" "./$install_name"
 incoming=""
-ln -sfn "$INSTALL_DIR/$REMOTE_BIN" "$next_link"
-mv -Tf "$next_link" ./logwatch-analyzer
+published_artifact="./$install_name"
+if ! ln -sfn "$INSTALL_DIR/$install_name" "$next_link"; then
+    echo "ABORT: could not create the candidate live symlink; current binary is untouched" >&2
+    exit 1
+fi
+if ! mv -Tf "$next_link" ./logwatch-analyzer; then
+    echo "ABORT: could not publish the candidate live symlink; current binary is untouched" >&2
+    exit 1
+fi
 next_link=""
+published_artifact=""
 
 revert_live_binary() {
     local reason=$1
@@ -146,7 +162,7 @@ if ! ./logwatch-analyzer -version; then
 fi
 
 if [[ $prev_valid == 1 ]]; then
-    if ! mv -f "$next_record" ./.logwatch-analyzer.prev-target; then
+    if ! mv -Tf "$next_record" "$record"; then
         revert_live_binary "the rollback record could not be published." || true
         exit 1
     fi

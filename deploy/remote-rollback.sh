@@ -100,7 +100,7 @@ cleanup_rollback_temps() {
         }
     fi
     if [[ $restore_record == 1 && -f $consumed_record && ! -e $record ]]; then
-        mv -f "$consumed_record" "$record" || {
+        mv -Tf "$consumed_record" "$record" || {
             echo "CRITICAL: restore the rollback record manually: $consumed_record" >&2
         }
     fi
@@ -109,7 +109,7 @@ trap cleanup_rollback_temps EXIT
 
 # Hide the record atomically before the swap. Any failure below restores it;
 # success consumes the hidden copy so a second rollback cannot silently no-op.
-mv -f "$record" "$consumed_record"
+mv -Tf "$record" "$consumed_record"
 restore_record=1
 if ! ln -sfn "$prev" "$rollback_link"; then
     echo "error: could not create the rollback link; current binary is untouched" >&2
