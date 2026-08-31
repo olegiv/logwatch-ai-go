@@ -172,11 +172,14 @@ else
     gate_fail=1
 fi
 echo "--- existing lock files ---"
-ls -la "$LOCK_FILE" "$OLD_LOCK_FILE" 2>&1 | grep -v 'No such file' || echo "(neither present)"
+ls -la "$effective_lock" "$OLD_LOCK_FILE" 2>&1 | grep -v 'No such file' || echo "(neither present)"
 
 echo
 echo "===== GATE 3: run in flight? ====="
-if pgrep -a -f 'run-cron\.sh|logwatch-analyzer' 2>/dev/null; then
+# Same anchored, root-scoped predicate the locked deploy path uses, so an
+# editor or pager that merely mentions the file does not fail the gate.
+inflight_pat="^(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
+if pgrep -u root -a -f "$inflight_pat" 2>/dev/null; then
     echo "  FAILED   a run is in flight — do not deploy now"
     gate_fail=1
 else

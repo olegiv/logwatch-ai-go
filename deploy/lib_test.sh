@@ -194,11 +194,13 @@ eq "yields empty when no snapshot exists" "" "$missing"
 # open blocked both deploy and rollback — worst on rollback, the safety net.
 echo "in-flight process pattern"
 INSTALL_DIR=/opt/logwatch-ai
-pat="^(${INSTALL_DIR}/)?(run-cron\.sh|logwatch-analyzer)"
+pat="^(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
 matches() { grep -qE "$pat" <<<"$1"; }
 
 for cmd in "/opt/logwatch-ai/run-cron.sh" \
            "/opt/logwatch-ai/logwatch-analyzer -source-type ocms" \
+           "./logwatch-analyzer -source-type ocms -ocms-site it_digest" \
+           "./run-cron.sh" \
            "run-cron.sh"; do
     if matches "$cmd"; then ok "matches a real job: $cmd"
     else bad "matches a real job: $cmd" "match" "no match"; fi
@@ -210,6 +212,38 @@ for cmd in "vim /opt/logwatch-ai/run-cron.sh" \
     if matches "$cmd"; then bad "ignores a bystander: $cmd" "no match" "match"
     else ok "ignores a bystander: $cmd"; fi
 done
+
+# ------------------------------------------------------------ prune safety
+# Regression: `for f in $(ls ...)` word-split the snapshot list, so a
+# DATABASE_PATH containing spaces produced path fragments — which were then
+# handed to a root `rm`.
+echo "prune path handling"
+cd "$WORK" || exit 1
+rm -rf "prune dir" && mkdir "prune dir" && cd "prune dir" || exit 1
+db="summaries db.sqlite"
+for v in 1 2 3 4; do printf 'snap%s' "$v" > "$db.pre-v0.$v.0"; done
+printf 'wal' > "$db.pre-v0.4.0-wal"
+
+collected=()
+# shellcheck disable=SC2010 # mirrors deploy.sh's expression exactly
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    collected+=("$f")
+done < <(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$')
+eq "counts snapshots, not path fragments" "4" "${#collected[@]}"
+
+whole=1
+for f in "${collected[@]}"; do [[ -e $f ]] || whole=0; done
+eq "every collected name is a real file" "1" "$whole"
+
+# The old expression, for contrast: it must NOT be reintroduced.
+# shellcheck disable=SC2010,SC2206,SC2207 # demonstrating the defective form
+split=( $(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$') )
+if [[ ${#split[@]} -gt ${#collected[@]} ]]; then
+    ok "the unquoted form would have over-counted (${#split[@]} vs ${#collected[@]})"
+else
+    bad "the unquoted form would have over-counted" ">4" "${#split[@]}"
+fi
 
 # ------------------------------------------------------------------ result
 echo

@@ -66,7 +66,7 @@ valid_install_dir "$INSTALL_DIR" || {
 echo "==> Rolling back on ${HOST}:${INSTALL_DIR}"
 ssh "$HOST" INSTALL_DIR="$INSTALL_DIR" DO_BIN="$DO_BIN" DO_RUNNER="$DO_RUNNER" \
             DO_SCRIPTS="$DO_SCRIPTS" DO_DB="$DO_DB" LENIENT="$LENIENT" \
-            TRACKED="${TRACKED_SCRIPTS[*]}" 'bash -s' \
+            TRACKED="${TRACKED_SCRIPTS[*]}" FORCE="${FORCE:-0}" 'bash -s' \
   < <(cat "$REMOTE_LIB"; cat <<'__REMOTE_ROLLBACK__'
 set -euo pipefail
 cd "$INSTALL_DIR"
@@ -88,6 +88,16 @@ if [ "$DO_BIN" = 1 ]; then
     prev_target=$(cat ./.logwatch-analyzer.prev-target)
     if [ ! -x "$prev_target" ]; then
         echo "error: recorded rollback target $prev_target is missing or not executable" >&2
+        exit 1
+    fi
+    # Executable by mode is not the same as runnable: a corrupt or
+    # wrong-architecture binary passes -x and fails at exec. deploy.sh only
+    # WARNs when the recorded target cannot run, so that state can reach us.
+    # Discover it before repointing the symlink, or an emergency rollback
+    # replaces a partly working release with an unusable one and then aborts.
+    if ! "$prev_target" -version >/dev/null 2>&1; then
+        echo "error: rollback target $prev_target does not run — refusing to switch to it." >&2
+        echo "       The current binary is untouched. Rebuild the previous tag instead." >&2
         exit 1
     fi
     failed_target=$(readlink -f ./logwatch-analyzer)
@@ -126,7 +136,10 @@ if [ "$DO_RUNNER" = 1 ]; then
         echo "       The current runner is untouched. Fix the backup by hand." >&2
         exit 1
     fi
-    mv ./run-cron.sh ./run-cron.sh.failed
+    # A failed deployment or manual recovery may have left no live runner —
+    # precisely when --runner is needed — so an unconditional mv would abort
+    # under errexit before the valid backup could be restored.
+    [ -e ./run-cron.sh ] && mv ./run-cron.sh ./run-cron.sh.failed
     mv ./run-cron.sh.prev ./run-cron.sh
     echo "runner rolled back, syntax OK"
     grep -n 'LOCK_FILE=' ./run-cron.sh \

@@ -101,15 +101,29 @@ acquire_cron_lock() {
     else
         exec 9>"$lock" || { echo "ABORT: cannot open lock $lock" >&2; return 1; }
         if ! flock -n 9; then
-            echo "ABORT: the cron runner holds $lock — a run is in progress" >&2
-            return 1
+            if [ "${FORCE:-0}" = 1 ]; then
+                # The case that most needs a rollback is a wedged runner, and
+                # a wedged runner is holding this lock — so FORCE has to cover
+                # the lock as well as the process check, or it is inert
+                # exactly when it is needed.
+                echo "WARN: $lock is held; FORCE=1 given, proceeding without it" >&2
+            else
+                echo "ABORT: the cron runner holds $lock — a run is in progress" >&2
+                echo "       (set FORCE=1 to override — needed to roll back a wedged run)" >&2
+                return 1
+            fi
         fi
     fi
     # Anchor on the install path so an editor or pager holding the file open
     # ("vim /opt/logwatch-ai/run-cron.sh") does not look like a running job:
     # pgrep -f matches the whole command line, so ^ requires the process to BE
     # the runner or the analyzer, not merely to mention it.
-    local pat="^(${INSTALL_DIR}/)?(run-cron\.sh|logwatch-analyzer)"
+    # Accept the bare, absolute and ./-relative forms. An operator running a
+    # manual analysis from the install directory types `./logwatch-analyzer
+    # -source-type ocms`, which holds no cron lock — exactly the case this
+    # check exists to catch — so omitting `./` would let a deploy proceed
+    # alongside it and copy the database mid-write.
+    local pat="^(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
     if pgrep -u root -f "$pat" >/dev/null 2>&1; then
         if [ "${FORCE:-0}" = 1 ]; then
             echo "WARN: an analyzer process is running; FORCE=1 given, continuing anyway" >&2

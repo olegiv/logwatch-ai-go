@@ -457,8 +457,11 @@ if [ "$KEEP_VERSIONS" -gt 0 ]; then
 
     # Binaries: newest first, skip the two that must survive, drop the rest
     # past the keep count.
+    # `for f in $(ls ...)` word-splits, which would feed path fragments to a
+    # root rm. Read whole lines instead.
     n=0
-    for f in $(ls -1t ./logwatch-analyzer-* 2>/dev/null); do
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
         abs="$INSTALL_DIR/${f#./}"
         [ "$abs" = "$live" ] && continue
         [ "$abs" = "$keep_target" ] && continue
@@ -466,18 +469,22 @@ if [ "$KEEP_VERSIONS" -gt 0 ]; then
         if [ "$n" -gt "$KEEP_VERSIONS" ]; then
             rm -f "$f" && echo "    removed $f"
         fi
-    done
+    done < <(ls -1t ./logwatch-analyzer-* 2>/dev/null)
 
     # Database snapshots: prune the main files and take their sidecars along,
     # so a restore can never pick up a WAL whose snapshot is gone.
     if db=$(resolve_db); then
+        # DATABASE_PATH may legitimately contain spaces, so the snapshot names
+        # must survive intact all the way to `rm` — an unquoted command
+        # substitution here would hand root a list of path fragments.
         n=0
-        for f in $(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$'); do
+        while IFS= read -r f; do
+            [ -n "$f" ] || continue
             n=$((n + 1))
             if [ "$n" -gt "$KEEP_VERSIONS" ]; then
                 rm -f "$f" "$f"-wal "$f"-shm "$f"-journal && echo "    removed $f"
             fi
-        done
+        done < <(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$')
     fi
 fi
 
