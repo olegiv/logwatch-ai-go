@@ -85,7 +85,10 @@ valid_stage_dir() {
 # that disagreed between the two would upload a script, report it changed,
 # then never install or restore it.
 # shellcheck disable=SC2034 # consumed by deploy.sh and rollback.sh
-TRACKED_SCRIPTS=(generate-logwatch.sh generate-drupal-watchdog.sh helper.sh)
+# run-cron.sh.example is included because docs/CRON_SETUP.md tells operators
+# to copy it into place; leaving it out meant the template an upgraded host
+# offers was permanently whatever shipped at first install.
+TRACKED_SCRIPTS=(generate-logwatch.sh generate-drupal-watchdog.sh helper.sh run-cron.sh.example)
 
 # valid_install_dir PATH
 #

@@ -47,8 +47,15 @@ Choose the appropriate LLM provider for your deployment:
 4. **Verify credentials**: Test with actual API keys in isolated environment
 5. **Check cron configuration**: Ensure logwatch runs before analyzer
 6. **Monitor logs**: Watch `/opt/logwatch-ai/logs/` for first few runs
+7. **For an upgrade, run `make preflight` first**: it checks CPU level, lock
+   directory ownership, in-flight runs, free space on each relevant
+   filesystem, and that you are outside the nightly cron window
 
-## Deployment Steps
+## First-Time Installation (bootstrap)
+
+Use this only for a host that has no existing install. To **upgrade** an
+existing one, use the section below instead — `install.sh` is a bootstrapper,
+not an upgrader.
 
 1. Build optimized static Linux AMD64 binary: `make build-linux-amd64`
 2. Transfer binary to target system
@@ -58,6 +65,57 @@ Choose the appropriate LLM provider for your deployment:
 6. Verify Telegram notifications received
 7. Set up cron jobs (see `docs/CRON_SETUP.md`)
 8. Monitor logs in `/opt/logwatch-ai/logs/`
+
+## Upgrading an Existing Install
+
+Use `deploy/` for every upgrade. Set the target once in `deploy/deploy.env`
+(copy `deploy/deploy.env.example`), then:
+
+```bash
+make preflight      # read-only: inspects the host and checks the gates
+make deploy         # build, verify, install under the cron lock
+make status         # deployed version, schedule, lock, recent runs
+make rollback       # revert the binary to the recorded previous target
+```
+
+`make deploy` builds from the current worktree and refuses a dirty one. To
+build a specific release instead — which is what you normally want, since it
+stamps the artifact with that version rather than with whatever the worktree
+contains:
+
+```bash
+REF=v0.15.0 ./deploy/deploy.sh
+```
+
+**Do not run `scripts/install.sh` to upgrade.** It looks for the host-arch
+binary name (so it cannot place a cross-built Linux binary), replaces
+`scripts/` wholesale, and finishes with a recursive `chown` across `.env` and
+`data/summaries.db`.
+
+What `deploy.sh` does, in order: runs `make check`; builds; stages to a
+root-owned temporary directory on the target and *executes the staged binary
+there* to prove it runs on that CPU; compares the helper scripts and asks
+before touching them; then, holding the cron runner's own `flock`, snapshots
+the database, swaps the binary via an atomic symlink re-point, installs any
+approved scripts, prunes old artifacts, and verifies the protected files
+(`.env`, `*-sites.json`, `summaries.db`) are byte-identical to before.
+
+Useful flags:
+
+| | |
+|---|---|
+| `REF=<tag>` | build that git ref from a throwaway worktree |
+| `--stage-only` | build and verify on the target, change nothing |
+| `SKIP_SCRIPTS=1` | binary only |
+| `ASSUME_YES=1` | answer yes to the scripts prompt (unattended) |
+| `KEEP_VERSIONS=N` | artifacts to retain (default 3) |
+| `FORCE=1` | proceed past an in-flight run or a missing `flock` |
+
+Rollback (`deploy/rollback.sh`): `--runner`, `--scripts`, `--db`, `--all`.
+The binary path re-points the symlink at the recorded previous target and
+then consumes that record, so a second rollback refuses rather than silently
+doing nothing. `--db` refuses if the live database is newer than the snapshot
+unless `FORCE=1`.
 
 ## Environment-Specific Configuration
 

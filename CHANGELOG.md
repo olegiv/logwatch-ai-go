@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `deploy/` remote deployment tooling: `preflight.sh` (read-only host
+  inspection with gates for CPU level, lock-directory ownership, in-flight
+  runs, per-filesystem free space and the nightly cron window), `deploy.sh`
+  (build, stage, verify, install under the cron runner's own flock),
+  `rollback.sh` (binary, runner, helper scripts, database), `status.sh`, and
+  shared helpers in `lib.sh`/`remote-lib.sh`.
+- `deploy/lib_test.sh`: 103 assertions covering the pure helpers, run by
+  `make check` and in CI on ubuntu-latest.
+- `deploy/lint-payloads.sh`: extracts and lints the remote SSH payloads,
+  which `shellcheck -x` cannot see inside because they are quoted heredocs.
+- Makefile targets `preflight`, `deploy`, `deploy-stage`, `rollback`,
+  `status`, `lint-sh`, `lint-payloads`, `test-sh`.
+
+### Changed
+- `docs/DEPLOYMENT.md` now separates first-time bootstrap from upgrades.
+  `scripts/install.sh` is for bootstrap only — it expects the host-arch
+  binary name, replaces `scripts/` wholesale, and recursively chowns `.env`
+  and `data/summaries.db`.
+- CI additionally runs shellcheck, the payload lint and the shell tests.
+
 ## [0.15.0] - 2026-08-27
 
 ### Added

@@ -10,8 +10,16 @@
 #                                          # clean up; nothing in /opt is touched
 #   SKIP_TESTS=1 ./deploy/deploy.sh        # emergency bypass of make check
 #   SKIP_SCRIPTS=1 ./deploy/deploy.sh      # binary only; leave scripts/ and run-cron.sh
-#   ASSUME_YES=1 ./deploy/deploy.sh        # answer the scripts prompt automatically
+#   ASSUME_YES=1 ./deploy/deploy.sh        # answer YES to the scripts prompt
 #   KEEP_VERSIONS=5 ./deploy/deploy.sh     # retain more old artifacts (default 3, 0 = keep all)
+#   FORCE=1 ./deploy/deploy.sh             # proceed without flock, or past an in-flight run
+#
+# Shared environment, read by every deploy/ script:
+#   DEPLOY_HOST  target host (deploy/deploy.env); HOST overrides it,
+#                and a positional argument overrides both
+#   INSTALL_DIR  remote install root (default /opt/logwatch-ai)
+#   LOCK_FILE    target-side only — no script forwards it; the lock is
+#                discovered from the crontab and the deployed runner
 #
 # Run ./deploy/preflight.sh FIRST — this script assumes its gates passed.
 #
@@ -161,7 +169,7 @@ fi
 if [[ ${SKIP_TESTS:-0} == 1 ]]; then
   echo "==> SKIP_TESTS=1 — skipping make check"
 else
-  echo "==> make check (fmt-check + vet + lint + test)"
+  echo "==> make check (fmt, vet, lint incl. shell + payloads, Go and shell tests)"
   make -C "$SRC" check
 fi
 
@@ -212,7 +220,8 @@ fi
 
 echo "==> Verifying transfer + proving this CPU can execute the binary"
 ssh "$HOST" 'bash -s' \
-  < <(remote_env BIN_SHA "$BIN_SHA" STAGE_DIR "$STAGE_DIR"
+  < <(echo '{'
+       remote_env BIN_SHA "$BIN_SHA" STAGE_DIR "$STAGE_DIR"
       cat <<'__REMOTE_STAGE__'
 set -euo pipefail
 got=$(sha256sum "$STAGE_DIR/logwatch-analyzer" | awk '{print $1}')
@@ -225,6 +234,7 @@ echo "  --- executing the STAGED binary (catches GOAMD64/SIGILL, /opt untouched)
 for f in "$STAGE_DIR"/*.sh; do [ -e "$f" ] || continue; bash -n "$f" || exit 1; done
 echo "  staged scripts pass syntax check"
 __REMOTE_STAGE__
+      echo '}'
 )
 
 if [[ $STAGE_ONLY == 1 ]]; then
@@ -292,11 +302,17 @@ fi
 
 # --------------------------- 5. one locked session: backup, binary, scripts
 echo "==> Installing (cron lock, database backup, binary swap)"
+# Tee the payload so a failure can be described accurately: without this the
+# operator sees a non-zero exit and cannot tell whether the binary was
+# swapped before the failure or not.
+install_log=$(mktemp "${TMPDIR:-/tmp}/logwatch-install.XXXXXXXX")
+install_rc=0
 ssh "$HOST" 'bash -s' \
-  < <(remote_env INSTALL_DIR "$INSTALL_DIR" STAGE_DIR "$STAGE_DIR" \
+  < <(echo '{'
+       remote_env INSTALL_DIR "$INSTALL_DIR" STAGE_DIR "$STAGE_DIR" \
                  REMOTE_BIN "$REMOTE_BIN" VERSION "$VERSION" \
                  INSTALL_SCRIPTS "$INSTALL_SCRIPTS" TRACKED "${TRACKED_SCRIPTS[*]}" \
-                 KEEP_VERSIONS "$KEEP_VERSIONS"
+                 KEEP_VERSIONS "$KEEP_VERSIONS" FORCE "${FORCE:-0}"
       cat "$REMOTE_LIB"; cat <<'__REMOTE_INSTALL__'
 set -euo pipefail
 cd "$INSTALL_DIR"
@@ -315,12 +331,24 @@ if [ "$INSTALL_SCRIPTS" = 1 ]; then
     fi
 fi
 
-# Every artifact this tooling creates is recorded here. Pruning deletes only
-# names on this list, so an operator's own recovery copy — say
-# logwatch-analyzer-emergency — can never be swept up by a root rm just
-# because it shares the prefix. Defined before the first caller: the database
-# snapshot records itself, and that runs well before the binary swap.
+# Every PRUNABLE artifact this tooling creates is recorded here — versioned
+# binaries and database snapshots. Pruning deletes only names on this list,
+# so an operator's own recovery copy (say logwatch-analyzer-emergency) can
+# never be swept up by a root rm just because it shares the prefix.
+# Deliberately NOT recorded, and therefore never pruned: .prev backups (they
+# are rollback material for the current release) and everything rollback.sh
+# produces (.failed, .suspect-*), which need an operator's judgement.
+# Defined before its first caller: the snapshot records itself, well before
+# the binary swap.
 note_artifact() { printf '%s\n' "$1" >> ./.logwatch-artifacts; }
+
+# An artifact is created before it can be recorded, so a run that dies in
+# between leaves an orphan the manifest never mentions and pruning can never
+# reach — ~12 MiB each on a shared box. These names are unambiguous (they
+# carry a pid suffix this tooling generates), so sweeping them is safe.
+for orphan in ./logwatch-analyzer-*.incoming.* ./*.prev-target.new ./*.db-snapshot.new; do
+    [ -e "$orphan" ] && { echo "  sweeping orphan from an interrupted run: $orphan"; rm -f "$orphan"; }
+done
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 
 # Record the protected files so stage 6 can prove they were not touched,
@@ -356,8 +384,9 @@ else
     # A unique basename per deploy. Reusing "$db.pre-$VERSION" meant a
     # same-version redeploy rewrote the snapshot the metadata still points
     # at, so an interruption mid-publication could pair an old main file with
-    # new sidecars. Nothing here ever touches an existing snapshot set, and
-    # the metadata is pointed at this one only once it is complete.
+    # new sidecars. Nothing here touches a snapshot set from an EARLIER
+    # deploy — the rm below clears only this deploy's own name, defensively —
+    # and the metadata is pointed at this one only once it is complete.
     # The snapshot is created and then chmod/chown'd as root. Both follow
     # symlinks, so a non-root principal able to write this directory could
     # swap $dst for a link and have the database's mode and ownership applied
@@ -391,7 +420,8 @@ else
         done
     fi
     ls -l "$dst"
-    printf '%s\n' "$dst" > ./.logwatch-analyzer.db-snapshot
+    printf '%s\n' "$dst" > ./.logwatch-analyzer.db-snapshot.new
+    mv -f ./.logwatch-analyzer.db-snapshot.new ./.logwatch-analyzer.db-snapshot
     note_artifact "$dst"
 fi
 
@@ -404,10 +434,11 @@ if [ ! -e ./logwatch-analyzer ]; then
 fi
 
 
-# Stage the incoming artifact under a unique name FIRST. Nothing below
-# unlinks or renames anything the live symlink resolves through, so the
-# stable path stays valid for the whole sequence and the final rename is the
-# only visible transition.
+# Stage the incoming artifact under a unique name FIRST. The stable path
+# always resolves to a complete binary: the only write to it is an atomic
+# rename, and in the same-version case the outgoing inode is preserved by a
+# hard link before that rename — so nothing the symlink resolves through is
+# ever unlinked while it is still the target.
 install -m 0755 -o root -g root "$STAGE_DIR/logwatch-analyzer" "./$REMOTE_BIN.incoming.$$"
 
 if [ -L ./logwatch-analyzer ]; then
@@ -437,12 +468,25 @@ fi
 
 echo "  rollback target: $prev_target"
 if ! "$prev_target" -version >/dev/null 2>&1; then
-    echo "  WARN: $prev_target does not execute — rollback.sh would refuse it." >&2
+    # A warning was not enough: the record below is then overwritten with this
+    # dead target, discarding a pointer that may still have worked, and the
+    # closing summary still advertises `./deploy/rollback.sh`. Refuse before
+    # the swap — there is no recovery path to deploy into.
+    echo "ABORT: the current rollback target does not execute:" >&2
+    echo "         $prev_target" >&2
+    echo "       Deploying now would leave no way back. Repair or remove it," >&2
+    echo "       or set FORCE=1 to accept a deploy with no rollback path." >&2
+    [ "${FORCE:-0}" = 1 ] || exit 1
+    echo "WARN: FORCE=1 — continuing with no usable rollback target" >&2
 else
-    "$prev_target" -version 2>&1 | head -1
+    "$prev_target" -version 2>&1 | head -1 || true
 fi
 mv -Tf "./$REMOTE_BIN.incoming.$$" "./$REMOTE_BIN"
 note_artifact "$REMOTE_BIN"
+# Everything from here on runs with the new binary already live, so a failure
+# below is NOT "the deploy did nothing". The caller keys off this marker to
+# say so instead of reporting a clean failure.
+echo "STATE: binary-swapped"
 ln -sfn "$INSTALL_DIR/$REMOTE_BIN" ./logwatch-analyzer.new
 mv -Tf ./logwatch-analyzer.new ./logwatch-analyzer
 
@@ -453,7 +497,12 @@ mv -Tf ./logwatch-analyzer.new ./logwatch-analyzer
 # back: reverting to B while recording B as its own predecessor would make
 # the next rollback a no-op and lose the path back to A.
 prior_meta=$(cat ./.logwatch-analyzer.prev-target 2>/dev/null || echo "")
-printf '%s\n' "$prev_target" > ./.logwatch-analyzer.prev-target
+# Written via a temp file and rename, like every other publication here. A
+# plain `>` truncates first, so a write failure would leave this EMPTY at the
+# moment the new, not-yet-smoke-tested binary is already live — and
+# rollback.sh would then refuse, with no recovery path at all.
+printf '%s\n' "$prev_target" > ./.logwatch-analyzer.prev-target.new
+mv -f ./.logwatch-analyzer.prev-target.new ./.logwatch-analyzer.prev-target
 
 ls -la ./logwatch-analyzer ./"$REMOTE_BIN"
 
@@ -480,20 +529,18 @@ if ! ./logwatch-analyzer -version; then
 fi
 
 # --- scripts + runner (same lock) ------------------------------------------
+# A .prev must belong to THIS deployment, so clear every one of them here —
+# unconditionally, before the stage below decides what to replace. Gating
+# this on INSTALL_SCRIPTS=1 left backups from an older deploy in place on
+# the commonest path of all (a binary-only release, where the scripts
+# compare equal), and rollback --all would then restore a runner two
+# releases old alongside the current binary. The stage below recreates a
+# .prev only for what it actually replaces, so "a .prev exists" once again
+# means "this deployment replaced that component".
+rm -f ./run-cron.sh.prev ./scripts/*.prev
+
 if [ "$INSTALL_SCRIPTS" = 1 ]; then
     mkdir -p ./scripts
-    # A .prev must belong to THIS deployment. When a component is not
-    # replaced, an older backup left beside it would make rollback --all
-    # restore a version this deploy never touched, producing a mixed tree.
-    if [ -f "$STAGE_DIR/run-cron.sh" ] && cmp -s "$STAGE_DIR/run-cron.sh" ./run-cron.sh; then
-        rm -f ./run-cron.sh.prev
-    fi
-    for f in $TRACKED; do
-        if [ -f "$STAGE_DIR/$f" ] && cmp -s "$STAGE_DIR/$f" "./scripts/$f"; then
-            rm -f "./scripts/$f.prev"
-        fi
-    done
-
     if [ -f "$STAGE_DIR/run-cron.sh" ] && ! cmp -s "$STAGE_DIR/run-cron.sh" ./run-cron.sh; then
         # A .prev must mean "this deployment replaced it", so the stale one is
         # cleared here — at the moment of replacement — rather than up front,
@@ -503,16 +550,25 @@ if [ "$INSTALL_SCRIPTS" = 1 ]; then
         # No live runner is exactly the state --runner must repair, so the
         # backup is conditional rather than aborting the install.
         [ -e ./run-cron.sh ] && cp -p ./run-cron.sh ./run-cron.sh.prev
+        # Check before publishing, the way rollback.sh does. Validating after
+        # the rename leaves a broken runner live, and a broken runner fails
+        # silently: cron exits 0 and logs a plausible "already in progress".
+        if ! bash -n "$STAGE_DIR/run-cron.sh"; then
+            echo "ABORT: the staged runner has a syntax error — not installing it." >&2
+            echo "       The current runner is untouched." >&2
+            exit 1
+        fi
         install -m 0755 -o root -g root "$STAGE_DIR/run-cron.sh" ./run-cron.sh.new
         mv -f ./run-cron.sh.new ./run-cron.sh
-        bash -n ./run-cron.sh || { echo "ABORT: installed runner has a syntax error" >&2; exit 1; }
         echo "  run-cron.sh updated, syntax OK"
         grep -n 'LOCK_FILE=' ./run-cron.sh \
             || echo "  WARN: runner pins no LOCK_FILE — it will use the built-in default"
     fi
 
-    # Preserve each file's existing mode rather than flattening them to 0755
-    # (generate-logwatch.sh is 0750, helper.sh is 0640).
+    # Preserve each file's existing mode rather than flattening them to 0755.
+    # As deployed on the production host these differ from the repo's own
+    # modes — generate-logwatch.sh is 0750 there because it runs logwatch as
+    # root, and helper.sh is 0640 because it is sourced, not executed.
     for f in $TRACKED; do
         src="$STAGE_DIR/$f"
         dst="./scripts/$f"
@@ -527,9 +583,10 @@ if [ "$INSTALL_SCRIPTS" = 1 ]; then
             # generate-logwatch.sh runs logwatch as root and helper.sh is
             # sourced, not executed.
             case "$f" in
-                helper.sh)            mode=0640 ;;
-                generate-logwatch.sh) mode=0750 ;;
-                *)                    mode=0755 ;;
+                helper.sh)             mode=0640 ;;  # sourced, not executed
+                generate-logwatch.sh)  mode=0750 ;;  # runs logwatch as root
+                *.example)             mode=0644 ;;  # a template, not a program
+                *)                     mode=0755 ;;
             esac
         fi
         install -m "$mode" -o root -g root "$src" "$dst.new"
@@ -546,8 +603,14 @@ fi
 # only names this tooling generates, never the live target, and never the
 # recorded rollback target.
 if [ "$KEEP_VERSIONS" -gt 0 ]; then
+    # Canonicalise BOTH sides. `live` came from readlink -f (physical) while
+    # each candidate was built as "$INSTALL_DIR/$base" (logical), so on a host
+    # whose install path contains a symlink they could never compare equal and
+    # the live binary was protected only by being newest.
     live=$(readlink -f ./logwatch-analyzer)
     keep_target=$(cat ./.logwatch-analyzer.prev-target 2>/dev/null || echo "")
+    [ -n "$keep_target" ] && keep_target=$(readlink -f "$keep_target" 2>/dev/null || printf '%s' "$keep_target")
+    pruned=0; kept=0; unmanaged=0
     echo "  pruning old artifacts (keeping $KEEP_VERSIONS, plus live and rollback target)"
 
     # Binaries: newest first, skip the two that must survive, drop the rest
@@ -559,24 +622,30 @@ if [ "$KEEP_VERSIONS" -gt 0 ]; then
         [ -n "$f" ] || continue
         base="${f#./}"
         # Only ever delete something this tooling recorded creating.
-        grep -qxF "$base" ./.logwatch-artifacts 2>/dev/null || continue
-        abs="$INSTALL_DIR/$base"
+        if ! grep -qxF "$base" ./.logwatch-artifacts 2>/dev/null; then
+            unmanaged=$((unmanaged + 1)); continue
+        fi
+        abs=$(readlink -f "$f" 2>/dev/null || printf '%s' "$INSTALL_DIR/$base")
         [ "$abs" = "$live" ] && continue
         [ "$abs" = "$keep_target" ] && continue
         n=$((n + 1))
         if [ "$n" -gt "$KEEP_VERSIONS" ]; then
-            rm -f "$f" && echo "    removed $f"
+            rm -f "$f" && { echo "    removed $f"; pruned=$((pruned + 1)); }
+        else
+            kept=$((kept + 1))
         fi
     done < <(ls -1t ./logwatch-analyzer-* 2>/dev/null)
 
     # Database snapshots: prune the main files and take their sidecars along,
     # so a restore can never pick up a WAL whose snapshot is gone.
-    if db=$(resolve_db); then
+    prune_rc=0; db=$(resolve_db 2>/dev/null) || prune_rc=$?
+    if [ "$prune_rc" -eq 0 ]; then
         # DATABASE_PATH may legitimately contain spaces, so the snapshot names
         # must survive intact all the way to `rm` — an unquoted command
         # substitution here would hand root a list of path fragments.
         n=0
         current_snap=$(cat ./.logwatch-analyzer.db-snapshot 2>/dev/null || echo "")
+        # shellcheck disable=SC2010 # mtime order is the point; the names are ours
         while IFS= read -r f; do
             [ -n "$f" ] || continue
             [ "$f" = "$current_snap" ] && continue
@@ -586,6 +655,17 @@ if [ "$KEEP_VERSIONS" -gt 0 ]; then
                 rm -f "$f" "$f"-wal "$f"-shm "$f"-journal && echo "    removed $f"
             fi
         done < <(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$')
+    fi
+
+    # Report what actually happened. "pruning old artifacts" printed alone was
+    # a lie on any host carrying artifacts from before this tooling: they are
+    # not in the manifest, so nothing is ever removed and the disk keeps
+    # filling while the line claims otherwise.
+    echo "    summary: removed $pruned, kept $kept managed binary artifact(s)"
+    if [ "$unmanaged" -gt 0 ]; then
+        echo "    note: $unmanaged binary artifact(s) predate this tooling and are"
+        echo "          absent from .logwatch-artifacts, so pruning will never"
+        echo "          remove them. Delete them by hand once known unused."
     fi
 fi
 
@@ -598,7 +678,29 @@ else
     exit 1
 fi
 __REMOTE_INSTALL__
-)
+      echo '}'
+) 2>&1 | tee "$install_log" || true
+
+# The pipeline's exit status is tee's, so read ssh's from PIPESTATUS.
+install_rc=${PIPESTATUS[0]}
+if [ "$install_rc" -ne 0 ]; then
+  if grep -q "^STATE: binary-swapped" "$install_log"; then
+    cat >&2 <<EOF
+
+DEPLOY FAILED AFTER THE BINARY WAS SWAPPED.
+  ${HOST}:${INSTALL_DIR} is now running ${VERSION}, but the steps after the
+  swap (scripts, pruning, the protected-file check) did not all complete.
+  Inspect:  ./deploy/status.sh
+  Revert:   ./deploy/rollback.sh
+EOF
+  else
+    echo "" >&2
+    echo "Deploy failed BEFORE the binary was swapped — ${HOST} is unchanged." >&2
+  fi
+  rm -f "$install_log"
+  exit "$install_rc"
+fi
+rm -f "$install_log"
 
 cat <<EOF
 

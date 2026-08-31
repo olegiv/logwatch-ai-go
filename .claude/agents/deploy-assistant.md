@@ -36,6 +36,12 @@ Development (macOS) → Integration → QA → Pre-Production → Production
 
 ## Installation Process
 
+> **Upgrading an existing install?** Use `deploy/` — `make preflight`
+> then `make deploy` (see `docs/DEPLOYMENT.md`). The `install.sh` flow
+> below is for bootstrapping a NEW host only: it expects the host-arch
+> binary name, replaces `scripts/` wholesale, and recursively chowns
+> `.env` and `data/summaries.db`.
+
 ### Standard Installation (Using make install)
 
 ```bash

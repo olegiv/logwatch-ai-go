@@ -12,7 +12,7 @@ GOFUMPT_VERSION       := v0.11.0
 .PHONY: all help build build-prod build-linux-amd64 build-darwin-arm64 build-all-platforms \
         test test-race coverage coverage-html fmt fmt-check vet lint lint-go check deps tidy clean install-tools \
         install run \
-        preflight deploy deploy-stage rollback status lint-sh test-sh
+        preflight deploy deploy-stage rollback status lint-sh lint-payloads test-sh
 
 # Version info from git
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -98,7 +98,14 @@ lint-sh: ## Lint shell scripts with shellcheck (skipped if not installed)
 test-sh: ## Run shell unit tests for the deploy helpers
 	bash deploy/lib_test.sh
 
-lint: lint-go lint-sh ## Run all linters
+lint-payloads: ## Lint the remote SSH payloads (shellcheck cannot see inside heredocs)
+	@if command -v shellcheck >/dev/null 2>&1; then \
+		bash deploy/lint-payloads.sh; \
+	else \
+		echo "WARN: shellcheck not installed — skipping payload lint."; \
+	fi
+
+lint: lint-go lint-sh lint-payloads ## Run all linters
 
 check: fmt-check vet lint test test-sh ## Run the full local quality gate
 

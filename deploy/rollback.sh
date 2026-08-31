@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 #
-# Revert a deploy by swapping in the .prev backups left by deploy.sh.
-# Reverting the binary and the cron runner are independent operations,
+# Revert a deploy. The binary is reverted by re-pointing the stable symlink
+# at the target recorded in .logwatch-analyzer.prev-target; the runner and
+# helper scripts are reverted from their .prev copies; the database is
+# restored from the snapshot named in .logwatch-analyzer.db-snapshot.
+# Reverting the binary, the cron runner, the helper scripts and the database
+# are independent operations,
 # because they are independent failure modes:
 #
 #   binary  — a bad binary shows up as -version failing, SIGILL, or
@@ -13,8 +17,11 @@
 #   scripts — a bad generate-* script shows up as that job alone failing
 #             while the rest of the run succeeds.
 #
-# After a rollback the broken artifact is kept as .failed for inspection
-# rather than deleted.
+# Nothing is deleted. What the replaced artifact becomes depends on which:
+#   binary  — keeps its own versioned name; only the symlink moves
+#   runner  — run-cron.sh.failed
+#   scripts — scripts/<name>.failed
+#   database— <db>.suspect-<timestamp>  (never pruned; clean up by hand)
 #
 # Usage:
 #   ./deploy/rollback.sh                    # binary only (the common case)
@@ -24,6 +31,13 @@
 #   ./deploy/rollback.sh --db               # restore the pre-deploy database
 #   ./deploy/rollback.sh <host> [--flags]
 #   FORCE=1 ./deploy/rollback.sh            # proceed even if a run is active
+#
+# Shared environment, read by every deploy/ script:
+#   DEPLOY_HOST  target host (deploy/deploy.env); HOST overrides it,
+#                and a positional argument overrides both
+#   INSTALL_DIR  remote install root (default /opt/logwatch-ai)
+#   LOCK_FILE    target-side only — no script forwards it; the lock is
+#                discovered from the crontab and the deployed runner
 #
 # FORCE=1 exists because the case that most needs a rollback — a wedged or
 # runaway analyzer — is also the case where the running-process check would
@@ -65,7 +79,8 @@ valid_install_dir "$INSTALL_DIR" || {
 
 echo "==> Rolling back on ${HOST}:${INSTALL_DIR}"
 ssh "$HOST" 'bash -s' \
-  < <(remote_env INSTALL_DIR "$INSTALL_DIR" DO_BIN "$DO_BIN" DO_RUNNER "$DO_RUNNER" \
+  < <(echo '{'
+       remote_env INSTALL_DIR "$INSTALL_DIR" DO_BIN "$DO_BIN" DO_RUNNER "$DO_RUNNER" \
                  DO_SCRIPTS "$DO_SCRIPTS" DO_DB "$DO_DB" LENIENT "$LENIENT" \
                  TRACKED "${TRACKED_SCRIPTS[*]}" FORCE "${FORCE:-0}"
       cat "$REMOTE_LIB"; cat <<'__REMOTE_ROLLBACK__'
@@ -81,6 +96,11 @@ if [ "$DO_BIN" = 1 ]; then
     # deleting the binary we are rolling away from.
     if [ ! -f ./.logwatch-analyzer.prev-target ]; then
         echo "error: no .logwatch-analyzer.prev-target — nothing to roll back to." >&2
+        echo "  Either no deploy has run since these scripts were installed, or a" >&2
+        echo "  rollback has already consumed the record. Available artifacts:" >&2
+        ls -1t ./logwatch-analyzer-* 2>/dev/null | sed 's|^|    |' >&2
+        echo "  Re-point by hand: ln -sfn $INSTALL_DIR/<artifact> ./logwatch-analyzer.rb \\" >&2
+        echo "                    && mv -Tf ./logwatch-analyzer.rb ./logwatch-analyzer" >&2
         echo "  deploy.sh writes it on every install. If this is the first deploy" >&2
         echo "  with these scripts, re-point the symlink by hand:" >&2
         ls -la ./logwatch-analyzer* >&2
@@ -104,9 +124,16 @@ if [ "$DO_BIN" = 1 ]; then
     failed_target=$(readlink -f ./logwatch-analyzer)
     ln -sfn "$prev_target" ./logwatch-analyzer.rb
     mv -Tf ./logwatch-analyzer.rb ./logwatch-analyzer
+    # Consume the record. Leaving it in place made a second rollback a silent
+    # no-op: it re-pointed the symlink at the target it already had and still
+    # printed "rolled back". We do not know this target's own predecessor, so
+    # the honest state is "no recorded target" — the guard above then tells
+    # the operator to choose an artifact explicitly.
+    rm -f ./.logwatch-analyzer.prev-target
     echo "binary rolled back:"
     echo "  symlink now -> $prev_target"
     echo "  rolled away from $failed_target (kept for inspection)"
+    echo "  rollback record consumed; a further rollback needs an explicit target"
     ./logwatch-analyzer -version
     ls -la ./logwatch-analyzer
 fi
@@ -161,14 +188,24 @@ if [ "$DO_SCRIPTS" = 1 ]; then
     restored=0
     for f in $TRACKED; do
         [ -f "./scripts/$f.prev" ] || continue
+        # Stage, then rename — the same shape the runner restore uses. Two
+        # moves left the helper ABSENT between them, so a failure on the
+        # second (EACCES, ENOSPC, EIO) deleted it outright and errexit then
+        # aborted the loop, leaving the remaining helpers unrestored too.
+        #
         # .prev was made with `cp -p`, so it already carries the mode the file
         # had when the deploy replaced it. Re-applying the CURRENT file's mode
         # would faithfully restore an operator's later chmod — e.g. a
         # helper.sh loosened from 0640 to 0644 — which is the opposite of a
-        # rollback. Guarding the move also matters: a missing live file must
-        # not abort the loop half-way through the restore.
-        [ -e "./scripts/$f" ] && mv "./scripts/$f" "./scripts/$f.failed"
-        mv "./scripts/$f.prev" "./scripts/$f"
+        # rollback.
+        if ! cp -p "./scripts/$f.prev" "./scripts/$f.restoring.$$"; then
+            echo "  WARN: could not stage scripts/$f — left as deployed" >&2
+            rm -f "./scripts/$f.restoring.$$"
+            continue
+        fi
+        [ -e "./scripts/$f" ] && cp -p "./scripts/$f" "./scripts/$f.failed"
+        mv -f "./scripts/$f.restoring.$$" "./scripts/$f"
+        rm -f "./scripts/$f.prev"
         echo "  restored scripts/$f (mode $(stat -c '%a' "./scripts/$f"))"
         restored=$((restored + 1))
     done
@@ -181,7 +218,12 @@ if [ "$DO_DB" = 1 ]; then
     # Resolve the same path deploy.sh backed up: .env may set an absolute or
     # non-default DATABASE_PATH, in which case the snapshot does not live in
     # ./data at all.
-    if ! db=$(resolve_db); then
+    db_rc=0; db=$(resolve_db) || db_rc=$?
+    if [ "$db_rc" -eq 2 ]; then
+        # resolve_db has already explained the runtime override. Restoring the
+        # .env database would put back one the analyzer does not read.
+        exit 1
+    elif [ "$db_rc" -ne 0 ]; then
         echo "error: database disabled in .env — nothing to restore" >&2
         exit 1
     fi
@@ -199,6 +241,7 @@ if [ "$DO_DB" = 1 ]; then
     backup=$(cat ./.logwatch-analyzer.db-snapshot 2>/dev/null || echo "")
     if [ -n "$backup" ] && [ ! -f "$backup" ]; then backup=""; fi
     if [ -z "$backup" ]; then
+        # shellcheck disable=SC2010 # mtime order is the point; the names are ours
         backup=$(ls -1t "$db".pre-* 2>/dev/null | grep -vE -- '-(wal|shm|journal)$' | head -1 || true)
     fi
     if [ -z "$backup" ]; then
@@ -214,7 +257,6 @@ if [ "$DO_DB" = 1 ]; then
         echo "       Restoring would replace the link with a regular file." >&2
         echo "       Restore to the link's target by hand, or point" >&2
         echo "       DATABASE_PATH at the real path." >&2
-        rm -f "$staged"
         exit 1
     fi
 
@@ -226,6 +268,16 @@ if [ "$DO_DB" = 1 ]; then
         echo "error: recorded snapshot $backup is not beside the configured" >&2
         echo "       database $db — DATABASE_PATH appears to have changed." >&2
         echo "       Restore it by hand, or point DATABASE_PATH back." >&2
+        exit 1
+    fi
+    # Refuse to discard data the snapshot predates. Re-running --db days later
+    # ("did that actually take?") would otherwise revert the live database a
+    # second time and drop every row written since, reporting success.
+    if [ -f "$db" ] && [ "$db" -nt "$backup" ] && [ "${FORCE:-0}" != 1 ]; then
+        echo "error: the live database is NEWER than $backup." >&2
+        echo "       Restoring would discard everything written since that" >&2
+        echo "       snapshot. If that is genuinely what you want, re-run with" >&2
+        echo "       FORCE=1. Nothing has been changed." >&2
         exit 1
     fi
     echo "restoring from $backup"
@@ -289,7 +341,9 @@ if [ "$DO_DB" = 1 ]; then
     elif [ -f "$backup-wal" ] || [ -f "$backup-journal" ]; then
         # Without sqlite3 the WAL cannot be folded in, and publishing a
         # main/sidecar pair in two steps can leave a mismatched set that
-        # SQLite may replay or reject. Refuse rather than risk it.
+        # SQLite may replay or reject. Refuse rather than risk it. Note the
+        # LIVE database's own WAL is handled separately below, where sqlite3
+        # is likewise required.
         echo "error: $backup carries a WAL/journal and sqlite3 is not available" >&2
         echo "       to consolidate it. Install sqlite3 and retry, or restore" >&2
         echo "       the snapshot set by hand." >&2
@@ -300,11 +354,12 @@ if [ "$DO_DB" = 1 ]; then
     # A fixed .suspect name would destroy the evidence of an earlier failed
     # rollback, which this script promises to retain.
     suspect="$db.suspect-$(date -u +%Y%m%dT%H%M%SZ)"
-    # Hard-link the suspect state aside rather than moving it: a move empties
-    # the live path, and an interruption before the rename below would leave
-    # no database at all, so the next analyzer run would create an empty one.
-    # A link keeps both names pointing at the same inode until the rename
-    # atomically replaces the live one.
+    # Hard-link the MAIN file aside rather than moving it: a move empties the
+    # live path, and an interruption before the rename below would leave no
+    # database at all, so the next analyzer run would create an empty one. A
+    # link keeps both names on the same inode until the rename replaces the
+    # live one. The sidecars ARE moved — safe only because the checkpoint
+    # above folded them into the main file, so they hold nothing unique.
     # Fold the LIVE database's own WAL in before touching anything, so the
     # sidecars can be removed without the old main file ever being left
     # incomplete. Removing them first would mean an interruption before the
@@ -338,10 +393,14 @@ if [ "$DO_DB" = 1 ]; then
     # Both sides are now single consolidated files, so the publish is one
     # atomic rename over a live path that never went missing.
     mv -f "$staged" "$db"
+    # Consume the marker: it names a snapshot that has now been restored, and
+    # leaving it would let a repeat run pick the same one again.
+    rm -f "$INSTALL_DIR/.logwatch-analyzer.db-snapshot"
     echo "  restored; previous state kept as $(basename "$suspect")"
     ls -l "$db"*
 fi
 __REMOTE_ROLLBACK__
+      echo '}'
 )
 
 cat <<EOF
@@ -350,11 +409,11 @@ cat <<EOF
 
 Nothing was deleted: the binary you rolled away from is still on disk
 under its own version name, the runner is kept as run-cron.sh.failed, and
-a replaced database is kept as summaries.db.suspect. Fix the source, then
+a replaced database is kept as <db>.suspect-<timestamp>. Fix the source, then
 re-run ./deploy/deploy.sh.
 
 If the runner was rolled back because /run turned out not to be writable,
-prefer keeping the L-06 fix and pinning the lock path in the crontab line
+prefer keeping the /run lock path and pinning it in the crontab line
 instead of reverting the script:
 
   7 2 * * * LOCK_FILE=${INSTALL_DIR}/.cron.lock ${INSTALL_DIR}/run-cron.sh >> ${INSTALL_DIR}/logs/cron.log 2>&1

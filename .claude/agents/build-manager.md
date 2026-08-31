@@ -211,7 +211,13 @@ Development (macOS) → Build Linux binary → Transfer to server → Install
 1. Develop and test on macOS: `make build && make test`
 2. Build for Linux: `make build-linux-amd64`
 3. Transfer: `scp bin/logwatch-analyzer-linux-amd64 server:/tmp/`
-4. Install on server: `sudo ./scripts/install.sh`
+4. Install on server: `> **Upgrading an existing install?** Use `deploy/` — `make preflight`
+> then `make deploy` (see `docs/DEPLOYMENT.md`). The `install.sh` flow
+> below is for bootstrapping a NEW host only: it expects the host-arch
+> binary name, replaces `scripts/` wholesale, and recursively chowns
+> `.env` and `data/summaries.db`.
+
+sudo ./scripts/install.sh`
 
 ## Integration with CI/CD
 

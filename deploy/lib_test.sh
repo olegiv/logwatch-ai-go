@@ -83,14 +83,25 @@ eq "still resolves a backward reference"  "/var/lib/lw/y.db" "$(read_env BACK_B)
 printf 'DATA_DIR=/srv/db\nESCAPED=\\${DATA_DIR}/summaries.db\n' > .env
 # shellcheck disable=SC2016 # the literal is the expected value
 eq "leaves an escaped reference literal" '${DATA_DIR}/summaries.db' "$(read_env ESCAPED)"
+# godotenv's expandVarRegex is [A-Z0-9_]+ — lowercase references are NOT
+# expanded. Expanding them here resolved a path the analyzer never opens, so
+# the deploy would snapshot and restore a different database.
+# shellcheck disable=SC2016 # writing literal ${...} into the fixture
+printf 'data_dir=/var/lib/lw\nDATA_DIR=/var/lib/lw\nLOWER=${data_dir}/s.db\nUPPER=${DATA_DIR}/s.db\n' > .env
+# shellcheck disable=SC2016 # the literal is the expected value
+eq "leaves a lowercase reference literal" '${data_dir}/s.db' "$(read_env LOWER)"
+eq "expands an uppercase reference"       "/var/lib/lw/s.db" "$(read_env UPPER)"
 
 # ------------------------------------------------------------- resolve_db
 echo "resolve_db"
 cd "$WORK" || exit 1
 printf 'ENABLE_DATABASE=true\nDATABASE_PATH=./data/summaries.db\n' > .env
 # shellcheck disable=SC2034 # read by the sourced resolve_* functions
-INSTALL_DIR=/opt/logwatch-ai
-eq "resolves a relative path against INSTALL_DIR" "/opt/logwatch-ai/data/summaries.db" "$(resolve_db)"
+# INSTALL_DIR must be the sandbox: resolve_db reads $INSTALL_DIR/run-cron.sh,
+# and pointing this at the real /opt/logwatch-ai made the result depend on
+# whatever is installed on the machine running the tests.
+INSTALL_DIR="$WORK"
+eq "resolves a relative path against INSTALL_DIR" "$WORK/data/summaries.db" "$(resolve_db)"
 
 printf 'ENABLE_DATABASE=true\nDATABASE_PATH=/var/lib/lw/summaries.db\n' > .env
 eq "keeps an absolute path as-is" "/var/lib/lw/summaries.db" "$(resolve_db)"
@@ -99,7 +110,7 @@ printf 'ENABLE_DATABASE=false\n' > .env
 if resolve_db >/dev/null; then bad "returns nonzero when disabled" "nonzero" "zero"; else ok "returns nonzero when disabled"; fi
 
 printf 'LOG_LEVEL=info\n' > .env
-eq "defaults to enabled at the default path" "/opt/logwatch-ai/data/summaries.db" "$(resolve_db)"
+eq "defaults to enabled at the default path" "$WORK/data/summaries.db" "$(resolve_db)"
 
 # The application reads this key with viper.GetBool, which also accepts 1/t/T.
 # Treating those as "disabled" would silently skip the database backup.
@@ -113,6 +124,23 @@ for v in false FALSE 0 f no; do
     if resolve_db >/dev/null; then bad "treats ENABLE_DATABASE=$v as disabled" "disabled" "enabled"
     else ok "treats ENABLE_DATABASE=$v as disabled"; fi
 done
+
+# A runtime DATABASE_PATH override must be distinguishable from "disabled":
+# resolve_db returns 2, and deploy.sh aborts on it. Callers must capture the
+# status with `|| rc=$?` — `if ! cmd` discards it and made the abort inert.
+printf 'ENABLE_DATABASE=true\nDATABASE_PATH=/var/lib/lw/s.db\n' > .env
+printf '#!/bin/sh\nexport DATABASE_PATH=/srv/other.db\n' > run-cron.sh
+rc=0; resolve_db >/dev/null 2>&1 || rc=$?
+eq "returns 2 for a runner DATABASE_PATH export" "2" "$rc"
+
+printf '#!/bin/sh\n# export DATABASE_PATH=/srv/old.db\n' > run-cron.sh
+eq "ignores a commented-out override" "/var/lib/lw/s.db" "$(resolve_db)"
+
+rm -f run-cron.sh
+printf 'ENABLE_DATABASE=false\n' > .env
+rc=0; resolve_db >/dev/null 2>&1 || rc=$?
+eq "returns 1 for a disabled database" "1" "$rc"
+rm -f .env
 
 # ------------------------------------------------------ resolve_lock_file
 # Regression: matched commented-out crontab lines, and truncated a quoted
@@ -252,7 +280,10 @@ eq "yields empty when no snapshot exists" "" "$missing"
 # open blocked both deploy and rollback — worst on rollback, the safety net.
 echo "in-flight process pattern"
 INSTALL_DIR=/opt/logwatch-ai
-pat="^((/usr)?/bin/(ba)?sh[[:space:]]+)?(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
+# Call the shipped function, do not retype the regex: a hand-copied pattern
+# lets the real one drift while these assertions still pass, which is exactly
+# the failure inflight_pattern was introduced to prevent.
+pat=$(inflight_pattern)
 matches() { grep -qE "$pat" <<<"$1"; }
 
 for cmd in "/bin/bash /opt/logwatch-ai/run-cron.sh" \

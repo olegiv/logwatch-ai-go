@@ -9,6 +9,13 @@
 # DATABASE_PATH or a crontab-pinned LOCK_FILE is reported accurately rather
 # than against the built-in defaults.
 #
+# Shared environment, read by every deploy/ script:
+#   DEPLOY_HOST  target host (deploy/deploy.env); HOST overrides it,
+#                and a positional argument overrides both
+#   INSTALL_DIR  remote install root (default /opt/logwatch-ai)
+#   LOCK_FILE    target-side only — no script forwards it; the lock is
+#                discovered from the crontab and the deployed runner
+#
 # Usage:
 #   ./deploy/status.sh                  # uses DEPLOY_HOST from deploy.env
 #   ./deploy/status.sh <host>           # explicit (overrides env)
@@ -31,7 +38,8 @@ valid_install_dir "$INSTALL_DIR" || {
 # No -n here: it would redirect stdin from /dev/null and discard the payload
 # fed in below. -n belongs only on ssh calls that do NOT read a script.
 ssh "$HOST" 'bash -s' \
-  < <(remote_env INSTALL_DIR "$INSTALL_DIR"
+  < <(echo '{'
+       remote_env INSTALL_DIR "$INSTALL_DIR"
       declare -f redact_assignments
       cat "$REMOTE_LIB"; cat <<'__REMOTE_STATUS__'
 set -u
@@ -62,7 +70,9 @@ echo "==> Schedule"
 # docs/CRON_SETUP.md documents /etc/cron.d/logwatch-ai as a supported
 # location, so reporting only root's personal crontab could claim there is no
 # schedule while the lock section below shows that same entry's lock path.
-sched=$( { crontab -l -u root 2>/dev/null | sed 's/^/[crontab] /';
+sched=$( { # @desc lines are the marker convention scripts/run-cron.sh documents for
+           # identifying this job among a host's other cron entries.
+           crontab -l -u root 2>/dev/null | sed 's/^/[crontab] /';
            grep -H -iE 'logwatch|@desc' /etc/cron.d/* 2>/dev/null | sed 's/^/[cron.d] /'; } \
          | grep -iE 'logwatch|@desc' )
 if [ -n "$sched" ]; then
@@ -109,15 +119,33 @@ fi
 
 echo
 echo "==> Database"
-if ! db=$(resolve_db); then
+db_rc=0; db=$(resolve_db 2>/dev/null) || db_rc=$?
+if [ "$db_rc" -eq 2 ]; then
+    echo "  !! DATABASE_PATH is overridden outside .env — this tooling and the"
+    echo "     analyzer disagree about which database is live. Snapshot and"
+    echo "     rollback are unsafe until that is resolved."
+elif [ "$db_rc" -ne 0 ]; then
     echo "  disabled in .env"
 elif [ -f "$db" ]; then
     ls -l "$db"
+    # The pointer rollback --db actually prefers, which was never shown.
+    if [ -f "$INSTALL_DIR/.logwatch-analyzer.db-snapshot" ]; then
+        echo "  recorded snapshot: $(cat "$INSTALL_DIR/.logwatch-analyzer.db-snapshot")"
+    else
+        echo "  recorded snapshot: (none — rollback --db would fall back to mtime order)"
+    fi
+    # Filter sidecars: listing them as separate "snapshots" is the same
+    # confusion rollback.sh and deploy.sh already filter out.
     for f in "$db".pre-*; do
+        case "$f" in *-wal|*-shm|*-journal) continue ;; esac
         [ -e "$f" ] && echo "  snapshot: $(ls -l "$f" | awk '{print $5, $6, $7, $8, $9}')"
+    done
+    for f in "$db".suspect-*; do
+        [ -e "$f" ] && echo "  suspect (from a rollback; prune does not reach these): $f"
     done
 else
     echo "  configured at $db but not present"
 fi
 __REMOTE_STATUS__
+      echo '}'
 )

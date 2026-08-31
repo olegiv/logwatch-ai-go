@@ -30,11 +30,19 @@ jobs:
       run: go test -v ./...
 
     # The deploy/ scripts run on Linux but are authored on macOS, so the
-    # runner is the only place the GNU coreutils behaviour they depend on is
-    # actually exercised (a BSD-only mktemp template once made REF deploys
-    # fail on Linux while working locally). shellcheck is preinstalled here.
+    # runner is the only place they are linted and unit-tested under GNU
+    # userland (a BSD-only mktemp template once made REF deploys fail on
+    # Linux while working locally). Note this does not execute the remote
+    # payloads, where most of the GNU-specific calls live — those are linted
+    # by the step below but not run. shellcheck is preinstalled here.
     - name: Shell lint
       run: shellcheck -x deploy/*.sh
+
+    # shellcheck treats a quoted heredoc as data, so `shellcheck -x deploy/*.sh`
+    # reports clean while several hundred lines of root-executed payload go
+    # unchecked. This extracts and lints them.
+    - name: Payload lint
+      run: bash deploy/lint-payloads.sh
 
     - name: Shell tests
       run: bash deploy/lib_test.sh

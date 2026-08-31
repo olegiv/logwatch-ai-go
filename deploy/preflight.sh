@@ -4,13 +4,23 @@
 #
 # Read-only, with one exception: GATE 2 creates and immediately removes a
 # probe file to prove the lock directory is writable. Nothing else is written.
-# Prints a captured snapshot, then evaluates four hard gates that must pass
-# before deploy.sh is allowed to mutate /opt/logwatch-ai.
+#
+# The remote payload runs with `set -u` only — deliberately no `-e` and no
+# `pipefail` — so that every gate runs and their failures aggregate into
+# gate_fail rather than aborting at the first one.
+# Prints a captured snapshot interleaved with the gates below. Any of them
+# failing sets gate_fail and the script exits non-zero; deploy.sh should not
+# be run until they all pass. Note the missing-binary check (section 2) and
+# the flock check (section 10) are gates too, despite sitting outside the
+# numbered GATE blocks.
 #
 #   GATE 1  CPU supports GOAMD64=v3 (build-linux-amd64 targets v3; a v3
 #           binary on a pre-Haswell CPU dies at exec).
-#   GATE 2  The directory of the runner's EFFECTIVE lock path (a crontab
-#           override is honoured) is writable. If it is not, run-cron.sh's
+#   GATE 2  The directory of the runner's EFFECTIVE lock path (a crontab or
+#           /etc/cron.d override is honoured) is root-owned, not writable by
+#           group or other, and writable by us. Root can write anywhere, so
+#           writability alone proves nothing: any other principal that can
+#           write there may plant the fixed lock name as a symlink. If it is not, run-cron.sh's
 #           `exec 9>"$LOCK_FILE"` fails but the shell KEEPS GOING (verified:
 #           a failed exec redirection does not terminate non-interactive
 #           bash). `flock -n 9` then fails on the unopened fd, the runner
@@ -18,10 +28,21 @@
 #           reports success every night while nothing is analyzed, and
 #           cron.log gains only a plausible "already in progress" line.
 #   GATE 3  No analyzer/cron run currently in flight.
-#   GATE 4  At least 100 MB free on the install filesystem.
+#   GATE 4  Enough free space, summed PER FILESYSTEM: ~25 MiB for the binary
+#           in INSTALL_DIR, plus the database's own size +10% +1 MiB beside
+#           the database. Those can be different filesystems when
+#           DATABASE_PATH is configured, so each is checked against its own.
+#   GATE 5  Not inside the nightly run window (derived from the crontab).
 #
 # Secrets: .env is read for KEY NAMES ONLY. Values are never printed except
 # for an explicit allowlist of non-secret tuning settings.
+#
+# Shared environment, read by every deploy/ script:
+#   DEPLOY_HOST  target host (deploy/deploy.env); HOST overrides it,
+#                and a positional argument overrides both
+#   INSTALL_DIR  remote install root (default /opt/logwatch-ai)
+#   LOCK_FILE    target-side only — no script forwards it; the lock is
+#                discovered from the crontab and the deployed runner
 #
 # Usage:
 #   ./deploy/preflight.sh                # uses DEPLOY_HOST from deploy.env
@@ -43,6 +64,8 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
 valid_install_dir "$INSTALL_DIR" || {
   echo "error: refusing to use INSTALL_DIR='$INSTALL_DIR'" >&2; exit 1
 }
+# The pre-move /var/lock location. Reported alongside the effective lock so
+# can see a leftover there; overridable only for hosts that used another path.
 OLD_LOCK_FILE="${OLD_LOCK_FILE:-/var/lock/logwatch-ai-cron.lock}"
 
 echo "==> Pre-flight inspection of ${HOST} (read-only)"
@@ -56,7 +79,8 @@ rc=0
 # a set value, which would make the gate test the local default again instead
 # of discovering what the deployed runner uses.
 ssh "$HOST" 'bash -s' \
-  < <(remote_env INSTALL_DIR "$INSTALL_DIR" OLD_LOCK_FILE "$OLD_LOCK_FILE"
+  < <(echo '{'
+       remote_env INSTALL_DIR "$INSTALL_DIR" OLD_LOCK_FILE "$OLD_LOCK_FILE"
       declare -f redact_assignments
       cat "$REMOTE_LIB"; cat <<'__REMOTE_PREFLIGHT__'
 set -u
@@ -103,10 +127,11 @@ echo
 echo "===== 4. crontab ====="
 crontab -l -u root 2>&1 | grep -n -iE 'logwatch|^SHELL|^PATH|^MAILTO' \
     | redact_assignments || echo "(no logwatch line in root crontab)"
+# shellcheck disable=SC2010 # a human-readable listing, not a name list
 ls -la /etc/cron.d/ 2>/dev/null | grep -i logwatch || echo "(nothing logwatch-related in /etc/cron.d)"
 
 echo
-echo "===== 5. L-06 drift: LOCK_FILE default in deployed runners ====="
+echo "===== 5. LOCK_FILE default in deployed runners ====="
 echo "--- top-level runner (THIS is the file cron executes) ---"
 grep -Hn 'LOCK_FILE' "$INSTALL_DIR/run-cron.sh" 2>&1 || echo "!! no run-cron.sh at top level"
 # deploy.sh installs the runner only at the top level, which is the path cron
@@ -173,7 +198,7 @@ findmnt -no FSTYPE "$lock_dir" 2>&1 || true
 # Root can write anywhere, so a successful probe says nothing about safety.
 # Any principal that can write the directory can plant a symlink at the fixed
 # lock name and have the root runner's `exec 9>"$LOCK_FILE"` truncate its
-# target — the L-06 finding that moved this path off /var/lock. Checking only
+# target — the reason this path was moved off /var/lock. Checking only
 # the other-write bit is not enough: a directory owned by another account
 # (0700) or writable by an untrusted group (0770) is equally exploitable, so
 # require root ownership and no group or other write.
@@ -208,6 +233,7 @@ else
     gate_fail=1
 fi
 echo "--- existing lock files ---"
+# shellcheck disable=SC2010 # filtering ls's stderr, not parsing names
 ls -la "$effective_lock" "$OLD_LOCK_FILE" 2>&1 | grep -v 'No such file' || echo "(neither present)"
 
 echo
@@ -221,8 +247,28 @@ if pgrep -u root -a -f "$(inflight_pattern)" 2>/dev/null; then
 else
     echo "  ok       nothing running"
 fi
-echo "--- current time vs 02:07 cron (avoid 01:50-03:00) ---"
-date '+  now: %H:%M %Z'
+# Derived from the crontab rather than hardcoded, and treated as a gate.
+# Deploying into the window means cron fires against the lock the deploy
+# holds, and run-cron.sh then exits 0 logging "already in progress" — a whole
+# night of analysis skipped, indistinguishable from a genuine overlap.
+cron_hm=$(crontab -l -u root 2>/dev/null | grep -v '^[[:space:]]*#' \
+          | grep -F "$INSTALL_DIR/run-cron.sh" \
+          | awk '{printf "%02d:%02d", $2, $1}' | head -1)
+if [ -n "$cron_hm" ]; then
+    now_min=$(( 10#$(date +%H) * 60 + 10#$(date +%M) ))
+    cron_min=$(( 10#${cron_hm%%:*} * 60 + 10#${cron_hm##*:} ))
+    lo=$(( cron_min - 20 )); hi=$(( cron_min + 50 ))
+    echo "  cron runs at $cron_hm; now $(date +%H:%M) $(date +%Z)"
+    if [ "$now_min" -ge "$lo" ] && [ "$now_min" -le "$hi" ]; then
+        echo "  FAILED   inside the nightly run window — deploying now can make"
+        echo "           cron skip tonight's run entirely (it exits 0 quietly)"
+        gate_fail=1
+    else
+        echo "  ok       outside the nightly run window"
+    fi
+else
+    echo "  (no cron entry found for $INSTALL_DIR/run-cron.sh — window not checked)"
+fi
 
 echo
 echo "===== GATE 4: disk ====="
@@ -234,7 +280,8 @@ echo "===== GATE 4: disk ====="
 # df is captured and tested explicitly rather than piped into awk: this
 # script runs without `pipefail`, so a df failure would otherwise be masked
 # by awk exiting cleanly on zero records and the gate would report success.
-ssh_has_sqlite3() { command -v sqlite3 >/dev/null 2>&1; }
+# Runs on the TARGET, inside the payload — not a probe from the client.
+has_sqlite3() { command -v sqlite3 >/dev/null 2>&1; }
 
 check_free_dev() {   # $1 = device, $2 = KiB required, $3 = label
     local dev="$1" need="$2" label="$3" out line avail
@@ -262,8 +309,11 @@ check_free_dev() {   # $1 = device, $2 = KiB required, $3 = label
 # and the database snapshot land on the same device, so checking each against
 # the same free-space figure independently would pass a host that cannot fit
 # both together.
-# Binary plus headroom: ~25 MiB covers a 12 MiB artifact kept alongside its
-# predecessor, with room for logs written during the run.
+# Binary plus headroom: ~25 MiB covers the incoming ~12 MiB artifact
+# alongside the one it replaces. Older artifacts are already on disk and are
+# pruned to KEEP_VERSIONS (default 3) AFTER the new one lands, so peak usage
+# is higher than this gate checks; it covers the transient pair, not the
+# whole retention set.
 declare -A need_by_dev=() label_by_dev=()
 add_need() {  # $1 = path, $2 = KiB, $3 = label
     local dev
@@ -276,7 +326,13 @@ add_need() {  # $1 = path, $2 = KiB, $3 = label
 }
 
 add_need "$INSTALL_DIR" 25600 "binary+headroom"
-if db=$(resolve_db) && [ -f "$db" ]; then
+db_rc=0; db=$(resolve_db) || db_rc=$?
+if [ "$db_rc" -eq 2 ]; then
+    # A runtime override means deploy.sh will refuse, so the gate must too —
+    # otherwise preflight says ALL GATES PASSED for a host that cannot deploy.
+    echo "  FAILED   DATABASE_PATH is overridden outside .env (see above)"
+    gate_fail=1
+elif [ "$db_rc" -eq 0 ] && [ -f "$db" ]; then
     db_kib=$(du -k "$db" | awk '{print $1}')
     # The WAL counts either way. Without sqlite3 the deploy copies the
     # sidecars verbatim; WITH sqlite3, .backup folds those pages into the
@@ -289,7 +345,7 @@ if db=$(resolve_db) && [ -f "$db" ]; then
         fi
     done
     # -shm is shared memory, only copied by the raw fallback.
-    if ! ssh_has_sqlite3 && [ -f "$db-shm" ]; then
+    if ! has_sqlite3 && [ -f "$db-shm" ]; then
         db_kib=$(( db_kib + $(du -k "$db-shm" | awk '{print $1}') ))
     fi
     # The snapshot is a full copy, so require its size again plus 10% slack.
@@ -314,7 +370,10 @@ echo "===== 9. database ====="
 # Resolve the configured path and never touch a database that is disabled or
 # absent: sqlite3 CREATES an empty file when handed a missing path, which
 # would make this supposedly read-only preflight mutate the installation.
-if ! db=$(resolve_db); then
+db_rc=0; db=$(resolve_db 2>/dev/null) || db_rc=$?
+if [ "$db_rc" -eq 2 ]; then
+    echo "  DATABASE_PATH overridden outside .env — not inspected"
+elif [ "$db_rc" -ne 0 ]; then
     echo "  database disabled in .env — skipped"
 elif [ ! -f "$db" ]; then
     echo "  no database at $db — skipped (not creating one)"
@@ -366,6 +425,7 @@ else
 fi
 exit "$gate_fail"
 __REMOTE_PREFLIGHT__
+      echo '}'
 ) || rc=$?
 
 echo

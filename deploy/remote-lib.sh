@@ -36,6 +36,8 @@ read_env() {
         "'"*) val=${val#\'}; val=${val%%\'*}; literal=1 ;;
         *)    # godotenv only treats # as a comment when whitespace precedes
               # it, so a path like /srv/db#blue/x.db keeps its hash.
+              # Two rules, matching godotenv: a # preceded by whitespace
+              # starts a comment; a value that is ONLY a comment is empty.
               if [[ $val =~ ^(.*[^[:space:]])[[:space:]]+#.*$ ]]; then
                   val="${BASH_REMATCH[1]}"
               elif [[ $val =~ ^[[:space:]]*#.*$ ]]; then
@@ -49,9 +51,15 @@ read_env() {
     # otherwise be looked for under a literal "${DATA_DIR}" and its backup
     # silently skipped. Substitution is by lookup, never eval; the depth guard
     # stops a self-referential .env from looping.
+    #
+    # UPPERCASE ONLY, matching godotenv v1.5.1's expandVarRegex
+    # `(\\)?(\$)(\()?\{?([A-Z0-9_]+)?\}?`. Accepting lowercase here resolved
+    # ${data_dir}/x.db to a real path while the analyzer opened a file
+    # literally named "${data_dir}/x.db" — so the deploy would snapshot, prune
+    # and restore a database the analyzer never touches.
     if [ "$depth" -lt 5 ] && [ "$literal" -eq 0 ]; then
         local out="" rest="$val" name pre
-        while [[ $rest =~ ^([^$]*)\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?(.*)$ ]]; do
+        while [[ $rest =~ ^([^$]*)\$\{?([A-Z0-9_]+)\}?(.*)$ ]]; do
             pre="${BASH_REMATCH[1]}"
             name="${BASH_REMATCH[2]}"
             if [[ $pre == *\\ ]]; then
@@ -115,13 +123,6 @@ resolve_db() {
     esac
 }
 
-# acquire_cron_lock
-#
-# Takes the same exclusive flock the cron runner uses, held for the whole
-# remote critical section. A pgrep snapshot is only instantaneous: cron
-# could start immediately after the probe and overlap a database copy or a
-# script swap. pgrep is still checked afterwards to catch a manual run
-# started outside run-cron.sh, which holds no lock.
 # resolve_lock_file
 #
 # Prints the lock path the deployed runner will actually use. An explicit
@@ -165,6 +166,13 @@ resolve_lock_file() {
     printf '%s' /run/logwatch-ai-cron.lock
 }
 
+# acquire_cron_lock
+#
+# Takes the same exclusive flock the cron runner uses, held for the whole
+# remote critical section. A pgrep snapshot is only instantaneous: cron
+# could start immediately after the probe and overlap a database copy or a
+# script swap. pgrep is still checked afterwards to catch a manual run
+# started outside run-cron.sh, which holds no lock.
 acquire_cron_lock() {
     local lock
     lock=$(resolve_lock_file)
