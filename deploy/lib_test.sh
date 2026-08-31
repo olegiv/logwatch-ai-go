@@ -70,6 +70,13 @@ eq "returns the default when .env is absent" "fallback" "$(cd "$WORK" && rm -f .
 printf 'HASHPATH=/srv/db#blue/summaries.db\nSPACED=/srv/db   # a real comment\n' > .env
 eq "keeps a hash inside a path"  "/srv/db#blue/summaries.db" "$(read_env HASHPATH)"
 eq "still strips a spaced comment" "/srv/db"                 "$(read_env SPACED)"
+# godotenv assigns top to bottom, so a reference to a variable defined LATER
+# is unresolved for the analyzer. Resolving it here would make deploy back up
+# a different database than the one actually in use.
+# shellcheck disable=SC2016 # writing literal ${...} into the fixture
+printf 'FWD=${LATER}/x.db\nLATER=/var/lib/lw\nBACK_A=/var/lib/lw\nBACK_B=${BACK_A}/y.db\n' > .env
+eq "does not resolve a forward reference" "/x.db"          "$(read_env FWD)"
+eq "still resolves a backward reference"  "/var/lib/lw/y.db" "$(read_env BACK_B)"
 
 # ------------------------------------------------------------- resolve_db
 echo "resolve_db"

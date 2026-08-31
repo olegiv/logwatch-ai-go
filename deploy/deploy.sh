@@ -303,6 +303,18 @@ cd "$INSTALL_DIR"
 
 acquire_cron_lock || exit 1
 
+# If the staged runner pins a different lock path, cron could start the NEW
+# runner on that path the moment it lands, so both are held across the swap.
+# Taken here, before anything is mutated: acquiring it after the binary swap
+# would report a failed deployment while leaving the new binary live
+# alongside the old runner and helpers.
+if [ "$INSTALL_SCRIPTS" = 1 ]; then
+    incoming_lock=$(lock_path_of "$STAGE_DIR/run-cron.sh")
+    if [ -n "$incoming_lock" ] && [ "$incoming_lock" != "$(resolve_lock_file)" ]; then
+        acquire_extra_lock "$incoming_lock" || exit 1
+    fi
+fi
+
 # Every artifact this tooling creates is recorded here. Pruning deletes only
 # names on this list, so an operator's own recovery copy — say
 # logwatch-analyzer-emergency — can never be swept up by a root rm just
@@ -429,12 +441,6 @@ fi
 
 # --- scripts + runner (same lock) ------------------------------------------
 if [ "$INSTALL_SCRIPTS" = 1 ]; then
-    # If the staged runner pins a different lock path, cron could start the
-    # NEW runner on that path the moment it lands. Hold both across the swap.
-    incoming_lock=$(lock_path_of "$STAGE_DIR/run-cron.sh")
-    if [ -n "$incoming_lock" ] && [ "$incoming_lock" != "$(resolve_lock_file)" ]; then
-        acquire_extra_lock "$incoming_lock" || exit 1
-    fi
     mkdir -p ./scripts
     if [ -f "$STAGE_DIR/run-cron.sh" ] && ! cmp -s "$STAGE_DIR/run-cron.sh" ./run-cron.sh; then
         # A .prev must mean "this deployment replaced it", so the stale one is

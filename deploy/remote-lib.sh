@@ -14,10 +14,18 @@
 # unquoted value. Deleting quotes and spaces instead would corrupt a
 # legitimate path such as DATABASE_PATH="/opt/logwatch ai/data/x.db".
 read_env() {
-    local key="$1" def="${2-}" line val
-    local depth="${3:-0}"
-    line=$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" .env 2>/dev/null | tail -1) || true
-    if [ -z "$line" ]; then printf '%s' "$def"; return 0; fi
+    local key="$1" def="${2-}" line val numbered
+    local depth="${3:-0}" maxline="${4:-0}"
+    # godotenv assigns top to bottom, so a reference only sees assignments
+    # ABOVE it. Bounding the lookup by line number keeps a forward reference
+    # unresolved here exactly as it is for the analyzer, instead of quietly
+    # resolving to a different database.
+    numbered=$(grep -nE "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" .env 2>/dev/null) || true
+    line=$(printf '%s\n' "$numbered" \
+           | awk -F: -v m="$maxline" 'NF && (m==0 || $1+0 < m+0){last=$0} END{print last}')
+    local lineno="${line%%:*}"
+    line="${line#*:}"
+    if [ -z "$lineno" ]; then printf '%s' "$def"; return 0; fi
     val=${line#*=}
     val=${val#"${val%%[![:space:]]*}"}          # trim leading whitespace
     # godotenv suppresses variable expansion inside SINGLE quotes, so track
@@ -46,7 +54,7 @@ read_env() {
         while [[ $rest =~ ^([^$]*)\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?(.*)$ ]]; do
             out+="${BASH_REMATCH[1]}"
             name="${BASH_REMATCH[2]}"
-            out+="$(read_env "$name" "" $((depth + 1)))"
+            out+="$(read_env "$name" "" $((depth + 1)) "$lineno")"
             rest="${BASH_REMATCH[3]}"
         done
         val="$out$rest"
@@ -162,10 +170,8 @@ acquire_cron_lock() {
     # -source-type ocms`, which holds no cron lock — exactly the case this
     # check exists to catch — so omitting `./` would let a deploy proceed
     # alongside it and copy the database mid-write.
-    # `bash /opt/logwatch-ai/run-cron.sh` is how a shebang launch can appear,
-    # so allow an optional interpreter word before the path. This predicate is
-    # the only guard when flock is unavailable.
-    local pat="^((/usr)?/bin/(ba)?sh[[:space:]]+)?(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
+    local pat
+    pat=$(inflight_pattern)
     if pgrep -u root -f "$pat" >/dev/null 2>&1; then
         if [ "${FORCE:-0}" = 1 ]; then
             echo "WARN: an analyzer process is running; FORCE=1 given, continuing anyway" >&2
@@ -178,6 +184,19 @@ acquire_cron_lock() {
         return 1
     fi
     return 0
+}
+
+# inflight_pattern
+#
+# The predicate for "an analyzer or runner process is running". Defined once:
+# preflight's gate and acquire_cron_lock both use it, and they have already
+# drifted apart twice. Allows an optional interpreter word, because a shebang
+# launch can appear as `/bin/bash /opt/logwatch-ai/run-cron.sh`, and the ./
+# form an operator types from the install directory. Anchored, so a command
+# that merely mentions the path — an editor, a pager — does not match.
+inflight_pattern() {
+    printf '^((/usr)?/bin/(ba)?sh[[:space:]]+)?(%s/|\./)?(run-cron\.sh|logwatch-analyzer)' \
+        "$INSTALL_DIR"
 }
 
 # acquire_extra_lock PATH

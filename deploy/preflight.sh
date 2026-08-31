@@ -168,16 +168,32 @@ echo "  effective lock path: $effective_lock"
 lock_dir=$(dirname "$effective_lock")
 stat -c '%n  mode=%a  owner=%U:%G' "$lock_dir" 2>&1
 findmnt -no FSTYPE "$lock_dir" 2>&1 || true
-# Root can write anywhere, so writability alone says nothing about safety.
-# A world-writable lock directory lets a local user pre-create the fixed lock
-# name as a symlink, and `exec 9>"$lock"` running as root then truncates
-# whatever it points at — the L-06 finding that moved this path off /var/lock
-# in the first place.
+# Root can write anywhere, so a successful probe says nothing about safety.
+# Any principal that can write the directory can plant a symlink at the fixed
+# lock name and have the root runner's `exec 9>"$LOCK_FILE"` truncate its
+# target — the L-06 finding that moved this path off /var/lock. Checking only
+# the other-write bit is not enough: a directory owned by another account
+# (0700) or writable by an untrusted group (0770) is equally exploitable, so
+# require root ownership and no group or other write.
 lock_perm=$(stat -c '%a' "$lock_dir" 2>/dev/null || echo "")
-if [ -n "$lock_perm" ] && [ "$((8#$lock_perm & 0002))" -ne 0 ]; then
-    echo "  FAILED   $lock_dir is world-writable (mode $lock_perm) — unsafe for a root lock"
-    echo "           point LOCK_FILE at a root-owned directory such as /run"
+lock_owner=$(stat -c '%U' "$lock_dir" 2>/dev/null || echo "")
+if [ -z "$lock_perm" ]; then
+    echo "  FAILED   cannot stat $lock_dir"
     gate_fail=1
+else
+    if [ "$lock_owner" != "root" ]; then
+        echo "  FAILED   $lock_dir is owned by '$lock_owner', not root"
+        gate_fail=1
+    fi
+    if [ "$((8#$lock_perm & 0022))" -ne 0 ]; then
+        echo "  FAILED   $lock_dir is group- or world-writable (mode $lock_perm)"
+        gate_fail=1
+    fi
+    if [ "$lock_owner" = "root" ] && [ "$((8#$lock_perm & 0022))" -eq 0 ]; then
+        echo "  ok       $lock_dir is root-owned, not writable by others (mode $lock_perm)"
+    else
+        echo "           point LOCK_FILE at a root-owned directory such as /run"
+    fi
 fi
 
 probe="$lock_dir/.logwatch-preflight-probe.$$"
@@ -194,10 +210,10 @@ ls -la "$effective_lock" "$OLD_LOCK_FILE" 2>&1 | grep -v 'No such file' || echo 
 
 echo
 echo "===== GATE 3: run in flight? ====="
-# Same anchored, root-scoped predicate the locked deploy path uses, so an
-# editor or pager that merely mentions the file does not fail the gate.
-inflight_pat="^(${INSTALL_DIR}/|\./)?(run-cron\.sh|logwatch-analyzer)"
-if pgrep -u root -a -f "$inflight_pat" 2>/dev/null; then
+# Exactly the predicate acquire_cron_lock uses — shared, because these two
+# have drifted apart twice, each time leaving this gate blind to a real run
+# (most recently an interpreter-prefixed `/bin/bash .../run-cron.sh`).
+if pgrep -u root -a -f "$(inflight_pattern)" 2>/dev/null; then
     echo "  FAILED   a run is in flight — do not deploy now"
     gate_fail=1
 else
