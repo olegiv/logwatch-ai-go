@@ -146,6 +146,21 @@ eq "keeps a space inside a quoted lock path" "/var/lock/quoted path.lock" "$(LOC
 
 eq "an explicit LOCK_FILE wins over everything" "/tmp/explicit.lock" "$(LOCK_FILE=/tmp/explicit.lock resolve_lock_file)"
 
+# lock_path_of must read a host-specific runner that pins the path directly,
+# not only the template default — otherwise the deploy holds the wrong lock.
+echo "lock_path_of"
+# shellcheck disable=SC2016 # literal template text
+printf 'LOCK_FILE="${LOCK_FILE:-/run/tmpl.lock}"\n' > r1.sh
+printf 'LOCK_FILE="/opt/logwatch-ai/.cron.lock"\n'  > r2.sh
+printf "LOCK_FILE='/opt/sq.lock'\n"                  > r3.sh
+printf 'LOCK_FILE=/opt/bare.lock\n'                  > r4.sh
+printf 'export LOCK_FILE=/opt/exported.lock\n'       > r5.sh
+eq "reads the template default"   "/run/tmpl.lock"             "$(lock_path_of r1.sh)"
+eq "reads a double-quoted value"  "/opt/logwatch-ai/.cron.lock" "$(lock_path_of r2.sh)"
+eq "reads a single-quoted value"  "/opt/sq.lock"               "$(lock_path_of r3.sh)"
+eq "reads a bare value"           "/opt/bare.lock"             "$(lock_path_of r4.sh)"
+eq "reads an exported value"      "/opt/exported.lock"         "$(lock_path_of r5.sh)"
+
 # ----------------------------------------------------------- resolve_host
 echo "resolve_host / require_root_target"
 eq "prefixes root@ for a bare host"   "root@example.com"   "$(HOST='' DEPLOY_HOST=example.com resolve_host '')"

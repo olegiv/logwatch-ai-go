@@ -202,9 +202,16 @@ if [ "$DO_DB" = 1 ]; then
         echo "error: no $(basename "$db").pre-* backup found beside $db" >&2
         exit 1
     fi
-    cd "$(dirname "$db")"
-    db=$(basename "$db")
-    backup=$(basename "$backup")
+    # Keep absolute paths. Changing into the database directory and reducing
+    # both to basenames breaks when DATABASE_PATH has moved since the
+    # snapshot was recorded: the backup would be looked for beside the new
+    # database, aborting a valid rollback or restoring a same-named stranger.
+    if [ "$(dirname "$backup")" != "$(dirname "$db")" ]; then
+        echo "error: recorded snapshot $backup is not beside the configured" >&2
+        echo "       database $db — DATABASE_PATH appears to have changed." >&2
+        echo "       Restore it by hand, or point DATABASE_PATH back." >&2
+        exit 1
+    fi
     echo "restoring from $backup"
     # Move the ENTIRE suspect state aside, sidecars included. Leaving a stale
     # -wal/-shm/-journal beside the restored snapshot lets SQLite replay those
@@ -235,7 +242,28 @@ if [ "$DO_DB" = 1 ]; then
         # rename. Otherwise the main file becomes live before its WAL is
         # moved, and an interruption in between drops rows that exist only in
         # that WAL — rows the validation above just confirmed were there.
-        sqlite3 "$staged" 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null 2>&1 || true
+        # wal_checkpoint reports completion in its result row (busy, log,
+        # checkpointed); a failure that is discarded here would let the WAL be
+        # deleted while its frames are still missing from the main file. The
+        # validation below cannot catch that, because it reads main+WAL
+        # together and would succeed either way.
+        ck=$(sqlite3 "$staged" 'PRAGMA wal_checkpoint(TRUNCATE);' 2>&1) || {
+            echo "error: WAL checkpoint failed on the staged restore: $ck" >&2
+            echo "       The live database is untouched." >&2
+            rm -f "$staged" "$staged"-wal "$staged"-shm "$staged"-journal
+            exit 1
+        }
+        if [ "${ck%%|*}" != "0" ]; then
+            echo "error: WAL checkpoint did not complete (result: $ck)." >&2
+            echo "       The live database is untouched." >&2
+            rm -f "$staged" "$staged"-wal "$staged"-shm "$staged"-journal
+            exit 1
+        fi
+        if [ -s "$staged-wal" ]; then
+            echo "error: WAL still holds frames after a TRUNCATE checkpoint." >&2
+            rm -f "$staged" "$staged"-wal "$staged"-shm "$staged"-journal
+            exit 1
+        fi
         if ! sqlite3 -readonly "$staged" 'select count(*) from summaries;' >/dev/null 2>&1; then
             echo "error: staged restore became unreadable after checkpoint — aborting." >&2
             rm -f "$staged" "$staged"-wal "$staged"-shm "$staged"-journal
@@ -261,12 +289,24 @@ if [ "$DO_DB" = 1 ]; then
     # no database at all, so the next analyzer run would create an empty one.
     # A link keeps both names pointing at the same inode until the rename
     # atomically replaces the live one.
+    # Fold the LIVE database's own WAL in before touching anything, so the
+    # sidecars can be removed without the old main file ever being left
+    # incomplete. Removing them first would mean an interruption before the
+    # rename releases the lock with a live database missing rows that existed
+    # only in its WAL.
+    if [ -f "$db-wal" ] || [ -f "$db-journal" ]; then
+        ck=$(sqlite3 "$db" 'PRAGMA wal_checkpoint(TRUNCATE);' 2>&1) || {
+            echo "error: could not checkpoint the live database before replacing it: $ck" >&2
+            echo "       Nothing has been changed." >&2
+            rm -f "$staged"; exit 1
+        }
+    fi
     [ -f "$db" ] && ln -f "$db" "$suspect"
     for ext in -wal -shm -journal; do
         [ -f "$db$ext" ] && ln -f "$db$ext" "$suspect$ext" && rm -f "$db$ext"
     done
-    # The staged set is a single consolidated file (guaranteed above), so the
-    # publish is one atomic rename over a live path that never went missing.
+    # Both sides are now single consolidated files, so the publish is one
+    # atomic rename over a live path that never went missing.
     mv -f "$staged" "$db"
     echo "  restored; previous state kept as $(basename "$suspect")"
     ls -l "$db"*

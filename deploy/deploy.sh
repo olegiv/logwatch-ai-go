@@ -344,6 +344,22 @@ else
     # at, so an interruption mid-publication could pair an old main file with
     # new sidecars. Nothing here ever touches an existing snapshot set, and
     # the metadata is pointed at this one only once it is complete.
+    # The snapshot is created and then chmod/chown'd as root. Both follow
+    # symlinks, so a non-root principal able to write this directory could
+    # swap $dst for a link and have the database's mode and ownership applied
+    # to an arbitrary target. Refuse rather than race.
+    db_dir=$(dirname "$db")
+    db_perm=$(stat -c '%a' "$db_dir" 2>/dev/null || echo "")
+    db_owner=$(stat -c '%U' "$db_dir" 2>/dev/null || echo "")
+    if [ -z "$db_perm" ]; then
+        echo "ABORT: cannot stat database directory $db_dir" >&2; exit 1
+    fi
+    if [ "$db_owner" != "root" ] || [ "$((8#$db_perm & 0022))" -ne 0 ]; then
+        echo "ABORT: $db_dir is owned by '$db_owner' with mode $db_perm." >&2
+        echo "       Snapshotting there would race a non-root writer." >&2
+        echo "       Make it root-owned and not group/other-writable." >&2
+        exit 1
+    fi
     dst="$db.pre-$VERSION-$stamp"
     rm -f "$dst" "$dst"-wal "$dst"-shm "$dst"-journal
     if command -v sqlite3 >/dev/null 2>&1; then
@@ -442,6 +458,18 @@ fi
 # --- scripts + runner (same lock) ------------------------------------------
 if [ "$INSTALL_SCRIPTS" = 1 ]; then
     mkdir -p ./scripts
+    # A .prev must belong to THIS deployment. When a component is not
+    # replaced, an older backup left beside it would make rollback --all
+    # restore a version this deploy never touched, producing a mixed tree.
+    if [ -f "$STAGE_DIR/run-cron.sh" ] && cmp -s "$STAGE_DIR/run-cron.sh" ./run-cron.sh; then
+        rm -f ./run-cron.sh.prev
+    fi
+    for f in $TRACKED; do
+        if [ -f "$STAGE_DIR/$f" ] && cmp -s "$STAGE_DIR/$f" "./scripts/$f"; then
+            rm -f "./scripts/$f.prev"
+        fi
+    done
+
     if [ -f "$STAGE_DIR/run-cron.sh" ] && ! cmp -s "$STAGE_DIR/run-cron.sh" ./run-cron.sh; then
         # A .prev must mean "this deployment replaced it", so the stale one is
         # cleared here — at the moment of replacement — rather than up front,

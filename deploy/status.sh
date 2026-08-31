@@ -72,8 +72,9 @@ fi
 
 echo
 echo "==> In flight?"
-pat="^(${INSTALL_DIR}/)?(run-cron\.sh|logwatch-analyzer)"
-pgrep -u root -a -f "$pat" 2>/dev/null || echo "(idle)"
+# The shared predicate, so status cannot report "(idle)" during a run the
+# other scripts would have detected.
+pgrep -u root -a -f "$(inflight_pattern)" 2>/dev/null || echo "(idle)"
 
 echo
 echo "==> Last runs"

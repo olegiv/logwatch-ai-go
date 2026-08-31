@@ -270,6 +270,14 @@ acquire_extra_lock() {
 
 # lock_path_of FILE — the LOCK_FILE default a run-cron.sh script would use.
 lock_path_of() {
+    # Both the template default and a plain assignment are valid in a
+    # host-specific runner. Recognising only the template meant a runner
+    # pinning `LOCK_FILE=/opt/logwatch-ai/.cron.lock` silently fell back to
+    # the built-in path, and the deploy then held the wrong lock.
     # shellcheck disable=SC2016 # the ${...} here is literal text being matched
-    sed -n 's/^[[:space:]]*LOCK_FILE="\${LOCK_FILE:-\([^}]*\)}".*/\1/p' "$1" 2>/dev/null | tail -1
+    sed -nE 's/^[[:space:]]*(export[[:space:]]+)?LOCK_FILE="\$\{LOCK_FILE:-([^}]*)\}".*/\2/p;
+             s/^[[:space:]]*(export[[:space:]]+)?LOCK_FILE="([^"$]*)".*/\2/p;
+             s/^[[:space:]]*(export[[:space:]]+)?LOCK_FILE='"'"'([^'"'"']*)'"'"'.*/\2/p;
+             s/^[[:space:]]*(export[[:space:]]+)?LOCK_FILE=([^"'"'"'$[:space:]][^[:space:]]*).*/\2/p' \
+        "$1" 2>/dev/null | tail -1
 }
