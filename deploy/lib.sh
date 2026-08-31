@@ -28,6 +28,14 @@ EOF
   printf '%s\n' "$host"
 }
 
+# format_rollback_command HOST
+#
+# Include the already-resolved deployment target in operator instructions.
+# %q keeps the printed command safe to paste even for unusual SSH host syntax.
+format_rollback_command() {
+  printf './deploy/rollback.sh %q\n' "$1"
+}
+
 # require_root_target HOST
 #
 # The remote side writes under /opt, uses `install -o root -g root` and takes

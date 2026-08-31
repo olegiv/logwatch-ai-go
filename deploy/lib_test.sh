@@ -26,6 +26,10 @@ if HOST='' DEPLOY_HOST='' resolve_host '' >/dev/null 2>&1
 then bad "fails with no host" nonzero; else ok "fails with no host"; fi
 yes "accepts root@"  require_root_target root@example.com
 no  "rejects deploy@" require_root_target deploy@example.com
+eq "rollback command keeps resolved host" "./deploy/rollback.sh root@arg.example" \
+  "$(format_rollback_command root@arg.example)"
+eq "rollback command quotes unusual host" "./deploy/rollback.sh root@host\\ name" \
+  "$(format_rollback_command 'root@host name')"
 
 echo "valid_version   (reaches a remote command line as root)"
 for v in v0.15.0 v0.15.0-1-gabc123 v1.0.0+build.5 0.1.0; do yes "accepts $v" valid_version "$v"; done

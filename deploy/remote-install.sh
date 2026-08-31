@@ -74,6 +74,13 @@ published_artifact=""
 
 cleanup_install_temps() {
     local temp
+    # A terminating signal can arrive after the atomic live-link rename but
+    # before the next assignment clears published_artifact. Never remove an
+    # artifact that the stable symlink already resolves to.
+    if [[ -n $published_artifact && -e $published_artifact \
+        && -e ./logwatch-analyzer && ./logwatch-analyzer -ef $published_artifact ]]; then
+        published_artifact=""
+    fi
     for temp in "$incoming" "$next_link" "$revert_link" "$next_record" "$published_artifact"; do
         [[ -n $temp ]] || continue
         rm -f -- "$temp" || echo "WARN: remove temporary deployment file manually: $temp" >&2
@@ -101,13 +108,25 @@ else
 fi
 
 prev_valid=1
+prev_problem=""
 if ! "$prev" -version >/dev/null 2>&1; then
     prev_valid=0
+    prev_problem="the current rollback target does not run: $prev"
+else
+    case "$prev" in
+        "$INSTALL_DIR"/logwatch-analyzer-*) ;;
+        *)
+            prev_valid=0
+            prev_problem="the current rollback target is outside $INSTALL_DIR: $prev"
+            ;;
+    esac
+fi
+if [[ $prev_valid == 0 ]]; then
     if [[ $FORCE == 1 ]]; then
-        echo "WARN: FORCE=1 — current rollback target does not run: $prev" >&2
+        echo "WARN: FORCE=1 — $prev_problem" >&2
         echo "      The previous rollback record will be left unchanged." >&2
     else
-        echo "ABORT: the current rollback target does not run: $prev" >&2
+        echo "ABORT: $prev_problem" >&2
         echo "       Fix it, run rollback.sh, or use FORCE=1 to deploy without this safeguard." >&2
         exit 1
     fi

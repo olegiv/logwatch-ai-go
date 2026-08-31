@@ -142,8 +142,6 @@ ssh "$HOST" \
   "INSTALL_DIR=$INSTALL_DIR STAGE_DIR=$STAGE_DIR REMOTE_BIN=$REMOTE_BIN LOCK_FILE=$LOCK_FILE FORCE=$FORCE_VALUE bash -s" \
   < "$SCRIPT_DIR/remote-install.sh"
 
-cat <<EOF
-
-==> Deployed $VERSION to $HOST
-    Roll back:  ./deploy/rollback.sh
-EOF
+echo
+echo "==> Deployed $VERSION to $HOST"
+printf '    Roll back:  %s\n' "$(format_rollback_command "$HOST")"

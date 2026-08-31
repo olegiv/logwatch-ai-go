@@ -94,6 +94,11 @@ make_script "$SHIM_DIR/mv" \
     '  fi' \
     'done' \
     'if [[ $treat_dest_as_file == 1 && -d $last ]]; then exit 76; fi' \
+    'if [[ ${TEST_SIGNAL_AFTER_LIVE_PUBLISH:-0} == 1 && $last == ./logwatch-analyzer ]]; then' \
+    '  "$REAL_MV" "${args[@]}"' \
+    '  kill -TERM "$PPID"' \
+    '  exit 0' \
+    'fi' \
     'exec "$REAL_MV" "${args[@]}"'
 
 TEST_PATH="$SHIM_DIR:$PATH"
@@ -140,6 +145,7 @@ run_install() {
     TEST_FAIL_REVERT_LINK="${TEST_FAIL_REVERT_LINK:-0}" \
     TEST_FAIL_NEXT_LINK="${TEST_FAIL_NEXT_LINK:-0}" \
     TEST_FAIL_LIVE_PUBLISH="${TEST_FAIL_LIVE_PUBLISH:-0}" \
+    TEST_SIGNAL_AFTER_LIVE_PUBLISH="${TEST_SIGNAL_AFTER_LIVE_PUBLISH:-0}" \
     TEST_FAIL_RECORD_PUBLISH="${TEST_FAIL_RECORD_PUBLISH:-0}" \
     INSTALL_DIR="${INSTALL_OVERRIDE:-$INSTALL_PATH}" STAGE_DIR="$STAGE_PATH" \
     REMOTE_BIN="$remote_bin" LOCK_FILE="$LOCK_PATH" FORCE="$force" \
@@ -177,6 +183,36 @@ else
 fi
 no_install_temps "$INSTALL_PATH" "same-version deployment cleans temporary files"
 
+echo "external predecessors are never advertised as rollback targets"
+new_case external-predecessor
+mkdir "$CASE_ROOT/external"
+make_analyzer "$CASE_ROOT/external/operator-analyzer" operator
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v0" v0
+ln -s "$CASE_ROOT/external/operator-analyzer" "$INSTALL_PATH/logwatch-analyzer"
+printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v0" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+if output=$(run_install logwatch-analyzer-v2 2>&1); then
+    bad "external predecessor aborts without FORCE=1"
+else
+    ok "external predecessor aborts without FORCE=1"
+fi
+same_file "rejected external predecessor stays live" "$INSTALL_PATH/logwatch-analyzer" \
+    "$CASE_ROOT/external/operator-analyzer"
+contains "external predecessor is diagnosed" "$output" "rollback target is outside"
+if output=$(run_install logwatch-analyzer-v2 1 2>&1); then
+    ok "FORCE=1 deploys without recording the external target"
+else
+    bad "FORCE=1 deploys without recording the external target" "$output"
+fi
+same_file "forced external deployment publishes v2" "$INSTALL_PATH/logwatch-analyzer" \
+    "$INSTALL_PATH/logwatch-analyzer-v2"
+recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
+if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v0" ]]; then
+    ok "forced external deployment preserves the valid rollback record"
+else
+    bad "forced external deployment preserves the valid rollback record" "$recorded"
+fi
+contains "external-target override is reported" "$output" "FORCE=1"
+
 echo "failure before the symlink swap leaves the live artifact untouched"
 new_case pre-swap-failure
 seed_live v1
@@ -213,6 +249,40 @@ else
 fi
 contains "publication failure is visible" "$output" "could not publish the candidate live symlink"
 no_install_temps "$INSTALL_PATH" "publication failure cleans temporary files"
+
+echo "an interrupt after publication preserves the live artifact"
+new_case publication-signal
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v0" v0
+seed_live v1
+printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v0" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+TEST_SIGNAL_AFTER_LIVE_PUBLISH=1
+if output=$(run_install logwatch-analyzer-v1 2>&1); then
+    bad "post-publication signal interrupts deployment"
+else
+    ok "post-publication signal interrupts deployment"
+fi
+unset TEST_SIGNAL_AFTER_LIVE_PUBLISH
+live_target=$(readlink -f "$INSTALL_PATH/logwatch-analyzer")
+case "$live_target" in
+    "$INSTALL_PATH"/logwatch-analyzer-v1.redeploy-*)
+        ok "post-publication signal keeps the unique live artifact"
+        ;;
+    *)
+        bad "post-publication signal keeps the unique live artifact" "$live_target"
+        ;;
+esac
+if [[ -x $live_target ]]; then
+    ok "post-publication live artifact remains executable"
+else
+    bad "post-publication live artifact remains executable" "$live_target"
+fi
+recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
+if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v0" ]]; then
+    ok "interrupted deployment preserves the prior rollback record"
+else
+    bad "interrupted deployment preserves the prior rollback record" "$recorded"
+fi
+no_install_temps "$INSTALL_PATH" "post-publication signal cleans temporary files"
 
 echo "a directory cannot absorb the rollback record"
 new_case record-directory
