@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `deploy/` — binary deployment to the production host: `deploy.sh`
+  (build, stage, verify on the target, atomic symlink swap under the cron
+  runner's own flock, auto-revert if the new binary fails its smoke test),
+  `rollback.sh`, shellcheckable remote state machines, shared helpers in
+  `lib.sh`, and hermetic helper/state-machine tests.
+- Makefile targets `deploy`, `deploy-stage`, `rollback`, `lint-sh`,
+  `test-sh`; CI runs the same fail-closed quality gate as deployment and then
+  builds the exact production target.
+
+### Changed
+- `docs/DEPLOYMENT.md` separates first-time bootstrap from upgrades.
+  `scripts/install.sh` is for bootstrap only — it expects the host-arch
+  binary name, overwrites repository-managed scripts, and recursively chowns
+  `.env` and `data/summaries.db`.
+
 ## [0.15.0] - 2026-08-27
 
 ### Added

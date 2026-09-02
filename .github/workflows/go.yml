@@ -23,8 +23,17 @@ jobs:
       with:
         go-version-file: 'go.mod'
 
-    - name: Build
-      run: go build -v ./...
+    - name: Install quality tools
+      run: |
+        make install-tools
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-    - name: Test
-      run: go test -v ./...
+    # Use the same fail-closed gate that deploy.sh runs. This includes Go
+    # formatting, vet, pinned linting, Go tests, shellcheck and both deployment
+    # test suites. On Linux the state-machine tests exercise real GNU mv -T,
+    # readlink -f and the production shell semantics.
+    - name: Quality gate
+      run: make check
+
+    - name: Production Linux AMD64 build
+      run: make build-linux-amd64
