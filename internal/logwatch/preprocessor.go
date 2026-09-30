@@ -82,7 +82,7 @@ func (p *Preprocessor) processWithMaxTokens(content string, maxTokens int) (stri
 
 	// Deduplicate and compress sections
 	for i := range sections {
-		sections[i].Content = p.deduplicateContent(sections[i].Content)
+		sections[i].Content = p.deduplicateContentForPriority(sections[i].Content, sections[i].Priority)
 	}
 
 	// Deduplicated content often removes enough repetition on its own.
@@ -200,6 +200,10 @@ func (p *Preprocessor) determinePriority(name, content string) int {
 
 // deduplicateContent deduplicates similar log lines and groups them
 func (p *Preprocessor) deduplicateContent(content string) string {
+	return p.deduplicateContentForPriority(content, 1)
+}
+
+func (p *Preprocessor) deduplicateContentForPriority(content string, priority int) string {
 	lines := strings.Split(content, "\n")
 	if len(lines) <= 10 {
 		return content // Too small to deduplicate
@@ -210,7 +214,7 @@ func (p *Preprocessor) deduplicateContent(content string) string {
 	lineExamples := make(map[string]string)
 
 	for _, line := range lines {
-		normalized := p.normalizeLine(line)
+		normalized := p.deduplicationKey(line, priority == 1)
 		if normalized == "" {
 			continue
 		}
@@ -225,7 +229,7 @@ func (p *Preprocessor) deduplicateContent(content string) string {
 	processed := make(map[string]bool)
 
 	for _, line := range lines {
-		normalized := p.normalizeLine(line)
+		normalized := p.deduplicationKey(line, priority == 1)
 		if normalized == "" {
 			result.WriteString(line + "\n")
 			continue
@@ -245,6 +249,20 @@ func (p *Preprocessor) deduplicateContent(content string) string {
 	}
 
 	return result.String()
+}
+
+func (p *Preprocessor) deduplicationKey(line string, preserveIdentifiers bool) string {
+	if !preserveIdentifiers {
+		return p.normalizeLine(line)
+	}
+
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+	line = regexp.MustCompile(`\b\d{1,2}:\d{2}:\d{2}\b`).ReplaceAllString(line, "TIME")
+	line = regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}\b|\b\d{2}/\d{2}/\d{4}\b`).ReplaceAllString(line, "DATE")
+	return line
 }
 
 // normalizeLine normalizes a log line for deduplication
@@ -350,10 +368,18 @@ func (p *Preprocessor) compressContent(content string, keepRatio float64) string
 func (p *Preprocessor) aggressiveCompress(sections []*Section) string {
 	var result strings.Builder
 
-	for _, section := range sections {
-		fmt.Fprintf(&result, "\n################### %s ###################\n", section.Name)
-		result.WriteString(p.extractEssentialLines(section))
-		result.WriteString("\n")
+	// The terminal fallback keeps a prefix to meet the hard token limit, so
+	// priority order here is a correctness boundary: security/error evidence
+	// must precede medium and low-priority noise regardless of source order.
+	for _, priority := range []int{1, 2, 3} {
+		for _, section := range sections {
+			if section.Priority != priority {
+				continue
+			}
+			fmt.Fprintf(&result, "\n################### %s ###################\n", section.Name)
+			result.WriteString(p.extractEssentialLines(section))
+			result.WriteString("\n")
+		}
 	}
 
 	return result.String()
@@ -374,7 +400,7 @@ func (p *Preprocessor) extractEssentialLines(section *Section) string {
 			return
 		}
 
-		key := p.normalizeLine(line)
+		key := p.deduplicationKey(line, section.Priority == 1)
 		if key == "" {
 			key = line
 		}

@@ -10,7 +10,7 @@
 #
 # Crontab entry (root cron — logwatch needs /var/log/* read access):
 #   #@desc: Logwatch AI
-#   7 2 * * * /opt/logwatch-ai/run-cron.sh >> /opt/logwatch-ai/logs/cron.log 2>&1
+#   7 2 * * * /opt/logwatch-ai/run-cron.sh
 #
 # Each run_job runs independently — failure of one job no longer aborts the
 # rest. To make a job act as a gate (abort the whole run on failure), append
@@ -20,6 +20,7 @@
 
 set -u
 set -o pipefail
+umask 027
 # `set -e` is intentionally NOT enabled. run_job below propagates failure
 # status to the caller, and per-source policy is expressed at each call:
 # append `|| exit` to gate (logwatch lines below) or leave bare to continue
@@ -27,16 +28,60 @@ set -o pipefail
 # would abort the whole run on first failure.
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/logwatch-ai}"
-# /run is root:root 0755 on systemd-based distros. Avoid /var/lock — it is
-# 1777 sticky world-writable on Debian/Ubuntu, so a local user could plant a
-# symlink here and trick the cron runner (running as root) into truncating
-# arbitrary files via `exec 9>"$LOCK_FILE"`.
 LOCK_FILE="${LOCK_FILE:-/run/logwatch-ai-cron.lock}"
+CRON_LOG="${CRON_LOG:-/var/log/logwatch-ai/cron.log}"
+# The analyzer takes LOG_DIR from .env, which overrides this environment,
+# exactly as the deploy -check-runtime preflight does. Set it there, not here.
+LOGWATCH_REPORT_PATH="${LOGWATCH_REPORT_PATH:-/var/log/logwatch-ai/logwatch-output.txt}"
+# generate-logwatch.sh caps its report at LOGWATCH_MAX_OUTPUT_BYTES (default
+# 10485760). It reads this environment, not .env: export a different cap here
+# if needed, and keep it within the analyzer's MAX_LOG_SIZE_MB.
 
 failures=0
 total=0
 
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+
+stat_owner_mode() {
+    if stat -c '%u %a' "$1" >/dev/null 2>&1; then
+        stat -c '%u %a' "$1"
+    else
+        stat -f '%u %Lp' "$1"
+    fi
+}
+
+validate_trusted_directory_chain() {
+    local path=$1 label=$2 component current='' owner mode mode_value
+    local -a components
+
+    [[ $path == /* ]] || { log "ERROR: $label must be absolute: $path"; return 1; }
+    IFS=/ read -r -a components <<< "${path#/}"
+    for component in "${components[@]}"; do
+        [[ -n $component ]] || continue
+        current="${current%/}/$component"
+        [[ -e $current || -L $current ]] || {
+            log "ERROR: $label component does not exist: $current"
+            return 1
+        }
+        [[ ! -L $current && -d $current ]] || {
+            log "ERROR: $label component must be a real directory: $current"
+            return 1
+        }
+        read -r owner mode < <(stat_owner_mode "$current") || return 1
+        [[ $owner == 0 || $owner == $(id -u) ]] || {
+            log "ERROR: $label has an ancestor owned by untrusted uid $owner: $current"
+            return 1
+        }
+        mode_value=$((8#$mode))
+        if (( (mode_value & 8#022) != 0 && (mode_value & 8#1000) == 0 )); then
+            log "ERROR: $label has a non-sticky writable ancestor: $current"
+            return 1
+        fi
+    done
+}
+
+validate_trusted_directory_chain "$INSTALL_DIR" "install directory" || exit 1
+# shellcheck disable=SC2329 # template function is used after operators enable jobs
 run_job() {
     local tag="$1"; shift
     total=$((total + 1))
@@ -54,15 +99,87 @@ run_job() {
     fi
 }
 
+# Open the cron log only from a root-controlled directory. External shell
+# redirection into the service-writable application log directory would let
+# that account replace the destination with a symlink before root cron runs.
+cron_log_dir=${CRON_LOG%/*}
+cron_log_name=${CRON_LOG##*/}
+validate_trusted_directory_chain "$cron_log_dir" "cron log directory" || exit 1
+[[ $CRON_LOG == /* && -n $cron_log_name && -d $cron_log_dir && ! -L $CRON_LOG ]] || {
+    log "ERROR: CRON_LOG must be an absolute regular-file path in an existing directory"
+    exit 1
+}
+cron_log_dir=$(cd "$cron_log_dir" && pwd -P) || exit 1
+if stat -c '%u %a' "$cron_log_dir" >/dev/null 2>&1; then
+    read -r cron_log_owner cron_log_mode < <(stat -c '%u %a' "$cron_log_dir")
+else
+    read -r cron_log_owner cron_log_mode < <(stat -f '%u %Lp' "$cron_log_dir")
+fi
+if [[ $cron_log_owner != $(id -u) ]] || (( (8#$cron_log_mode & 8#022) != 0 )); then
+    log "ERROR: cron log directory must be owned by uid $(id -u) and not group/world-writable"
+    exit 1
+fi
+CRON_LOG="$cron_log_dir/$cron_log_name"
+if [[ -e $CRON_LOG && ! -f $CRON_LOG ]]; then
+    log "ERROR: cron log path must be a regular file"
+    exit 1
+fi
+if [[ -e $CRON_LOG ]]; then
+    if stat -c '%u %a' "$CRON_LOG" >/dev/null 2>&1; then
+        read -r cron_log_owner cron_log_mode < <(stat -c '%u %a' "$CRON_LOG")
+    else
+        read -r cron_log_owner cron_log_mode < <(stat -f '%u %Lp' "$CRON_LOG")
+    fi
+    if [[ $cron_log_owner != $(id -u) ]] || (( (8#$cron_log_mode & 8#022) != 0 )); then
+        log "ERROR: existing cron log has unsafe ownership or permissions"
+        exit 1
+    fi
+fi
+exec >>"$CRON_LOG" 2>&1
+
 # Lockfile — prevent overlap if a previous run is still going.
 if command -v flock >/dev/null 2>&1; then
-    exec 9>"$LOCK_FILE"
+    lock_dir=${LOCK_FILE%/*}
+    lock_name=${LOCK_FILE##*/}
+    validate_trusted_directory_chain "$lock_dir" "lock directory" || exit 1
+    [[ $LOCK_FILE == /* && -n $lock_name && -d $lock_dir && ! -L $LOCK_FILE ]] || {
+        log "ERROR: lock path must be an absolute regular-file path in an existing directory"
+        exit 1
+    }
+    lock_dir=$(cd "$lock_dir" && pwd -P) || exit 1
+    if stat -c '%u %a' "$lock_dir" >/dev/null 2>&1; then
+        read -r lock_owner lock_mode < <(stat -c '%u %a' "$lock_dir")
+    else
+        read -r lock_owner lock_mode < <(stat -f '%u %Lp' "$lock_dir")
+    fi
+    if [[ $lock_owner != $(id -u) ]] || (( (8#$lock_mode & 8#022) != 0 )); then
+        log "ERROR: lock directory must be owned by uid $(id -u) and not group/world-writable"
+        exit 1
+    fi
+    LOCK_FILE="$lock_dir/$lock_name"
+    if [[ -e $LOCK_FILE && ! -f $LOCK_FILE ]]; then
+        log "ERROR: lock path must be a regular file"
+        exit 1
+    fi
+    if [[ -e $LOCK_FILE ]]; then
+        if stat -c '%u %a' "$LOCK_FILE" >/dev/null 2>&1; then
+            read -r lock_owner lock_mode < <(stat -c '%u %a' "$LOCK_FILE")
+        else
+            read -r lock_owner lock_mode < <(stat -f '%u %Lp' "$LOCK_FILE")
+        fi
+        if [[ $lock_owner != $(id -u) ]] || (( (8#$lock_mode & 8#022) != 0 )); then
+            log "ERROR: existing lock file has unsafe ownership or permissions"
+            exit 1
+        fi
+    fi
+    exec 9>>"$LOCK_FILE"
     if ! flock -n 9; then
         log "another run-cron.sh is already in progress; exiting"
         exit 0
     fi
 else
-    log "WARN: flock(1) not on PATH — overlap protection DISABLED for this run"
+    log "ERROR: flock(1) not on PATH — refusing to run without overlap protection"
+    exit 1
 fi
 
 cd "$INSTALL_DIR" || exit
@@ -72,12 +189,15 @@ log "begin run on $(hostname) (user=$(id -un))"
 # ===== Logwatch (system) — uncomment if logwatch is installed =====
 # Gate pattern: `|| exit` aborts the run if logwatch fails (so drupal/ocms
 # don't waste API credits when the host's logs aren't generating).
-# run_job "logwatch/generate" ./scripts/generate-logwatch.sh /tmp/logwatch-output.txt 10 yesterday || exit
-# run_job "logwatch/analyze"  ./logwatch-analyzer -source-type logwatch || exit
+# run_job "logwatch/generate" ./scripts/generate-logwatch.sh "$LOGWATCH_REPORT_PATH" 10 yesterday || exit
+# run_job "logwatch/analyze"  ./logwatch-analyzer -source-type logwatch \
+#     -source-path "$LOGWATCH_REPORT_PATH" || exit
 
 # ===== Drupal sites — one block per site listed in drupal-sites.json =====
-# run_job "drupal/<site>/generate" ./scripts/generate-drupal-watchdog.sh --site <site>
-# run_job "drupal/<site>/analyze"  ./logwatch-analyzer -source-type drupal_watchdog -drupal-site <site>
+# Keep producer and consumer in one conditional chain. A failed export must
+# never cause yesterday's stale watchdog file to be analyzed as today's data.
+# run_job "drupal/<site>/generate" ./scripts/generate-drupal-watchdog.sh --site <site> && \
+#     run_job "drupal/<site>/analyze" ./logwatch-analyzer -source-type drupal_watchdog -drupal-site <site>
 
 # ===== OCMS sites — one line per site listed in ocms-sites.json =====
 # Reads ocms.log.1 (yesterday's rotated log) by default. Pass -ocms-range

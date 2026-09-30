@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -34,6 +35,7 @@ type CLIOptions struct {
 	OCMSLogRange      string // -ocms-range: today (live log) or yesterday (rotated .1)
 	ListOCMSSites     bool   // -list-ocms-sites: list available OCMS sites and exit
 	ExclusionsConfig  string // -exclusions-config: path to exclusions.json
+	CheckRuntime      bool   // -check-runtime: validate deployed runtime paths and exit
 	ShowHelp          bool   // -help: show usage
 	ShowVersion       bool   // -version: show version
 }
@@ -54,6 +56,7 @@ func ParseCLI() *CLIOptions {
 	flag.StringVar(&opts.OCMSLogRange, "ocms-range", "", "OCMS log range: yesterday (default, reads rotated .1 file) or today (reads live log)")
 	flag.BoolVar(&opts.ListOCMSSites, "list-ocms-sites", false, "List available OCMS sites from ocms-sites.json and exit")
 	flag.StringVar(&opts.ExclusionsConfig, "exclusions-config", "", "Path to exclusions.json configuration file")
+	flag.BoolVar(&opts.CheckRuntime, "check-runtime", false, "Validate deployed runtime configuration and paths, then exit")
 	flag.BoolVar(&opts.ShowHelp, "help", false, "Show usage information")
 	flag.BoolVar(&opts.ShowHelp, "h", false, "Show usage information (shorthand)")
 	flag.BoolVar(&opts.ShowVersion, "version", false, "Show version information")
@@ -67,9 +70,9 @@ func ParseCLI() *CLIOptions {
 		flag.PrintDefaults()
 		_, _ = fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type logwatch\n", os.Args[0])
-		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type ocms -source-path /tmp/ocms.log\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type ocms -source-path /var/log/logwatch-ai/ocms.log\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type ocms -ocms-site example_com\n", os.Args[0])
-		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -source-path /tmp/watchdog.json\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -source-path /var/log/logwatch-ai/custom-watchdog.json\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -source-type drupal_watchdog -drupal-site production\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -list-drupal-sites\n", os.Args[0])
 		_, _ = fmt.Fprintf(os.Stderr, "  %s -list-ocms-sites\n", os.Args[0])
@@ -103,12 +106,14 @@ type Config struct {
 	ClaudeModel     string
 
 	// Ollama Settings (used when LLMProvider = "ollama")
-	OllamaBaseURL string // e.g., "http://localhost:11434"
-	OllamaModel   string // e.g., "llama3.3:latest"
+	OllamaBaseURL       string // e.g., "http://localhost:11434"
+	OllamaModel         string // e.g., "llama3.3:latest"
+	OllamaContextTokens int
 
 	// LM Studio Settings (used when LLMProvider = "lmstudio")
-	LMStudioBaseURL string // e.g., "http://localhost:1234"
-	LMStudioModel   string // e.g., "local-model" or specific model name
+	LMStudioBaseURL       string // e.g., "http://localhost:1234"
+	LMStudioModel         string // e.g., "local-model" or specific model name
+	LMStudioContextTokens int
 
 	// Telegram
 	TelegramBotToken       string
@@ -129,12 +134,13 @@ type Config struct {
 
 	// Drupal Watchdog Settings (used when LogSourceType = "drupal_watchdog")
 	DrupalWatchdogPath   string // Path to watchdog export file
-	DrupalWatchdogFormat string // "json" or "drush"
+	DrupalWatchdogFormat string // JSON watchdog export format
 	DrupalSiteName       string // Optional: site identifier for multi-site
 
 	// Selected site metadata shared by multi-site log sources
-	SiteID   string
-	SiteName string
+	SiteID          string
+	SiteName        string
+	SiteLegacyNames []string
 
 	// Multi-site Drupal configuration (loaded from drupal-sites.json)
 	DrupalSiteID          string             // Selected site ID from drupal-sites.json
@@ -158,6 +164,7 @@ type Config struct {
 
 	// Application
 	LogLevel       string
+	LogDir         string
 	EnableDatabase bool
 	DatabasePath   string
 
@@ -184,26 +191,42 @@ func Load() (*Config, error) {
 // LoadWithCLI loads configuration with CLI argument overrides
 // Priority: CLI args > .env file > OS environment variables
 func LoadWithCLI(cli *CLIOptions) (*Config, error) {
+	viper.Reset()
+
 	// Set up viper first to read OS environment variables
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	// Load .env file to override OS environment variables
-	// godotenv.Load() sets OS env vars from .env, which viper will then read
-	_ = godotenv.Load()
+	// Overload is intentional: the documented precedence gives the deployment
+	// file priority over inherited cron/service environment variables.
+	if err := godotenv.Overload(); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to load .env: %w", err)
+	}
 
 	// Set defaults
 	setDefaults()
 
+	enableDatabase, err := getStrictBool("ENABLE_DATABASE")
+	if err != nil {
+		return nil, err
+	}
+	enablePreprocessing, err := getStrictBool("ENABLE_PREPROCESSING")
+	if err != nil {
+		return nil, err
+	}
+
 	config := &Config{
 		// LLM Provider settings
-		LLMProvider:     viper.GetString("LLM_PROVIDER"),
-		AnthropicAPIKey: viper.GetString("ANTHROPIC_API_KEY"),
-		ClaudeModel:     viper.GetString("CLAUDE_MODEL"),
-		OllamaBaseURL:   viper.GetString("OLLAMA_BASE_URL"),
-		OllamaModel:     viper.GetString("OLLAMA_MODEL"),
-		LMStudioBaseURL: viper.GetString("LMSTUDIO_BASE_URL"),
-		LMStudioModel:   viper.GetString("LMSTUDIO_MODEL"),
+		LLMProvider:           viper.GetString("LLM_PROVIDER"),
+		AnthropicAPIKey:       viper.GetString("ANTHROPIC_API_KEY"),
+		ClaudeModel:           viper.GetString("CLAUDE_MODEL"),
+		OllamaBaseURL:         viper.GetString("OLLAMA_BASE_URL"),
+		OllamaModel:           viper.GetString("OLLAMA_MODEL"),
+		OllamaContextTokens:   viper.GetInt("OLLAMA_CONTEXT_TOKENS"),
+		LMStudioBaseURL:       viper.GetString("LMSTUDIO_BASE_URL"),
+		LMStudioModel:         viper.GetString("LMSTUDIO_MODEL"),
+		LMStudioContextTokens: viper.GetInt("LMSTUDIO_CONTEXT_TOKENS"),
 
 		// Telegram settings
 		TelegramBotToken:       viper.GetString("TELEGRAM_BOT_TOKEN"),
@@ -222,9 +245,10 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 
 		// Application settings
 		LogLevel:               viper.GetString("LOG_LEVEL"),
-		EnableDatabase:         viper.GetBool("ENABLE_DATABASE"),
+		LogDir:                 viper.GetString("LOG_DIR"),
+		EnableDatabase:         enableDatabase,
 		DatabasePath:           viper.GetString("DATABASE_PATH"),
-		EnablePreprocessing:    viper.GetBool("ENABLE_PREPROCESSING"),
+		EnablePreprocessing:    enablePreprocessing,
 		MaxPreprocessingTokens: viper.GetInt("MAX_PREPROCESSING_TOKENS"),
 		HTTPProxy:              viper.GetString("HTTP_PROXY"),
 		HTTPSProxy:             viper.GetString("HTTPS_PROXY"),
@@ -277,6 +301,18 @@ func LoadWithCLI(cli *CLIOptions) (*Config, error) {
 	}
 
 	return config, nil
+}
+
+func getStrictBool(name string) (bool, error) {
+	raw := strings.TrimSpace(viper.GetString(name))
+	switch {
+	case strings.EqualFold(raw, "true"):
+		return true, nil
+	case strings.EqualFold(raw, "false"):
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be exactly true or false (got: %q)", name, raw)
+	}
 }
 
 // applyExclusionsConfig loads exclusions.json (if present) and attaches
@@ -374,6 +410,7 @@ func (c *Config) applyDrupalMultiSiteConfig(cli *CLIOptions) error {
 		c.DrupalSiteName = siteID
 	}
 	c.SiteName = c.DrupalSiteName
+	c.SiteLegacyNames = append([]string(nil), site.LegacyNames...)
 
 	return nil
 }
@@ -386,6 +423,9 @@ func (c *Config) applyOCMSMultiSiteConfig(cli *CLIOptions) error {
 
 	configPath, cliSiteID, registryPath, cliLogKind, cliSourcePath := readOCMSCLI(cli)
 	if cliSourcePath != "" {
+		if cliSiteID != "" || configPath != "" || registryPath != "" {
+			return fmt.Errorf("-source-path cannot be combined with OCMS multi-site flags; use either -source-path or -ocms-site/-ocms-sites-config/-ocms-sites-registry")
+		}
 		return c.applyOCMSSourcePathOverride(cliSourcePath, cliLogKind)
 	}
 
@@ -435,6 +475,7 @@ func (c *Config) applyOCMSMultiSiteConfig(cli *CLIOptions) error {
 	}
 	c.SiteID = siteID
 	c.SiteName = c.OCMSSiteName
+	c.SiteLegacyNames = append([]string(nil), siteConfig.LegacyNames...)
 	c.OCMSSitesRegistry = registry
 	c.OCMSSitesRegistryPath = foundPath
 
@@ -494,6 +535,11 @@ func (c *Config) applyOCMSSingleSiteFallback(cliSiteID, configPath string) error
 		return err
 	}
 	c.OCMSLogKind = logKind
+	logRange, err := NormalizeOCMSLogRange(c.OCMSLogRange)
+	if err != nil {
+		return err
+	}
+	c.OCMSLogRange = logRange
 	return nil
 }
 
@@ -551,16 +597,19 @@ func setDefaults() {
 	viper.SetDefault("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 	viper.SetDefault("OLLAMA_BASE_URL", "http://localhost:11434")
 	viper.SetDefault("OLLAMA_MODEL", "llama3.3:latest")
+	viper.SetDefault("OLLAMA_CONTEXT_TOKENS", 32768)
 	viper.SetDefault("LMSTUDIO_BASE_URL", "http://localhost:1234")
 	viper.SetDefault("LMSTUDIO_MODEL", "local-model")
+	viper.SetDefault("LMSTUDIO_CONTEXT_TOKENS", 32768)
 
 	// Log source defaults
 	viper.SetDefault("LOG_SOURCE_TYPE", "logwatch")
-	viper.SetDefault("LOGWATCH_OUTPUT_PATH", "/tmp/logwatch-output.txt")
-	viper.SetDefault("OCMS_LOGS_PATH", "/tmp/ocms.log")
+	viper.SetDefault("LOGWATCH_OUTPUT_PATH", "/var/log/logwatch-ai/logwatch-output.txt")
+	viper.SetDefault("OCMS_LOGS_PATH", "/var/log/logwatch-ai/ocms.log")
 	// Drupal settings come from drupal-sites.json, not env vars
 	viper.SetDefault("MAX_LOG_SIZE_MB", 10)
 	viper.SetDefault("LOG_LEVEL", "info")
+	viper.SetDefault("LOG_DIR", "./logs")
 	viper.SetDefault("ENABLE_DATABASE", true)
 	viper.SetDefault("DATABASE_PATH", "./data/summaries.db")
 	viper.SetDefault("ENABLE_PREPROCESSING", true)
@@ -580,7 +629,8 @@ func (c *Config) Validate() error {
 	if c.TelegramBotToken == "" {
 		return fmt.Errorf("TELEGRAM_BOT_TOKEN is required")
 	}
-	telegramTokenRegex := regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
+	// At least five bot-ID digits, matching the log sanitizer's redaction rule.
+	telegramTokenRegex := regexp.MustCompile(`^\d{5,}:[A-Za-z0-9_-]+$`)
 	if !telegramTokenRegex.MatchString(c.TelegramBotToken) {
 		return fmt.Errorf("TELEGRAM_BOT_TOKEN has invalid format (expected: 'number:token')")
 	}
@@ -589,12 +639,12 @@ func (c *Config) Validate() error {
 	if c.TelegramArchiveChannel == 0 {
 		return fmt.Errorf("TELEGRAM_CHANNEL_ARCHIVE_ID is required")
 	}
-	if c.TelegramArchiveChannel > -100 {
+	if !isTelegramChannelID(c.TelegramArchiveChannel) {
 		return fmt.Errorf("TELEGRAM_CHANNEL_ARCHIVE_ID must be a supergroup/channel ID (starts with -100)")
 	}
 
 	// Validate Telegram Alerts Channel (optional, but if set must be valid)
-	if c.TelegramAlertsChannel != 0 && c.TelegramAlertsChannel > -100 {
+	if c.TelegramAlertsChannel != 0 && !isTelegramChannelID(c.TelegramAlertsChannel) {
 		return fmt.Errorf("TELEGRAM_CHANNEL_ALERTS_ID must be a supergroup/channel ID (starts with -100)")
 	}
 
@@ -633,6 +683,11 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+func isTelegramChannelID(id int64) bool {
+	encoded := strconv.FormatInt(id, 10)
+	return len(encoded) > len("-100") && strings.HasPrefix(encoded, "-100")
 }
 
 // HasAlertsChannel returns true if alerts channel is configured
@@ -708,6 +763,9 @@ func (c *Config) validateLLMProvider() error {
 		if err := validateLLMBaseURL("OLLAMA_BASE_URL", c.OllamaBaseURL); err != nil {
 			return err
 		}
+		if err := validateLocalContext("OLLAMA_CONTEXT_TOKENS", c.OllamaContextTokens, c.AIMaxTokens); err != nil {
+			return err
+		}
 
 	case "lmstudio":
 		// Validate LM Studio settings
@@ -717,9 +775,27 @@ func (c *Config) validateLLMProvider() error {
 		if err := validateLLMBaseURL("LMSTUDIO_BASE_URL", c.LMStudioBaseURL); err != nil {
 			return err
 		}
+		if err := validateLocalContext("LMSTUDIO_CONTEXT_TOKENS", c.LMStudioContextTokens, c.AIMaxTokens); err != nil {
+			return err
+		}
 		// Model is optional for LM Studio (defaults to "local-model")
 	}
 
+	return nil
+}
+
+func validateLocalContext(name string, contextTokens, maxOutputTokens int) error {
+	const minimumInputAndSafetyReserve = 3000
+
+	if contextTokens == 0 {
+		return nil
+	}
+	if contextTokens < 2048 || contextTokens > 2_000_000 {
+		return fmt.Errorf("%s must be between 2048 and 2000000", name)
+	}
+	if contextTokens-maxOutputTokens < minimumInputAndSafetyReserve {
+		return fmt.Errorf("%s must be greater than AI_MAX_TOKENS by at least %d", name, minimumInputAndSafetyReserve)
+	}
 	return nil
 }
 
@@ -746,12 +822,8 @@ func (c *Config) validateLogSource() error {
 		if c.DrupalWatchdogPath == "" {
 			return fmt.Errorf("watchdog_path is required in drupal-sites.json site configuration")
 		}
-		validFormats := map[string]bool{
-			"json":  true,
-			"drush": true,
-		}
-		if !validFormats[c.DrupalWatchdogFormat] {
-			return fmt.Errorf("watchdog_format must be 'json' or 'drush' in drupal-sites.json (got: %s)", c.DrupalWatchdogFormat)
+		if c.DrupalWatchdogFormat != "json" {
+			return fmt.Errorf("watchdog_format must be 'json' in drupal-sites.json (got: %s)", c.DrupalWatchdogFormat)
 		}
 	case "ocms":
 		if _, err := NormalizeOCMSLogKind(c.OCMSLogKind); err != nil {
@@ -810,6 +882,12 @@ func (c *Config) SelectedSiteName() string {
 		return c.DrupalSiteName
 	}
 	return c.OCMSSiteName
+}
+
+// SelectedSiteLegacyNames returns prior display names explicitly configured
+// for v2 database-history reconciliation.
+func (c *Config) SelectedSiteLegacyNames() []string {
+	return append([]string(nil), c.SiteLegacyNames...)
 }
 
 // IsDrupalWatchdog returns true if the log source type is drupal_watchdog
@@ -878,6 +956,9 @@ func validateLLMBaseURL(envName, raw string) error {
 	}
 	if u.Host == "" {
 		return fmt.Errorf("%s must include a host", envName)
+	}
+	if u.User != nil {
+		return fmt.Errorf("%s must not contain URL credentials", envName)
 	}
 
 	host := u.Hostname()

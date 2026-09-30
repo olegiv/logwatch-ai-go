@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 	"github.com/olegiv/logwatch-ai-go/internal/config"
+	"github.com/olegiv/logwatch-ai-go/internal/logwatch"
 )
 
 type testPromptBuilder struct{}
@@ -55,10 +57,14 @@ func (m *mockProvider) GetProviderName() string {
 
 type mockPromptTokenCounter struct {
 	*mockProvider
-	countFunc func(systemPrompt, userPrompt string) (int, error)
+	countFunc        func(systemPrompt, userPrompt string) (int, error)
+	countContextFunc func(context.Context, string, string) (int, error)
 }
 
-func (m *mockPromptTokenCounter) CountPromptTokens(_ context.Context, systemPrompt, userPrompt string) (int, error) {
+func (m *mockPromptTokenCounter) CountPromptTokens(ctx context.Context, systemPrompt, userPrompt string) (int, error) {
+	if m.countContextFunc != nil {
+		return m.countContextFunc(ctx, systemPrompt, userPrompt)
+	}
 	return m.countFunc(systemPrompt, userPrompt)
 }
 
@@ -390,7 +396,7 @@ func TestPreparePromptForAnalysisNonAnthropicUsesHeuristicPath(t *testing.T) {
 	provider := &mockProvider{
 		providerName: "Ollama",
 		modelInfo: map[string]any{
-			"context_limit": 4000,
+			"context_limit": 5000,
 		},
 	}
 	preprocessor := &scalingBudgetPreprocessor{multiplier: 1.0}
@@ -421,6 +427,127 @@ func TestPreparePromptForAnalysisNonAnthropicUsesHeuristicPath(t *testing.T) {
 
 	if len(result.LogContent) >= len(rawLogContent) {
 		t.Fatalf("expected compressed content for heuristic path, got %d >= %d", len(result.LogContent), len(rawLogContent))
+	}
+}
+
+func TestPreparePromptForAnalysisBudgetsSanitizedUnicode(t *testing.T) {
+	t.Parallel()
+
+	provider := &mockProvider{
+		providerName: "Ollama",
+		modelInfo:    map[string]any{"context_limit": 5000},
+	}
+	preprocessor := logwatch.NewPreprocessor(150000)
+	promptBuilder := logwatch.NewPromptBuilder()
+	rawLogContent := "### Security\n" + strings.Repeat("㍿\n", 1000)
+	logSource := &analyzer.LogSource{
+		Preprocessor:  preprocessor,
+		PromptBuilder: promptBuilder,
+	}
+
+	result, err := preparePromptForAnalysis(
+		context.Background(),
+		&config.Config{EnablePreprocessing: true, AIMaxTokens: 1000},
+		provider,
+		logSource,
+		"",
+		rawLogContent,
+		"",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("preparePromptForAnalysis() error = %v", err)
+	}
+	if result.LogContent == rawLogContent {
+		t.Fatal("compatibility-expanded Unicode was not preprocessed")
+	}
+	target := 5000 - 1000 - analyzer.PromptSafetyMarginTokens(5000)
+	if got := analyzer.EstimateTokens(result.UserPrompt); got > target {
+		t.Fatalf("prepared prompt estimate = %d, safe target %d", got, target)
+	}
+}
+
+func TestPreparePromptForAnalysisRejectsOversizedFixedHeuristicPrompt(t *testing.T) {
+	t.Parallel()
+
+	provider := &mockProvider{
+		providerName: "Ollama",
+		modelInfo:    map[string]any{"context_limit": 5000},
+	}
+	logSource := &analyzer.LogSource{
+		Preprocessor:  &scalingBudgetPreprocessor{multiplier: 1},
+		PromptBuilder: &testPromptBuilder{},
+	}
+	_, err := preparePromptForAnalysis(
+		context.Background(),
+		&config.Config{EnablePreprocessing: true, AIMaxTokens: 1000},
+		provider,
+		logSource,
+		"system",
+		"log",
+		strings.Repeat("h", 12000),
+		nil,
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "fixed prompt leaves no safe capacity") {
+		t.Fatalf("preparePromptForAnalysis() should reject oversized fixed prompt, got %v", err)
+	}
+}
+
+func TestPreparePromptForAnalysisRejectsOversizedPromptWhenPreprocessingDisabled(t *testing.T) {
+	t.Parallel()
+
+	provider := &mockProvider{
+		providerName: "LM Studio",
+		modelInfo:    map[string]any{"context_limit": 5000},
+	}
+	logSource := &analyzer.LogSource{PromptBuilder: &testPromptBuilder{}}
+	_, err := preparePromptForAnalysis(
+		context.Background(),
+		&config.Config{EnablePreprocessing: false, AIMaxTokens: 1000},
+		provider,
+		logSource,
+		"system",
+		strings.Repeat("x", 12000),
+		"",
+		nil,
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "prompt is too large") {
+		t.Fatalf("preparePromptForAnalysis() should reject oversized prompt, got %v", err)
+	}
+}
+
+func TestPreparePromptForAnalysisRejectsOversizedAnthropicFixedPrompt(t *testing.T) {
+	t.Parallel()
+
+	provider := &mockPromptTokenCounter{
+		mockProvider: &mockProvider{
+			providerName: "Anthropic",
+			modelInfo:    map[string]any{"context_limit": 4200},
+		},
+		countFunc: func(systemPrompt, userPrompt string) (int, error) {
+			return len(systemPrompt) + len(userPrompt), nil
+		},
+	}
+	logSource := &analyzer.LogSource{
+		Preprocessor:  &scalingBudgetPreprocessor{multiplier: 1},
+		PromptBuilder: &testPromptBuilder{},
+	}
+	_, err := preparePromptForAnalysis(
+		context.Background(),
+		&config.Config{EnablePreprocessing: true, AIMaxTokens: 100},
+		provider,
+		logSource,
+		"system",
+		"log",
+		strings.Repeat("h", 3000),
+		nil,
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "fixed Anthropic prompt is too large") {
+		t.Fatalf("preparePromptForAnalysis() should reject oversized fixed prompt, got %v", err)
 	}
 }
 
@@ -484,5 +611,39 @@ func TestPreparePromptForAnalysisAnthropicCountsContextualExclusions(t *testing.
 	minExpected := len("system") + len("LOG||HIST|") + len("CTX-EXCL:") + len(contextualExclusions[0]) + len(contextualExclusions[1])
 	if observedBaseCount < minExpected {
 		t.Errorf("base prompt token count = %d, want >= %d (exclusions must be in the base)", observedBaseCount, minExpected)
+	}
+}
+
+func TestPreparePromptForAnalysisDoesNotSwallowTokenCountCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	provider := &mockPromptTokenCounter{
+		mockProvider: &mockProvider{
+			providerName: "Anthropic",
+			modelInfo:    map[string]any{"context_limit": 4200},
+		},
+		countContextFunc: func(context.Context, string, string) (int, error) {
+			cancel()
+			return 0, context.Canceled
+		},
+	}
+	logSource := &analyzer.LogSource{
+		Preprocessor:  &scalingBudgetPreprocessor{multiplier: 2},
+		PromptBuilder: &testPromptBuilder{},
+	}
+	_, err := preparePromptForAnalysis(
+		ctx,
+		&config.Config{EnablePreprocessing: true, AIMaxTokens: 100},
+		provider,
+		logSource,
+		"system",
+		strings.Repeat("x", 200),
+		"",
+		nil,
+		nil,
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("preparePromptForAnalysis() error = %v, want context.Canceled", err)
 	}
 }

@@ -35,7 +35,7 @@ You are an API integration testing specialist for the logwatch-ai-go project. Th
 - Proxy: `HTTPS_PROXY` (optional)
 
 **Key Features:**
-- Prompt caching (system prompt marked as ephemeral)
+- Token accounting for uncached requests
 - Retry logic: 3 attempts with exponential backoff (2^n seconds)
 - Cost calculation: model-dependent per `internal/ai/pricing.go` (Haiku 4.5: $1/$5, Sonnet 4.6: $3/$15, Opus 4.7: $5/$25 per MTok)
 - Historical context: Last 7 days included in user prompt
@@ -252,13 +252,13 @@ go test -v -run TestEscapeMarkdownV2 ./internal/notification
 **Generate test logwatch output:**
 ```bash
 ./scripts/generate-logwatch.sh
-# Creates /tmp/logwatch-output.txt with sample data
+# Creates /var/log/logwatch-ai/logwatch-output.txt
 ```
 
 **Run with test data:**
 ```bash
-# Ensure .env points to /tmp/logwatch-output.txt
-LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt make run
+# Ensure .env points to the generated report
+LOGWATCH_OUTPUT_PATH=/var/log/logwatch-ai/logwatch-output.txt make run
 ```
 
 **What to verify:**
@@ -284,7 +284,7 @@ CLAUDE_MODEL=claude-haiku-4-5-20251001
 TELEGRAM_BOT_TOKEN=123456789:ABC-DEF...
 TELEGRAM_CHANNEL_ARCHIVE_ID=-1001234567890
 TELEGRAM_CHANNEL_ALERTS_ID=-1009876543210
-LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt
+LOGWATCH_OUTPUT_PATH=/var/log/logwatch-ai/logwatch-output.txt
 LOG_LEVEL=debug
 ENABLE_DATABASE=true
 DATABASE_PATH=./data/summaries.db
@@ -328,27 +328,11 @@ LOG_LEVEL=debug ./bin/logwatch-analyzer
 - Expect timeout error
 - Increase timeout and verify success
 
-### 7. Testing Prompt Caching
+### 7. Testing Cost Accounting
 
-**First run (cache creation):**
-```bash
-./bin/logwatch-analyzer
-# Check logs for: "cache_creation_input_tokens"
-# Cost should include cache write: ~$0.016-0.022
-```
-
-**Second run (within 5 minutes - cache hit):**
-```bash
-# Run again immediately
-./bin/logwatch-analyzer
-# Check logs for: "cache_read_input_tokens"
-# Cost should be lower: ~$0.011-0.015 (90% savings on cached portion)
-```
-
-**Cache expiry (after 5 minutes):**
-- Wait 5+ minutes
-- Run again
-- Should create new cache (higher cost)
+Run a known fixture and confirm input/output usage and `cost_usd` match the
+configured model's normal, uncached rates in `internal/ai/pricing.go`. The
+current client does not send prompt-cache control blocks.
 
 ## Testing Checklist
 

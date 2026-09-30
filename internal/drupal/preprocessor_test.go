@@ -175,6 +175,12 @@ func TestPreprocessor_determinePriority(t *testing.T) {
 			wantPrio: priorityMedium,
 		},
 		{
+			name:     "warning in content",
+			section:  "General",
+			content:  "request timeout while refreshing cache",
+			wantPrio: priorityMedium,
+		},
+		{
 			name:     "low priority",
 			section:  "Debug Info",
 			content:  "debug messages here",
@@ -302,6 +308,53 @@ Failed to connect`
 	// Result must fit the configured token budget
 	if got := p.EstimateTokens(result); got > 100 {
 		t.Errorf("aggressiveCompress() produced %d tokens, want <= 100", got)
+	}
+}
+
+func TestPreprocessorAggressiveCompressionKeepsErrorRecordAtomic(t *testing.T) {
+	p := NewPreprocessor(80)
+	content := `## Summary Statistics
+Total entries: 1000
+
+## Critical/Error Entries (Full Detail)
+[2026-08-31 10:00:00] ERROR | php | localhost | /admin
+  Message: Undefined array key "foo"
+[2026-08-31 09:00:00] ERROR | php | localhost | /node/1
+  Message: Invalid argument supplied`
+
+	result := p.aggressiveCompress(content)
+	if strings.Contains(result, "[2026-08-31 10:00:00] ERROR") &&
+		!strings.Contains(result, `Message: Undefined array key "foo"`) {
+		t.Fatalf("aggressive compression separated an Error header from its message: %q", result)
+	}
+	if strings.Contains(result, "[2026-08-31 09:00:00] ERROR") &&
+		!strings.Contains(result, "Message: Invalid argument supplied") {
+		t.Fatalf("aggressive compression separated an Error header from its message: %q", result)
+	}
+	if !strings.Contains(result, `Message: Undefined array key "foo"`) {
+		t.Fatalf("aggressive compression did not retain the newest complete Error record: %q", result)
+	}
+	if got := p.EstimateTokens(result); got > 80 {
+		t.Fatalf("aggressive compression produced %d tokens, want <= 80", got)
+	}
+}
+
+func TestPreprocessorAggressiveCompressionKeepsPathOnlyAccessEvidence(t *testing.T) {
+	p := NewPreprocessor(80)
+	content := `## Access/Permission Events
+- [12x] [PATH] (sources: 203.0.113.10, 203.0.113.11)
+
+## Recent Notice/Info Entries (Sample)
+` + strings.Repeat("- [info] cron: routine completion\n", 80)
+
+	result := p.aggressiveCompressWithLimit(content, 80)
+	if !strings.Contains(result, "[12x] [PATH]") ||
+		!strings.Contains(result, "203.0.113.10") ||
+		!strings.Contains(result, "203.0.113.11") {
+		t.Fatalf("aggressive compression discarded access-denied evidence: %q", result)
+	}
+	if got := p.EstimateTokens(result); got > 80 {
+		t.Fatalf("aggressive compression produced %d tokens, want <= 80", got)
 	}
 }
 

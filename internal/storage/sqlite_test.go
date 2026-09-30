@@ -1,12 +1,26 @@
 package storage
 
 import (
+	"database/sql"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func privateTempDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatalf("create private temp directory: %v", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("set private temp directory mode: %v", err)
+	}
+	return dir
+}
 
 // assertSummaryFieldsEqual compares two Summary structs and reports differences
 func assertSummaryFieldsEqual(t *testing.T, got, want *Summary) {
@@ -44,7 +58,7 @@ func assertSummaryFieldsEqual(t *testing.T, got, want *Summary) {
 }
 
 func TestNew(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -63,7 +77,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestNewCreatesDirectory(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "subdir", "nested", "test.db")
 
 	storage, err := New(dbPath)
@@ -77,8 +91,153 @@ func TestNewCreatesDirectory(t *testing.T) {
 	}
 }
 
+func TestNewRejectsPermissiveDatabaseDirectoryWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "database")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatalf("create permissive database directory: %v", err)
+	}
+	dbPath := filepath.Join(dir, "summaries.db")
+	storage, err := New(dbPath)
+	if err == nil {
+		_ = storage.Close()
+		t.Fatal("New() accepted a permissive existing database directory")
+	}
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat database directory: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o755 {
+		t.Fatalf("database directory mode changed to %04o, want 0755", got)
+	}
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("database path was created despite rejection: %v", err)
+	}
+}
+
+func TestValidatePathRejectsLegacyBootstrapModesWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "data")
+	if err := os.Mkdir(dir, 0o750); err != nil {
+		t.Fatalf("create legacy database directory: %v", err)
+	}
+	if err := os.Chmod(dir, 0o750); err != nil {
+		t.Fatalf("set legacy database directory mode: %v", err)
+	}
+	dbPath := filepath.Join(dir, "summaries.db")
+	if err := os.WriteFile(dbPath, []byte("legacy"), 0o640); err != nil {
+		t.Fatalf("create legacy database file: %v", err)
+	}
+	if err := os.Chmod(dbPath, 0o640); err != nil {
+		t.Fatalf("set legacy database file mode: %v", err)
+	}
+
+	if err := ValidatePath(dbPath); err == nil {
+		t.Fatal("ValidatePath() accepted legacy bootstrap permissions")
+	}
+	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o750 {
+		t.Fatalf("legacy directory was mutated: info=%v err=%v", info, err)
+	}
+	if info, err := os.Stat(dbPath); err != nil || info.Mode().Perm() != 0o640 {
+		t.Fatalf("legacy database was mutated: info=%v err=%v", info, err)
+	}
+}
+
+func TestValidatePathDoesNotCreateMissingDatabasePath(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "missing", "data", "summaries.db")
+	if err := ValidatePath(dbPath); err != nil {
+		t.Fatalf("ValidatePath() rejected a safely creatable missing path: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(dbPath)); !os.IsNotExist(err) {
+		t.Fatalf("ValidatePath() created a directory during read-only preflight: %v", err)
+	}
+}
+
+func TestNewRejectsPermissiveDatabaseFileWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "database")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatalf("create database directory: %v", err)
+	}
+	dbPath := filepath.Join(dir, "summaries.db")
+	if err := os.WriteFile(dbPath, []byte("sentinel"), 0o644); err != nil {
+		t.Fatalf("create database file: %v", err)
+	}
+	if err := os.Chmod(dbPath, 0o644); err != nil {
+		t.Fatalf("set database mode: %v", err)
+	}
+
+	storage, err := New(dbPath)
+	if err == nil {
+		_ = storage.Close()
+		t.Fatal("New() accepted a permissive existing database file")
+	}
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("stat database: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("database mode changed to %04o, want 0644", got)
+	}
+	data, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatalf("read database: %v", err)
+	}
+	if string(data) != "sentinel" {
+		t.Fatalf("database content changed to %q", data)
+	}
+}
+
+func TestNewRejectsSQLiteURISyntax(t *testing.T) {
+	t.Parallel()
+
+	target := filepath.Join(t.TempDir(), "actual.db")
+	for _, path := range []string{"file:" + target, filepath.Join(t.TempDir(), "name?mode=memory.db")} {
+		if storage, err := New(path); err == nil {
+			_ = storage.Close()
+			t.Fatalf("New(%q) accepted SQLite URI syntax", path)
+		}
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("alternate SQLite target exists after rejected URI: %v", err)
+	}
+}
+
+func TestNewRejectsDatabaseSymlink(t *testing.T) {
+	t.Parallel()
+
+	dir := privateTempDir(t)
+	target := filepath.Join(dir, "target.db")
+	link := filepath.Join(dir, "summaries.db")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := os.Chmod(target, 0o644); err != nil {
+		t.Fatalf("make target permissions observable: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create database symlink: %v", err)
+	}
+	if _, err := New(link); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("New() should reject database symlink, got %v", err)
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat target: %v", err)
+	}
+	if got := targetInfo.Mode().Perm(); got != 0o644 {
+		t.Fatalf("symlink target mode changed to %04o, want 0644", got)
+	}
+}
+
 func TestSaveSummary(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -121,7 +280,7 @@ func TestSaveSummary(t *testing.T) {
 }
 
 func TestGetRecentSummaries(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -194,7 +353,7 @@ func TestGetRecentSummaries(t *testing.T) {
 }
 
 func TestGetHistoricalContext(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -256,7 +415,7 @@ func TestGetHistoricalContext(t *testing.T) {
 }
 
 func TestGetHistoricalContext_Empty(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -277,7 +436,7 @@ func TestGetHistoricalContext_Empty(t *testing.T) {
 }
 
 func TestCleanupOldSummaries(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -347,7 +506,7 @@ func TestCleanupOldSummaries(t *testing.T) {
 }
 
 func TestGetStatistics(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -445,7 +604,7 @@ func TestGetStatistics(t *testing.T) {
 }
 
 func TestGetStatistics_Empty(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -477,7 +636,7 @@ func TestGetStatistics_Empty(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -566,7 +725,7 @@ func TestSummaryStructure(t *testing.T) {
 }
 
 func TestSaveAndRetrieveSummary(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -630,7 +789,7 @@ func TestSaveAndRetrieveSummary(t *testing.T) {
 }
 
 func TestCleanupOldSummaries_NoData(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -650,7 +809,7 @@ func TestCleanupOldSummaries_NoData(t *testing.T) {
 }
 
 func TestInitSchema(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -680,7 +839,7 @@ func TestInitSchema(t *testing.T) {
 }
 
 func TestGetSchemaVersionReturnsLatestWhenMultipleRowsExist(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -700,7 +859,7 @@ func TestGetSchemaVersionReturnsLatestWhenMultipleRowsExist(t *testing.T) {
 }
 
 func TestSetSchemaVersionReplacesExistingRows(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -730,8 +889,155 @@ func TestSetSchemaVersionReplacesExistingRows(t *testing.T) {
 	}
 }
 
+func TestMigrationV2RepairsPartialLegacyState(t *testing.T) {
+	dbPath := filepath.Join(privateTempDir(t), "partial.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Open partial database: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+		INSERT INTO schema_version(version) VALUES (1);
+		CREATE TABLE summaries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp TEXT NOT NULL,
+			system_status TEXT NOT NULL,
+			summary TEXT NOT NULL,
+			log_source_type TEXT NOT NULL DEFAULT 'logwatch'
+		);
+	`)
+	if err != nil {
+		_ = db.Close()
+		t.Fatalf("Create partial schema: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close partial database: %v", err)
+	}
+	if err := os.Chmod(dbPath, 0o600); err != nil {
+		t.Fatalf("secure partial database: %v", err)
+	}
+
+	storage, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("Repair partial migration: %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	var siteNameColumn int
+	if err := storage.db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('summaries') WHERE name = 'site_name'
+	`).Scan(&siteNameColumn); err != nil {
+		t.Fatalf("Inspect repaired schema: %v", err)
+	}
+	if siteNameColumn != 1 {
+		t.Fatalf("Expected repaired site_name column, got count %d", siteNameColumn)
+	}
+	if version := storage.getSchemaVersion(); version != currentSchemaVersion {
+		t.Fatalf("Expected schema version %d, got %d", currentSchemaVersion, version)
+	}
+}
+
+func TestMigrationV3NormalizesOffsetTimestampToUTC(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(privateTempDir(t), "offset.db")
+	storage, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("create database: %v", err)
+	}
+	_, err = storage.db.Exec(`
+		DELETE FROM schema_version;
+		INSERT INTO schema_version(version) VALUES (2);
+		INSERT INTO summaries (
+			timestamp, log_source_type, site_id, site_name, system_status, summary,
+			critical_issues, warnings, recommendations, metrics,
+			input_tokens, output_tokens, cost_usd
+		) VALUES (
+			'2026-10-25T02:30:00+02:00', 'logwatch', '', '', 'Good', 'before DST fallback',
+			'[]', '[]', '[]', '{}', 0, 0, 0
+		)
+	`)
+	if err != nil {
+		_ = storage.Close()
+		t.Fatalf("prepare v2 timestamp: %v", err)
+	}
+	if err := storage.Close(); err != nil {
+		t.Fatalf("close v2 database: %v", err)
+	}
+
+	storage, err = New(dbPath)
+	if err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+	var timestamp string
+	if err := storage.db.QueryRow(`SELECT timestamp FROM summaries`).Scan(&timestamp); err != nil {
+		t.Fatalf("read migrated timestamp: %v", err)
+	}
+	if timestamp != "2026-10-25T00:30:00Z" {
+		t.Fatalf("migrated timestamp = %q, want UTC", timestamp)
+	}
+}
+
+func TestMigrationV2RollsBackSchemaAndVersionTogether(t *testing.T) {
+	dbPath := filepath.Join(privateTempDir(t), "failed-migration.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Open database: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+		INSERT INTO schema_version(version) VALUES (1);
+		CREATE TABLE summaries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp TEXT NOT NULL,
+			system_status TEXT NOT NULL,
+			summary TEXT NOT NULL
+		);
+		CREATE TABLE idx_source_site (id INTEGER);
+	`)
+	if err != nil {
+		_ = db.Close()
+		t.Fatalf("Create v1 schema: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close v1 database: %v", err)
+	}
+	if err := os.Chmod(dbPath, 0o600); err != nil {
+		t.Fatalf("secure v1 database: %v", err)
+	}
+
+	if storage, err := New(dbPath); err == nil {
+		_ = storage.Close()
+		t.Fatal("Expected migration to fail on the conflicting index name")
+	}
+
+	db, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Reopen database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var addedColumns int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM pragma_table_info('summaries')
+		WHERE name IN ('log_source_type', 'site_name')
+	`).Scan(&addedColumns); err != nil {
+		t.Fatalf("Inspect failed migration: %v", err)
+	}
+	if addedColumns != 0 {
+		t.Fatalf("Migration left %d added columns after rollback", addedColumns)
+	}
+	var version int
+	if err := db.QueryRow(`SELECT version FROM schema_version`).Scan(&version); err != nil {
+		t.Fatalf("Read schema version: %v", err)
+	}
+	if version != 1 {
+		t.Fatalf("Schema version = %d after rollback, want 1", version)
+	}
+}
+
 func TestDatabaseConnectionPoolSettings(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -776,7 +1082,7 @@ func TestDatabaseConnectionPoolSettings(t *testing.T) {
 // Tests for source/site filtering
 
 func TestSaveAndRetrieveWithSourceFilter(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -899,7 +1205,7 @@ func TestSaveAndRetrieveWithSourceFilter(t *testing.T) {
 }
 
 func TestGetHistoricalContextWithFilter(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -983,8 +1289,292 @@ func TestGetHistoricalContextWithFilter(t *testing.T) {
 	}
 }
 
+func TestSourceFilterUsesStableSiteIDAcrossRename(t *testing.T) {
+	t.Parallel()
+
+	storage, err := New(filepath.Join(privateTempDir(t), "summaries.db"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	summary := &Summary{
+		Timestamp:       time.Now(),
+		LogSourceType:   "drupal_watchdog",
+		SiteID:          "production",
+		SiteName:        "Old display name",
+		SystemStatus:    "Good",
+		Summary:         "stable history",
+		CriticalIssues:  []string{},
+		Warnings:        []string{},
+		Recommendations: []string{},
+		Metrics:         map[string]any{},
+	}
+	if err := storage.SaveSummary(summary); err != nil {
+		t.Fatalf("SaveSummary() error = %v", err)
+	}
+
+	got, err := storage.GetRecentSummaries(7, &SourceFilter{
+		LogSourceType: "drupal_watchdog",
+		SiteID:        "production",
+		SiteName:      "New display name",
+	})
+	if err != nil {
+		t.Fatalf("GetRecentSummaries() error = %v", err)
+	}
+	if len(got) != 1 || got[0].SiteID != "production" || got[0].SiteName != "Old display name" {
+		t.Fatalf("stable-ID lookup returned %#v", got)
+	}
+}
+
+func TestMigrationV3DoesNotTreatDisplayNameAsStableID(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(privateTempDir(t), "legacy-site.db")
+	storage, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_, err = storage.db.Exec(`
+		DELETE FROM schema_version;
+		INSERT INTO schema_version(version) VALUES (2);
+		INSERT INTO summaries (
+			timestamp, log_source_type, site_name, system_status, summary,
+			critical_issues, warnings, recommendations, metrics
+		) VALUES (?, 'drupal_watchdog', 'Customer-facing label', 'Good', 'legacy', '[]', '[]', '[]', '{}')
+	`, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		_ = storage.Close()
+		t.Fatalf("prepare v2 row: %v", err)
+	}
+	if err := storage.Close(); err != nil {
+		t.Fatalf("close v2 database: %v", err)
+	}
+
+	storage, err = New(dbPath)
+	if err != nil {
+		t.Fatalf("migrate v2 database: %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+	var siteID string
+	if err := storage.db.QueryRow(`SELECT site_id FROM summaries WHERE summary = 'legacy'`).Scan(&siteID); err != nil {
+		t.Fatalf("read migrated site ID: %v", err)
+	}
+	if siteID != "" {
+		t.Fatalf("migrated site_id = %q, want empty until configuration reconciliation", siteID)
+	}
+}
+
+func TestReconcileSiteIdentityRepairsRowsWrittenByV2Binary(t *testing.T) {
+	t.Parallel()
+
+	storage, err := New(filepath.Join(privateTempDir(t), "rollback.db"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	_, err = storage.db.Exec(`
+		INSERT INTO summaries (
+			timestamp, log_source_type, site_name, system_status, summary,
+			critical_issues, warnings, recommendations, metrics
+		) VALUES (?, 'drupal_watchdog', 'Production website', 'Good', 'written by v2', '[]', '[]', '[]', '{}')
+	`, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatalf("simulate v2 insert: %v", err)
+	}
+
+	rows, err := storage.ReconcileSiteIdentity("drupal_watchdog", "production", "Production website")
+	if err != nil {
+		t.Fatalf("ReconcileSiteIdentity() error = %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("ReconcileSiteIdentity() affected %d rows, want 1", rows)
+	}
+	got, err := storage.GetRecentSummaries(7, &SourceFilter{
+		LogSourceType: "drupal_watchdog",
+		SiteID:        "production",
+		SiteName:      "Production website",
+	})
+	if err != nil {
+		t.Fatalf("GetRecentSummaries() error = %v", err)
+	}
+	if len(got) != 1 || got[0].SiteID != "production" {
+		t.Fatalf("reconciled lookup returned %#v", got)
+	}
+}
+
+func TestReconcileSiteIdentityUsesExplicitLegacyNameAcrossRename(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(privateTempDir(t), "renamed-site.db")
+	storage, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_, err = storage.db.Exec(`
+		DELETE FROM schema_version;
+		INSERT INTO schema_version(version) VALUES (2);
+		INSERT INTO summaries (
+			timestamp, log_source_type, site_name, system_status, summary,
+			critical_issues, warnings, recommendations, metrics
+		) VALUES (?, 'drupal_watchdog', 'Old', 'Good', 'legacy rename', '[]', '[]', '[]', '{}')
+	`, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		_ = storage.Close()
+		t.Fatalf("prepare v2 row: %v", err)
+	}
+	if err := storage.Close(); err != nil {
+		t.Fatalf("close v2 database: %v", err)
+	}
+
+	storage, err = New(dbPath)
+	if err != nil {
+		t.Fatalf("migrate v2 database: %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	rows, err := storage.ReconcileSiteIdentity("drupal_watchdog", "site-a", "New", "Old")
+	if err != nil || rows != 1 {
+		t.Fatalf("ReconcileSiteIdentity(site-a) rows=%d error=%v, want 1, nil", rows, err)
+	}
+	rows, err = storage.ReconcileSiteIdentity("drupal_watchdog", "site-b", "Old")
+	if err != nil || rows != 0 {
+		t.Fatalf("ReconcileSiteIdentity(site-b) rows=%d error=%v, want 0, nil", rows, err)
+	}
+
+	var siteID string
+	if err := storage.db.QueryRow(`SELECT site_id FROM summaries WHERE summary = 'legacy rename'`).Scan(&siteID); err != nil {
+		t.Fatalf("read reconciled site ID: %v", err)
+	}
+	if siteID != "site-a" {
+		t.Fatalf("legacy row site_id = %q, want site-a", siteID)
+	}
+	got, err := storage.GetRecentSummaries(7, &SourceFilter{
+		LogSourceType: "drupal_watchdog",
+		SiteID:        "site-a",
+		SiteName:      "New",
+	})
+	if err != nil || len(got) != 1 || got[0].Summary != "legacy rename" {
+		t.Fatalf("stable-ID history after rename = %#v, error=%v", got, err)
+	}
+}
+
+func TestNewRejectsFutureSchemaVersion(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(privateTempDir(t), "future.db")
+	storage, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := storage.db.Exec(`UPDATE schema_version SET version = ?`, currentSchemaVersion+1); err != nil {
+		_ = storage.Close()
+		t.Fatalf("set future version: %v", err)
+	}
+	if err := storage.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	if storage, err := New(dbPath); err == nil {
+		_ = storage.Close()
+		t.Fatal("New() accepted a future schema version")
+	}
+}
+
+func TestTimestampQueriesUseInstantsAcrossOffsets(t *testing.T) {
+	t.Parallel()
+
+	storage, err := New(filepath.Join(privateTempDir(t), "timestamps.db"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	now := time.Now().UTC()
+	minusTwelve := time.FixedZone("UTC-12", -12*60*60)
+	plusFourteen := time.FixedZone("UTC+14", 14*60*60)
+	insert := func(label string, timestamp time.Time) {
+		t.Helper()
+		_, err := storage.db.Exec(`
+			INSERT INTO summaries (
+				timestamp, log_source_type, site_id, site_name, system_status, summary,
+				critical_issues, warnings, recommendations, metrics
+			) VALUES (?, 'logwatch', '', '', 'Good', ?, '[]', '[]', '[]', '{}')
+		`, timestamp.Format(time.RFC3339), label)
+		if err != nil {
+			t.Fatalf("insert %s: %v", label, err)
+		}
+	}
+
+	insert("newest", now.Add(-time.Hour).In(minusTwelve))
+	insert("older", now.Add(-2*time.Hour).In(plusFourteen))
+	insert("outside recent window", now.AddDate(0, 0, -8).In(plusFourteen))
+	insert("retain during cleanup", now.AddDate(0, 0, -89).In(minusTwelve))
+	insert("delete during cleanup", now.AddDate(0, 0, -91).In(plusFourteen))
+
+	recent, err := storage.GetRecentSummaries(7, nil)
+	if err != nil {
+		t.Fatalf("GetRecentSummaries() error = %v", err)
+	}
+	if len(recent) != 2 || recent[0].Summary != "newest" || recent[1].Summary != "older" {
+		t.Fatalf("instant-based recent ordering returned %#v", recent)
+	}
+
+	affected, err := storage.CleanupOldSummaries(90)
+	if err != nil {
+		t.Fatalf("CleanupOldSummaries() error = %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("CleanupOldSummaries() affected %d rows, want 1", affected)
+	}
+	var retained int
+	if err := storage.db.QueryRow(`SELECT COUNT(*) FROM summaries WHERE summary = 'retain during cleanup'`).Scan(&retained); err != nil {
+		t.Fatalf("query retained row: %v", err)
+	}
+	if retained != 1 {
+		t.Fatalf("cleanup removed a row whose instant is within retention")
+	}
+}
+
+func TestHistoricalContextIsBounded(t *testing.T) {
+	t.Parallel()
+
+	storage, err := New(filepath.Join(privateTempDir(t), "history.db"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = storage.Close() }()
+
+	for i := range maxHistoricalSummaries + 5 {
+		summary := &Summary{
+			Timestamp:       time.Now().Add(-time.Duration(i) * time.Minute),
+			SystemStatus:    "Good",
+			Summary:         strings.Repeat("x", maxHistoricalSummaryLen*4),
+			CriticalIssues:  []string{},
+			Warnings:        []string{},
+			Recommendations: []string{},
+			Metrics:         map[string]any{},
+		}
+		if err := storage.SaveSummary(summary); err != nil {
+			t.Fatalf("SaveSummary(%d) error = %v", i, err)
+		}
+	}
+
+	context, err := storage.GetHistoricalContext(7, nil)
+	if err != nil {
+		t.Fatalf("GetHistoricalContext() error = %v", err)
+	}
+	if len(context) > maxHistoricalContextLen {
+		t.Fatalf("historical context length = %d, max %d", len(context), maxHistoricalContextLen)
+	}
+	if got := strings.Count(context, " - Status: "); got != maxHistoricalSummaries {
+		t.Fatalf("historical context entries = %d, want %d", got, maxHistoricalSummaries)
+	}
+}
+
 func TestGetStatisticsWithFilter(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)
@@ -1093,7 +1683,7 @@ func TestGetStatisticsWithFilter(t *testing.T) {
 }
 
 func TestSaveWithDefaultLogSourceType(t *testing.T) {
-	tmpDir := t.TempDir()
+	tmpDir := privateTempDir(t)
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	storage, err := New(dbPath)

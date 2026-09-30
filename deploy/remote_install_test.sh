@@ -6,6 +6,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REMOTE_INSTALL="$SCRIPT_DIR/remote-install.sh"
 REMOTE_ROLLBACK="$SCRIPT_DIR/remote-rollback.sh"
+REMOTE_VERIFY="$SCRIPT_DIR/remote-verify.sh"
 ROLLBACK_SCRIPT="$SCRIPT_DIR/rollback.sh"
 
 pass=0
@@ -22,7 +23,10 @@ no_install_temps() {
     if compgen -G "$1/*.incoming.*" >/dev/null \
         || compgen -G "$1/logwatch-analyzer.new.*" >/dev/null \
         || compgen -G "$1/logwatch-analyzer.revert.*" >/dev/null \
-        || compgen -G "$1/.logwatch-analyzer.prev-target.new.*" >/dev/null; then
+        || compgen -G "$1/logwatch-analyzer.recover.*" >/dev/null \
+        || compgen -G "$1/.logwatch-analyzer.prev-target.new.*" >/dev/null \
+        || compgen -G "$1/.logwatch-analyzer.prev-target.restore.*" >/dev/null \
+        || compgen -G "$1/.logwatch-analyzer.deploy-transaction.new.*" >/dev/null; then
         bad "$2" "temporary deployment files remain"
     else
         ok "$2"
@@ -43,6 +47,7 @@ case "$TEST_ROOT" in
     /tmp/logwatch-remote-test.*|/private/tmp/logwatch-remote-test.*|/var/folders/*/logwatch-remote-test.*) ;;
     *) echo "unsafe temporary test directory: $TEST_ROOT" >&2; exit 1 ;;
 esac
+TEST_ROOT=$(cd "$TEST_ROOT" && pwd -P)
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
 
 REAL_BASH=$(command -v bash)
@@ -55,6 +60,8 @@ export REAL_INSTALL REAL_LN REAL_MV REAL_RM
 SHIM_DIR="$TEST_ROOT/bin"
 NO_FLOCK_DIR="$TEST_ROOT/no-flock-bin"
 mkdir "$SHIM_DIR" "$NO_FLOCK_DIR"
+ln -s "$(command -v stat)" "$NO_FLOCK_DIR/stat"
+ln -s "$(command -v id)" "$NO_FLOCK_DIR/id"
 
 make_script() {
     local path=$1
@@ -91,6 +98,8 @@ make_script "$SHIM_DIR/mv" \
     'last=${!#}' \
     'if [[ ${TEST_FAIL_RECORD_PUBLISH:-0} == 1 && $last == ./.logwatch-analyzer.prev-target ]]; then exit 74; fi' \
     'if [[ ${TEST_FAIL_LIVE_PUBLISH:-0} == 1 && $last == ./logwatch-analyzer ]]; then exit 77; fi' \
+    'if [[ ${TEST_FAIL_RECOVERY_PUBLISH:-0} == 1 && $last == ./logwatch-analyzer && $* == *logwatch-analyzer.recover.* ]]; then exit 79; fi' \
+    'if [[ ${TEST_FAIL_RECOVERY_PUBLISH:-0} == 1 && $last == ./logwatch-analyzer && $* == *logwatch-analyzer.rollback.* ]]; then exit 79; fi' \
     'args=()' \
     'treat_dest_as_file=0' \
     'for arg in "$@"; do' \
@@ -105,12 +114,17 @@ make_script "$SHIM_DIR/mv" \
     '  fi' \
     'done' \
     'if [[ $treat_dest_as_file == 1 && -d $last ]]; then exit 76; fi' \
-    'if [[ ${TEST_SIGNAL_AFTER_LIVE_PUBLISH:-0} == 1 && $last == ./logwatch-analyzer ]]; then' \
+    'if [[ ${TEST_SIGNAL_AFTER_LIVE_PUBLISH:-0} == 1 && $last == ./logwatch-analyzer && $* == *logwatch-analyzer.new.* ]]; then' \
     '  "$REAL_MV" "${args[@]}"' \
     '  kill -TERM "$PPID"' \
     '  exit 0' \
     'fi' \
-    'if [[ ${TEST_SIGNAL_AFTER_RECORD_HIDE:-0} == 1 && $last == ./.logwatch-analyzer.prev-target.consumed.* ]]; then' \
+    'if [[ ${TEST_SIGNAL_AFTER_RECORD_PUBLISH:-0} == 1 && $last == ./.logwatch-analyzer.prev-target && $* == *.prev-target.new.* ]]; then' \
+    '  "$REAL_MV" "${args[@]}"' \
+    '  kill -TERM "$PPID"' \
+    '  exit 0' \
+    'fi' \
+    'if [[ ${TEST_SIGNAL_AFTER_ROLLBACK_PUBLISH:-0} == 1 && $last == ./logwatch-analyzer && $* == *logwatch-analyzer.rollback.* ]]; then' \
     '  "$REAL_MV" "${args[@]}"' \
     '  kill -TERM "$PPID"' \
     '  exit 0' \
@@ -125,7 +139,8 @@ make_script "$SHIM_DIR/ssh" \
 # shellcheck disable=SC2016 # these are literal lines for the generated shim
 make_script "$SHIM_DIR/rm" \
     'last=${!#}' \
-    'if [[ ${TEST_FAIL_RECORD_CONSUME:-0} == 1 && $last == ./.logwatch-analyzer.prev-target.consumed.* ]]; then exit 78; fi' \
+    'if [[ ${TEST_FAIL_RECORD_CONSUME:-0} == 1 && $last == ./.logwatch-analyzer.prev-target ]]; then exit 78; fi' \
+    'if [[ ${TEST_FAIL_JOURNAL_REMOVE:-0} == 1 && $last == ./.logwatch-analyzer.deploy-transaction ]]; then exit 80; fi' \
     'exec "$REAL_RM" "$@"'
 
 TEST_PATH="$SHIM_DIR:$PATH"
@@ -134,15 +149,20 @@ make_analyzer() {
     local path=$1
     local label=${2:-analyzer}
     local version_rc=${3:-0}
+    local runtime_rc=${4:-0}
     {
         printf '%s\n' '#!/usr/bin/env bash'
         printf 'label=%q\n' "$label"
         printf 'version_rc=%q\n' "$version_rc"
+        printf 'runtime_rc=%q\n' "$runtime_rc"
         # shellcheck disable=SC2016 # literal lines for the generated analyzer
         printf '%s\n' \
             'if [[ ${1:-} == -version ]]; then' \
             '  printf "%s\n" "$label"' \
             '  exit "$version_rc"' \
+            'fi' \
+            'if [[ ${1:-} == -check-runtime ]]; then' \
+            '  exit "$runtime_rc"' \
             'fi' \
             'exit 2'
     } > "$path"
@@ -191,7 +211,10 @@ run_install() {
     TEST_FAIL_NEXT_LINK="${TEST_FAIL_NEXT_LINK:-0}" \
     TEST_FAIL_LIVE_PUBLISH="${TEST_FAIL_LIVE_PUBLISH:-0}" \
     TEST_SIGNAL_AFTER_LIVE_PUBLISH="${TEST_SIGNAL_AFTER_LIVE_PUBLISH:-0}" \
+    TEST_SIGNAL_AFTER_RECORD_PUBLISH="${TEST_SIGNAL_AFTER_RECORD_PUBLISH:-0}" \
     TEST_FAIL_RECORD_PUBLISH="${TEST_FAIL_RECORD_PUBLISH:-0}" \
+    TEST_FAIL_JOURNAL_REMOVE="${TEST_FAIL_JOURNAL_REMOVE:-0}" \
+    TEST_FAIL_RECOVERY_PUBLISH="${TEST_FAIL_RECOVERY_PUBLISH:-0}" \
     INSTALL_DIR="${INSTALL_OVERRIDE:-$INSTALL_PATH}" STAGE_DIR="$STAGE_PATH" \
     REMOTE_BIN="$remote_bin" LOCK_FILE="$LOCK_PATH" FORCE="$force" \
     PATH="$TEST_PATH" "$REAL_BASH" "$REMOTE_INSTALL"
@@ -202,7 +225,8 @@ run_rollback() {
     INSTALL_DIR="$INSTALL_PATH" LOCK_FILE="$LOCK_PATH" FORCE="$force" \
     TEST_FLOCK_RC="${TEST_FLOCK_RC:-0}" \
     TEST_FAIL_RECORD_CONSUME="${TEST_FAIL_RECORD_CONSUME:-0}" \
-    TEST_SIGNAL_AFTER_RECORD_HIDE="${TEST_SIGNAL_AFTER_RECORD_HIDE:-0}" \
+    TEST_SIGNAL_AFTER_ROLLBACK_PUBLISH="${TEST_SIGNAL_AFTER_ROLLBACK_PUBLISH:-0}" \
+    TEST_FAIL_RECOVERY_PUBLISH="${TEST_FAIL_RECOVERY_PUBLISH:-0}" \
     PATH="$TEST_PATH" \
     "$REAL_BASH" "$REMOTE_ROLLBACK"
 }
@@ -246,7 +270,12 @@ no_install_temps "$INSTALL_PATH" "same-version deployment cleans temporary files
 echo "external predecessors are never advertised as rollback targets"
 new_case external-predecessor
 mkdir "$CASE_ROOT/external"
-make_analyzer "$CASE_ROOT/external/operator-analyzer" operator
+TEST_EXTERNAL_MARKER="$CASE_ROOT/external-was-executed"
+export TEST_EXTERNAL_MARKER
+# shellcheck disable=SC2016 # literal lines for the generated analyzer
+make_script "$CASE_ROOT/external/operator-analyzer" \
+    'if [[ ${1:-} == -version ]]; then : > "$TEST_EXTERNAL_MARKER"; printf "%s\n" operator; exit 0; fi' \
+    'exit 2'
 make_analyzer "$INSTALL_PATH/logwatch-analyzer-v0" v0
 ln -s "$CASE_ROOT/external/operator-analyzer" "$INSTALL_PATH/logwatch-analyzer"
 printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v0" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
@@ -258,6 +287,11 @@ fi
 same_file "rejected external predecessor stays live" "$INSTALL_PATH/logwatch-analyzer" \
     "$CASE_ROOT/external/operator-analyzer"
 contains "external predecessor is diagnosed" "$output" "rollback target is outside"
+if [[ ! -e $TEST_EXTERNAL_MARKER ]]; then
+    ok "rejected external predecessor is not executed"
+else
+    bad "rejected external predecessor is not executed"
+fi
 if output=$(run_install logwatch-analyzer-v2 1 2>&1); then
     ok "FORCE=1 deploys without recording the external target"
 else
@@ -272,6 +306,12 @@ else
     bad "forced external deployment preserves the valid rollback record" "$recorded"
 fi
 contains "external-target override is reported" "$output" "FORCE=1"
+if [[ ! -e $TEST_EXTERNAL_MARKER ]]; then
+    ok "forced external predecessor is not executed"
+else
+    bad "forced external predecessor is not executed"
+fi
+unset TEST_EXTERNAL_MARKER
 
 echo "failure before the symlink swap leaves the live artifact untouched"
 new_case pre-swap-failure
@@ -310,7 +350,25 @@ fi
 contains "publication failure is visible" "$output" "could not publish the candidate live symlink"
 no_install_temps "$INSTALL_PATH" "publication failure cleans temporary files"
 
-echo "an interrupt after publication preserves the live artifact"
+echo "runtime validation fails before the symlink swap"
+new_case runtime-preflight-failure
+seed_live v1
+make_analyzer "$STAGE_PATH/logwatch-analyzer" candidate 0 1
+if output=$(run_install logwatch-analyzer-v2 2>&1); then
+    bad "runtime validation failure aborts deployment"
+else
+    ok "runtime validation failure aborts deployment"
+fi
+same_file "runtime validation failure leaves v1 live" \
+    "$INSTALL_PATH/logwatch-analyzer" "$INSTALL_PATH/logwatch-analyzer-v1"
+contains "runtime validation failure is diagnosed" "$output" "failed runtime validation"
+if [[ ! -e $INSTALL_PATH/logwatch-analyzer-v2 ]]; then
+    ok "runtime validation failure publishes no artifact"
+else
+    bad "runtime validation failure publishes no artifact"
+fi
+
+echo "an interrupt after publication leaves a recoverable transaction"
 new_case publication-signal
 make_analyzer "$INSTALL_PATH/logwatch-analyzer-v0" v0
 seed_live v1
@@ -322,20 +380,18 @@ else
     ok "post-publication signal interrupts deployment"
 fi
 unset TEST_SIGNAL_AFTER_LIVE_PUBLISH
-live_target=$(readlink -f "$INSTALL_PATH/logwatch-analyzer")
-case "$live_target" in
-    "$INSTALL_PATH"/logwatch-analyzer-v1.redeploy-*)
-        ok "post-publication signal keeps the unique live artifact"
-        ;;
-    *)
-        bad "post-publication signal keeps the unique live artifact" "$live_target"
-        ;;
-esac
-if [[ -x $live_target ]]; then
-    ok "post-publication live artifact remains executable"
+if [[ -f $INSTALL_PATH/.logwatch-analyzer.deploy-transaction ]]; then
+    ok "post-publication signal leaves a durable transaction"
 else
-    bad "post-publication live artifact remains executable" "$live_target"
+    bad "post-publication signal leaves a durable transaction"
 fi
+if output=$(run_rollback 0 2>&1); then
+    ok "rollback command recovers the interrupted deployment"
+else
+    bad "rollback command recovers the interrupted deployment" "$output"
+fi
+same_file "post-publication signal restores v1" "$INSTALL_PATH/logwatch-analyzer" \
+    "$INSTALL_PATH/logwatch-analyzer-v1"
 recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
 if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v0" ]]; then
     ok "interrupted deployment preserves the prior rollback record"
@@ -343,6 +399,96 @@ else
     bad "interrupted deployment preserves the prior rollback record" "$recorded"
 fi
 no_install_temps "$INSTALL_PATH" "post-publication signal cleans temporary files"
+if [[ ! -e $INSTALL_PATH/.logwatch-analyzer.deploy-transaction ]]; then
+    ok "post-publication signal clears the recovered transaction"
+else
+    bad "post-publication signal clears the recovered transaction"
+fi
+
+echo "an interrupt after rollback-record publication restores older history"
+new_case record-publication-signal
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v0" v0
+seed_live v1
+printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v0" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+TEST_SIGNAL_AFTER_RECORD_PUBLISH=1
+if output=$(run_install logwatch-analyzer-v2 2>&1); then
+    bad "post-record-publication signal interrupts deployment"
+else
+    ok "post-record-publication signal interrupts deployment"
+fi
+unset TEST_SIGNAL_AFTER_RECORD_PUBLISH
+if [[ ! "$INSTALL_PATH/logwatch-analyzer" -ef "$INSTALL_PATH/logwatch-analyzer-v1" \
+    || ! -f $INSTALL_PATH/.logwatch-analyzer.prev-target \
+    || $(<"$INSTALL_PATH/.logwatch-analyzer.prev-target") != "$INSTALL_PATH/logwatch-analyzer-v0" ]]; then
+    if output=$(run_rollback 0 2>&1); then
+        ok "rollback command recovers the post-record-publication interrupt"
+    else
+        bad "rollback command recovers the post-record-publication interrupt" "$output"
+    fi
+else
+    ok "EXIT cleanup recovers the post-record-publication interrupt"
+fi
+same_file "record-publication signal restores v1" "$INSTALL_PATH/logwatch-analyzer" \
+    "$INSTALL_PATH/logwatch-analyzer-v1"
+recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
+if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v0" ]]; then
+    ok "record-publication signal restores the older rollback target"
+else
+    bad "record-publication signal restores the older rollback target" "$recorded"
+fi
+if [[ ! -e $INSTALL_PATH/.logwatch-analyzer.deploy-transaction ]]; then
+    ok "record-publication signal clears the recovered transaction"
+else
+    bad "record-publication signal clears the recovered transaction"
+fi
+no_install_temps "$INSTALL_PATH" "record-publication signal cleans temporary files"
+
+echo "failed recovery publication is never reported as success"
+new_case recovery-publish-failure
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v0" v0
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v1" v1
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v2" v2
+ln -s "$INSTALL_PATH/logwatch-analyzer-v2" "$INSTALL_PATH/logwatch-analyzer"
+printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v0" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+printf 'prev=%s\nnew=%s\n' "$INSTALL_PATH/logwatch-analyzer-v1" \
+    "$INSTALL_PATH/logwatch-analyzer-v2" > "$INSTALL_PATH/.logwatch-analyzer.deploy-transaction"
+TEST_FAIL_RECOVERY_PUBLISH=1
+if output=$(run_rollback 0 2>&1); then
+    bad "rollback recovery publish failure returns nonzero"
+else
+    ok "rollback recovery publish failure returns nonzero"
+fi
+same_file "failed rollback recovery leaves the candidate live" \
+    "$INSTALL_PATH/logwatch-analyzer" "$INSTALL_PATH/logwatch-analyzer-v2"
+if [[ -f $INSTALL_PATH/.logwatch-analyzer.deploy-transaction ]]; then
+    ok "failed rollback recovery retains its transaction"
+else
+    bad "failed rollback recovery retains its transaction"
+fi
+if [[ $output != *"recovered interrupted deployment"* ]]; then
+    ok "failed rollback recovery emits no success message"
+else
+    bad "failed rollback recovery emits no success message" "$output"
+fi
+if output=$(run_install logwatch-analyzer-v3 2>&1); then
+    bad "install recovery publish failure returns nonzero"
+else
+    ok "install recovery publish failure returns nonzero"
+fi
+same_file "failed install recovery leaves the candidate live" \
+    "$INSTALL_PATH/logwatch-analyzer" "$INSTALL_PATH/logwatch-analyzer-v2"
+if [[ -f $INSTALL_PATH/.logwatch-analyzer.deploy-transaction ]]; then
+    ok "failed install recovery retains its transaction"
+else
+    bad "failed install recovery retains its transaction"
+fi
+if [[ $output != *"reverted incomplete deployment"* ]]; then
+    ok "failed install recovery emits no success message"
+else
+    bad "failed install recovery emits no success message" "$output"
+fi
+unset TEST_FAIL_RECOVERY_PUBLISH
+no_install_temps "$INSTALL_PATH" "failed recovery cleans temporary links"
 
 echo "a directory cannot absorb the rollback record"
 new_case record-directory
@@ -354,7 +500,7 @@ else
     ok "record directory aborts deployment"
 fi
 same_file "record directory leaves v1 live" "$INSTALL_PATH/logwatch-analyzer" "$INSTALL_PATH/logwatch-analyzer-v1"
-contains "record directory is diagnosed" "$output" "rollback-record path is a directory"
+contains "record directory is diagnosed" "$output" "deployment state path must be a regular file"
 no_install_temps "$INSTALL_PATH" "record-directory failure creates no temporary files"
 
 echo "failed smoke test restores both live state and rollback history"
@@ -399,6 +545,47 @@ else
 fi
 contains "record failure reports its reason" "$output" "rollback record could not be published"
 
+echo "transaction cleanup failure restores the previous deployment"
+new_case journal-cleanup-failure
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v0" v0
+seed_live v1
+printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v0" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+TEST_FAIL_JOURNAL_REMOVE=1
+if output=$(run_install logwatch-analyzer-v2 2>&1); then
+    bad "journal cleanup failure aborts deployment"
+else
+    ok "journal cleanup failure aborts deployment"
+fi
+unset TEST_FAIL_JOURNAL_REMOVE
+same_file "journal cleanup failure restores v1" "$INSTALL_PATH/logwatch-analyzer" \
+    "$INSTALL_PATH/logwatch-analyzer-v1"
+recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
+if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v0" ]]; then
+    ok "journal cleanup failure restores the prior rollback record"
+else
+    bad "journal cleanup failure restores the prior rollback record" "$recorded"
+fi
+if [[ -f $INSTALL_PATH/.logwatch-analyzer.deploy-transaction ]]; then
+    ok "journal cleanup failure retains a recoverable transaction"
+else
+    bad "journal cleanup failure retains a recoverable transaction"
+fi
+contains "journal cleanup failure reports abort" "$output" \
+    "deployment transaction could not be finalized"
+if output=$(run_install logwatch-analyzer-v3 2>&1); then
+    ok "next deployment recovers the retained transaction"
+else
+    bad "next deployment recovers the retained transaction" "$output"
+fi
+same_file "recovered deployment publishes v3" "$INSTALL_PATH/logwatch-analyzer" \
+    "$INSTALL_PATH/logwatch-analyzer-v3"
+if [[ ! -e $INSTALL_PATH/.logwatch-analyzer.deploy-transaction ]]; then
+    ok "recovered deployment clears the transaction"
+else
+    bad "recovered deployment clears the transaction"
+fi
+no_install_temps "$INSTALL_PATH" "journal cleanup failure cleans temporary files"
+
 echo "emergency revert failures are explicit"
 new_case revert-failure
 seed_live v1
@@ -441,6 +628,70 @@ fi
 unset TEST_FLOCK_RC
 contains "forced lock override is reported" "$output" "FORCE=1"
 
+echo "deployment rejects writable ancestors above safe target directories"
+new_case writable-install-ancestor
+seed_live v1
+chmod 0777 "$CASE_ROOT"
+if output=$(run_install logwatch-analyzer-v2 2>&1); then
+    bad "install with writable target ancestor aborts"
+else
+    ok "install with writable target ancestor aborts"
+fi
+chmod 0700 "$CASE_ROOT"
+contains "writable install ancestor is diagnosed" "$output" "non-sticky writable ancestor"
+same_file "writable install ancestor leaves v1 live" \
+    "$INSTALL_PATH/logwatch-analyzer" "$INSTALL_PATH/logwatch-analyzer-v1"
+
+new_case writable-rollback-ancestor
+make_analyzer "$INSTALL_PATH/logwatch-analyzer-v1" v1
+seed_live v2
+printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v1" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
+chmod 0777 "$CASE_ROOT"
+if output=$(run_rollback 0 2>&1); then
+    bad "rollback with writable target ancestor aborts"
+else
+    ok "rollback with writable target ancestor aborts"
+fi
+chmod 0700 "$CASE_ROOT"
+contains "writable rollback ancestor is diagnosed" "$output" "non-sticky writable ancestor"
+same_file "writable rollback ancestor leaves v2 live" \
+    "$INSTALL_PATH/logwatch-analyzer" "$INSTALL_PATH/logwatch-analyzer-v2"
+
+if [[ $(uname -s) == Linux ]]; then
+    verify_stage=$(mktemp -d /tmp/logwatch-deploy.XXXXXXXXXX)
+    verify_parent="$TEST_ROOT/writable-verify-parent"
+    verify_install="$verify_parent/install"
+    mkdir -p "$verify_install"
+    make_analyzer "$verify_stage/logwatch-analyzer" candidate
+    chmod 0777 "$verify_parent"
+    if output=$(BIN_SHA=$(printf '0%.0s' {1..64}) STAGE_DIR="$verify_stage" \
+        INSTALL_DIR="$verify_install" "$REAL_BASH" "$REMOTE_VERIFY" 2>&1); then
+        bad "verification with writable install ancestor aborts"
+    else
+        ok "verification with writable install ancestor aborts"
+    fi
+    contains "writable verification ancestor is diagnosed" "$output" "non-sticky writable ancestor"
+    rm -rf -- "$verify_stage"
+else
+    ok "remote verification ancestor regression is exercised in Linux CI"
+fi
+
+new_case lock-symlink
+seed_live v1
+printf '%s\n' sentinel > "$CASE_ROOT/lock-target"
+ln -s "$CASE_ROOT/lock-target" "$LOCK_PATH"
+if output=$(run_install logwatch-analyzer-v2 2>&1); then
+    bad "symlink lock aborts deployment"
+else
+    ok "symlink lock aborts deployment"
+fi
+contains "symlink lock is diagnosed" "$output" "lock file must not be a symlink"
+if [[ $(<"$CASE_ROOT/lock-target") == sentinel ]]; then
+    ok "symlink lock target is untouched"
+else
+    bad "symlink lock target is untouched"
+fi
+
 echo "a dangling live symlink is a recoverable state"
 new_case dangling
 make_analyzer "$INSTALL_PATH/logwatch-analyzer-v0"
@@ -451,7 +702,7 @@ if output=$(run_install logwatch-analyzer-v2 2>&1); then
 else
     ok "dangling predecessor requires an explicit override"
 fi
-contains "dangling predecessor is diagnosed accurately" "$output" "rollback target does not run"
+contains "dangling predecessor is diagnosed accurately" "$output" "not a managed analyzer artifact"
 if output=$(run_install logwatch-analyzer-v2 1 2>&1); then
     ok "FORCE=1 can repair a dangling live symlink"
 else
@@ -492,27 +743,37 @@ else
     bad "rollback consumes its record"
 fi
 
-echo "rollback interruption restores the hidden record"
+echo "rollback interruption retains a retryable record"
 new_case rollback-record-signal
 make_analyzer "$INSTALL_PATH/logwatch-analyzer-v1" v1
 seed_live v2
 printf '%s\n' "$INSTALL_PATH/logwatch-analyzer-v1" > "$INSTALL_PATH/.logwatch-analyzer.prev-target"
-TEST_SIGNAL_AFTER_RECORD_HIDE=1
+TEST_SIGNAL_AFTER_ROLLBACK_PUBLISH=1
 if output=$(run_rollback 0 2>&1); then
-    bad "record-hide signal interrupts rollback"
+    bad "post-publication signal interrupts rollback"
 else
-    ok "record-hide signal interrupts rollback"
+    ok "post-publication signal interrupts rollback"
 fi
-unset TEST_SIGNAL_AFTER_RECORD_HIDE
-same_file "record-hide signal leaves v2 live" "$INSTALL_PATH/logwatch-analyzer" \
-    "$INSTALL_PATH/logwatch-analyzer-v2"
+unset TEST_SIGNAL_AFTER_ROLLBACK_PUBLISH
+same_file "post-publication signal leaves v1 live" "$INSTALL_PATH/logwatch-analyzer" \
+    "$INSTALL_PATH/logwatch-analyzer-v1"
 recorded=$(<"$INSTALL_PATH/.logwatch-analyzer.prev-target")
 if [[ $recorded == "$INSTALL_PATH/logwatch-analyzer-v1" ]]; then
-    ok "record-hide signal restores the rollback record"
+    ok "post-publication signal retains the rollback record"
 else
-    bad "record-hide signal restores the rollback record" "$recorded"
+    bad "post-publication signal retains the rollback record" "$recorded"
 fi
-no_rollback_temps "$INSTALL_PATH" "record-hide signal cleans rollback temporaries"
+if output=$(run_rollback 0 2>&1); then
+    ok "interrupted rollback can be retried safely"
+else
+    bad "interrupted rollback can be retried safely" "$output"
+fi
+if [[ ! -e $INSTALL_PATH/.logwatch-analyzer.prev-target ]]; then
+    ok "retry consumes the retained rollback record"
+else
+    bad "retry consumes the retained rollback record"
+fi
+no_rollback_temps "$INSTALL_PATH" "post-publication signal cleans rollback temporaries"
 
 echo "failed rollback smoke restores the original live target"
 new_case rollback-smoke-failure

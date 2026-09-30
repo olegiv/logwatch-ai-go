@@ -4,6 +4,7 @@
 package ocms
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -34,5 +35,29 @@ func TestPreprocessor_Basic(t *testing.T) {
 	}
 	if processed == "" {
 		t.Fatal("Process() should not return empty content")
+	}
+}
+
+func TestPreprocessorPreservesDistinctSecurityOrigins(t *testing.T) {
+	t.Parallel()
+
+	p := NewPreprocessor(1000)
+	var content strings.Builder
+	content.WriteString("################### Authentication Failures ###################\n")
+	for i := 1; i <= 12; i++ {
+		fmt.Fprintf(&content, "Unauthorized login failed from 203.0.113.%d for account %d\n", i, i)
+	}
+
+	processed, err := p.ProcessWithBudget(content.String(), 100)
+	if err != nil {
+		t.Fatalf("ProcessWithBudget() error = %v", err)
+	}
+	for _, origin := range []string{"203.0.113.1", "203.0.113.2"} {
+		if !strings.Contains(processed, origin) {
+			t.Fatalf("OCMS preprocessing merged distinct security origin %s: %q", origin, processed)
+		}
+	}
+	if strings.Contains(processed, "occurred 12 times") {
+		t.Fatalf("OCMS preprocessing collapsed distinct attacker evidence: %q", processed)
 	}
 }

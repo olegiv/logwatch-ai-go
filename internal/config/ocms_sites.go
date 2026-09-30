@@ -6,7 +6,6 @@ package config
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -54,8 +53,9 @@ type OCMSLogPath struct {
 
 // OCMSSiteConfig represents logwatch-ai settings for a single OCMS site.
 type OCMSSiteConfig struct {
-	Name    string `json:"name"`
-	LogKind string `json:"log_kind"`
+	Name        string   `json:"name"`
+	LegacyNames []string `json:"legacy_names"`
+	LogKind     string   `json:"log_kind"`
 }
 
 // OCMSSitesConfig represents the logwatch-ai OCMS multi-site JSON file.
@@ -110,7 +110,16 @@ func (c *OCMSSitesConfig) Validate() error {
 		return fmt.Errorf("default_log_kind: %w", err)
 	}
 
-	for siteID, site := range c.Sites {
+	displayNames := make(map[string]string, len(c.Sites))
+	for _, siteID := range c.ListSites() {
+		site := c.Sites[siteID]
+		effectiveName := site.Name
+		if effectiveName == "" {
+			effectiveName = siteID
+		}
+		if err := registerSiteIdentityNames(displayNames, siteID, effectiveName, site.LegacyNames); err != nil {
+			return err
+		}
 		if _, err := NormalizeOCMSLogKind(site.LogKind); err != nil {
 			return fmt.Errorf("site '%s': log_kind: %w", siteID, err)
 		}
@@ -167,9 +176,7 @@ func LoadOCMSSitesConfig(configPath string) (*OCMSSitesConfig, string, error) {
 	}
 
 	var config OCMSSitesConfig
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
+	if err := decodeStrictJSON(data, &config); err != nil {
 		return nil, "", fmt.Errorf("failed to parse %s: %w", foundPath, err)
 	}
 

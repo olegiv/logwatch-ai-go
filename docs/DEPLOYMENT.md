@@ -25,7 +25,7 @@ Choose the appropriate LLM provider for your deployment:
 
 ### Anthropic Claude (Recommended for Production)
 - Best analysis quality
-- Prompt caching reduces costs (~$0.47/month)
+- Model-aware token accounting records the cost of every cloud analysis
 - Requires `ANTHROPIC_API_KEY`
 
 ### Ollama (Recommended for Air-Gapped/Privacy)
@@ -57,8 +57,10 @@ existing one, use the section below instead — `install.sh` is a bootstrapper,
 not an upgrader.
 
 1. Build optimized static Linux AMD64 binary: `make build-linux-amd64`
-2. Transfer binary to target system
-3. Run installation script: `sudo ./scripts/install.sh`
+2. Transfer the checkout and `bin/logwatch-analyzer-linux-amd64` to the target
+3. From the checkout root, run `sudo ./scripts/install.sh`. The bootstrapper
+   detects the cross-built filename; use `BINARY_PATH=/absolute/path` to select
+   a different artifact explicitly.
 4. Configure `.env` with environment-specific credentials
 5. Test manual run: `/opt/logwatch-ai/logwatch-analyzer`
 6. Verify Telegram notifications received
@@ -70,6 +72,33 @@ not an upgrader.
 `deploy/` upgrades **the binary**. Everything else on the host — helper
 scripts, `run-cron.sh`, `.env`, the site configs, the database and the
 crontab — belongs to the operator; copy those with `scp` when they change.
+The bootstrap installer creates `data/` and its database as private paths for
+the account running it (`0700` directory, `0600` database). At runtime the
+analyzer validates those ownership and mode requirements and refuses unsafe
+existing paths; it never takes ownership of or tightens permissions on an
+operator-created directory or file.
+
+Installations created by the pre-hardening bootstrapper used mode `0750` for
+`data/` and may have a `0640` database. Correct that legacy state once before
+the first hardened binary-only upgrade (with the cron job stopped):
+
+```bash
+sudo chown root:root /opt/logwatch-ai/data
+sudo chmod 0700 /opt/logwatch-ai/data
+if [ -e /opt/logwatch-ai/data/summaries.db ]; then
+  sudo chown root:root /opt/logwatch-ai/data/summaries.db
+  sudo chmod 0600 /opt/logwatch-ai/data/summaries.db
+fi
+```
+
+Both `make deploy-stage` and the locked install run the candidate's
+`-check-runtime` preflight from `INSTALL_DIR`. Unsafe legacy ownership or modes
+therefore fail with remediation before the live symlink is changed.
+
+The preflight and the cron job both take `LOG_DIR` from `.env`. An older
+`.env` without it keeps `analyzer.log` in `INSTALL_DIR/logs`, and that is the
+directory the preflight checks. To move the log, add
+`LOG_DIR=/var/log/logwatch-ai` to `.env`.
 
 Set the target once in `deploy/deploy.env` (copy `deploy.env.example`), then:
 
@@ -92,7 +121,8 @@ it there** (which catches a CPU-instruction mismatch while `/opt` is
 untouched). It then requires the cron runner's own `flock`, installs the
 binary under a versioned name, and re-points the `logwatch-analyzer` symlink
 with an atomic rename. The rollback record is not published until the new
-binary passes `-version`; any later metadata failure restores the previous
+binary passes `-version`; runtime configuration and database-path validation
+also run before the swap. Any later metadata failure restores the previous
 binary and preserves the earlier rollback record.
 
 Flags and overrides:
@@ -123,10 +153,9 @@ deploy, checks it actually runs first, and then consumes the record — so a
 second rollback refuses rather than silently doing nothing. Nothing is
 deleted; the binary rolled away from keeps its versioned name.
 
-**Do not use `scripts/install.sh` to upgrade.** It looks for the host-arch
-binary name (so it cannot place a cross-built Linux binary), overwrites
-repository-managed files under `scripts/`, and finishes with a recursive
-`chown` across `.env` and `data/summaries.db`.
+**Do not use `scripts/install.sh` to upgrade.** It is intentionally a
+bootstrapper and refreshes repository-managed scripts and templates. Use the
+transactional binary-only deployment workflow above for upgrades.
 
 **Not covered, deliberately.** No database snapshot is taken — a binary swap
 does not touch the database, and the machinery to locate and safely copy a
@@ -245,7 +274,8 @@ Create `/opt/logwatch-ai/ocms-sites.json` from
   "default_log_kind": "main",
   "sites": {
     "example_com": {
-      "name": "Example Site"
+      "name": "Example Site",
+      "legacy_names": ["Previous Example Name"]
     },
     "app_example_com": {
       "name": "Example App",
@@ -269,6 +299,7 @@ Create `/opt/logwatch-ai/ocms-sites.json` from
 | `default_log_kind` | No | Default log kind for sites without `sites.<id>.log_kind`. Allowed: `main`, `error`, `all`. Defaults to `main`. |
 | `sites` | Yes | Map keyed by OCMS site ID. IDs must exist in `/etc/ocms/sites.conf`. |
 | `sites.<id>.name` | No | Human-readable site name for reports. |
+| `sites.<id>.legacy_names` | No | Previous display names used to attach v2 database history after a rename; values must be unique across all current and legacy site names. |
 | `sites.<id>.log_kind` | No | Per-site log kind override. Allowed: `main`, `error`, `all`. |
 
 Log-kind precedence:
@@ -374,6 +405,7 @@ For local LLM inference on production servers:
    LLM_PROVIDER=ollama
    OLLAMA_BASE_URL=http://localhost:11434
    OLLAMA_MODEL=llama3.3:latest
+   OLLAMA_CONTEXT_TOKENS=32768
    ```
 
 **Hardware Requirements:**

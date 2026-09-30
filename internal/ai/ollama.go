@@ -14,10 +14,11 @@ import (
 
 // OllamaClient wraps the Ollama REST API
 type OllamaClient struct {
-	baseURL    string
-	model      string
-	maxTokens  int
-	httpClient *http.Client
+	baseURL       string
+	model         string
+	maxTokens     int
+	contextTokens int
+	httpClient    *http.Client
 }
 
 // OllamaConfig holds Ollama-specific configuration
@@ -26,11 +27,13 @@ type OllamaConfig struct {
 	Model          string // e.g., "llama3.3:latest"
 	TimeoutSeconds int    // Request timeout
 	MaxTokens      int    // Max tokens in response
+	ContextTokens  int    // Context window configured in Ollama
 }
 
 // ollamaOptions contains model parameters
 type ollamaOptions struct {
 	NumPredict  int     `json:"num_predict,omitempty"` // Max tokens to generate
+	NumCtx      int     `json:"num_ctx,omitempty"`     // Context window to allocate
 	Temperature float64 `json:"temperature,omitempty"`
 	TopP        float64 `json:"top_p,omitempty"`
 	TopK        int     `json:"top_k,omitempty"`
@@ -57,6 +60,7 @@ type ollamaChatResponse struct {
 	CreatedAt          time.Time     `json:"created_at"`
 	Message            ollamaMessage `json:"message"`
 	Done               bool          `json:"done"`
+	DoneReason         string        `json:"done_reason,omitempty"`
 	TotalDuration      int64         `json:"total_duration,omitempty"`
 	LoadDuration       int64         `json:"load_duration,omitempty"`
 	PromptEvalCount    int           `json:"prompt_eval_count,omitempty"`
@@ -85,11 +89,18 @@ func NewOllamaClient(cfg OllamaConfig) (*OllamaClient, error) {
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 8000
 	}
+	if cfg.ContextTokens <= 0 {
+		cfg.ContextTokens = 32768
+	}
+	if cfg.ContextTokens <= cfg.MaxTokens {
+		return nil, fmt.Errorf("ollama context tokens must exceed max output tokens")
+	}
 
 	return &OllamaClient{
-		baseURL:   cfg.BaseURL,
-		model:     cfg.Model,
-		maxTokens: cfg.MaxTokens,
+		baseURL:       cfg.BaseURL,
+		model:         cfg.Model,
+		maxTokens:     cfg.MaxTokens,
+		contextTokens: cfg.ContextTokens,
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second,
 		},
@@ -101,7 +112,7 @@ func (c *OllamaClient) Analyze(ctx context.Context, systemPrompt, userPrompt str
 	startTime := time.Now()
 
 	// Create request with retry logic
-	response, err := retryWithBackoff(defaultMaxRetries, func() (*ollamaChatResponse, error) {
+	response, err := retryWithBackoff(ctx, defaultMaxRetries, func() (*ollamaChatResponse, error) {
 		return c.callAPI(ctx, systemPrompt, userPrompt)
 	})
 	if err != nil {
@@ -112,6 +123,9 @@ func (c *OllamaClient) Analyze(ctx context.Context, systemPrompt, userPrompt str
 	responseText := response.Message.Content
 	if responseText == "" {
 		return nil, nil, fmt.Errorf("empty response from Ollama")
+	}
+	if response.DoneReason == "length" {
+		return nil, nil, fmt.Errorf("ollama response was truncated at the configured token limit")
 	}
 
 	// Parse analysis
@@ -137,6 +151,7 @@ func (c *OllamaClient) callAPI(ctx context.Context, systemPrompt, userPrompt str
 		Stream: false,
 		Options: ollamaOptions{
 			NumPredict:  c.maxTokens,
+			NumCtx:      c.contextTokens,
 			Temperature: 0.1, // Low temperature for consistent, factual output
 			TopP:        0.9,
 		},
@@ -183,7 +198,7 @@ func (c *OllamaClient) GetModelInfo() map[string]any {
 		"provider":      "Ollama",
 		"max_tokens":    c.maxTokens,
 		"base_url":      c.baseURL,
-		"context_limit": 128000, // Varies by model, using common default
+		"context_limit": c.contextTokens,
 	}
 }
 
@@ -231,10 +246,13 @@ func (c *OllamaClient) CheckConnection(ctx context.Context) error {
 	}
 
 	// Check if the configured model is available
+	wantedModel := c.model
+	if !strings.Contains(wantedModel, ":") {
+		wantedModel += ":latest"
+	}
 	modelFound := false
 	for _, m := range tagsResp.Models {
-		// Match model name (e.g., "llama3.3:latest" matches "llama3.3")
-		if m.Name == c.model || strings.HasPrefix(m.Name, strings.Split(c.model, ":")[0]) {
+		if m.Name == wantedModel {
 			modelFound = true
 			break
 		}

@@ -47,7 +47,9 @@ func NewClient(apiKey, model, proxyURL string, timeoutSeconds, maxTokens int) (*
 	if proxyURL != "" {
 		proxyURLParsed, err := url.Parse(proxyURL)
 		if err != nil {
-			return nil, fmt.Errorf("invalid proxy URL: %w", err)
+			// net/url parse errors include the original URL, including userinfo.
+			// Do not wrap them because authenticated proxy passwords are allowed.
+			return nil, fmt.Errorf("invalid proxy URL")
 		}
 
 		// Validate proxy URL scheme for security
@@ -101,7 +103,7 @@ func (c *Client) Analyze(ctx context.Context, systemPrompt, userPrompt string) (
 	startTime := time.Now()
 
 	// Create request with retry logic
-	response, err := retryWithBackoff(defaultMaxRetries, func() (anthropic.MessagesResponse, error) {
+	response, err := retryWithBackoff(ctx, defaultMaxRetries, func() (anthropic.MessagesResponse, error) {
 		return c.callAPI(ctx, systemPrompt, userPrompt)
 	})
 	if err != nil {
@@ -111,6 +113,9 @@ func (c *Client) Analyze(ctx context.Context, systemPrompt, userPrompt string) (
 	// Extract response content
 	if len(response.Content) == 0 {
 		return nil, nil, fmt.Errorf("empty response from Claude")
+	}
+	if response.StopReason == anthropic.MessagesStopReasonMaxTokens {
+		return nil, nil, fmt.Errorf("claude response was truncated at the configured token limit")
 	}
 
 	var responseText strings.Builder
@@ -153,7 +158,7 @@ func (c *Client) CountPromptTokens(ctx context.Context, systemPrompt, userPrompt
 	}
 
 	request := c.buildMessagesRequest(systemPrompt, userPrompt)
-	response, err := retryWithBackoff(defaultMaxRetries, func() (anthropic.CountTokensResponse, error) {
+	response, err := retryWithBackoff(ctx, defaultMaxRetries, func() (anthropic.CountTokensResponse, error) {
 		resp, retryErr := c.countingClient.CountTokens(ctx, request)
 		if retryErr != nil {
 			return resp, internalerrors.Wrapf(retryErr, "API call failed")

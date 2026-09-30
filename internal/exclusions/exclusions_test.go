@@ -499,6 +499,41 @@ func TestLoad_MalformedJSON(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsUnknownFieldsAndTrailingValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "misspelled scope",
+			content: `{"version":"1.2","logwach":["ignored typo"]}`,
+			want:    `unknown field "logwach"`,
+		},
+		{
+			name:    "trailing JSON value",
+			content: `{"version":"1.2"} {"version":"1.2"}`,
+			want:    "multiple JSON values",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "exclusions.json")
+			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			_, _, err := Load(path)
+			if err == nil {
+				t.Fatal("Load() expected parse error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoad_ValidationFails(t *testing.T) {
 	tests := []struct {
 		name string

@@ -139,6 +139,7 @@ CREATE TABLE summaries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
     log_source_type TEXT NOT NULL DEFAULT 'logwatch',
+    site_id TEXT NOT NULL DEFAULT '',     -- Stable multi-site identifier
     site_name TEXT NOT NULL DEFAULT '',
     system_status TEXT NOT NULL,  -- Good/Warning/Critical/Bad
     summary TEXT NOT NULL,
@@ -152,7 +153,7 @@ CREATE TABLE summaries (
 );
 ```
 
-Auto-migrates from v1 to v2. Cleanup: 90 days retention.
+Auto-migrates from v1/v2 to v3. Cleanup: 90 days retention.
 
 ## Error Handling
 

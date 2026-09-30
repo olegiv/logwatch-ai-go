@@ -14,6 +14,17 @@ import (
 
 const maxAPIResponseBodyBytes = 10 * 1024 * 1024 // 10 MiB
 
+// HTTPStatusError preserves the response status so retry policy can
+// distinguish transient server failures from permanent client errors.
+type HTTPStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPStatusError) Error() string {
+	return fmt.Sprintf("API returned status %d: %s", e.StatusCode, e.Body)
+}
+
 // doJSONPost performs a JSON POST request and unmarshals the response.
 // This is a shared helper for HTTP-based LLM clients (Ollama, LM Studio).
 func doJSONPost[T any](ctx context.Context, client *http.Client, url string, request any) (*T, error) {
@@ -44,7 +55,7 @@ func doJSONPost[T any](ctx context.Context, client *http.Client, url string, req
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, &HTTPStatusError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var response T

@@ -5,7 +5,10 @@
 package notification
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -24,8 +27,32 @@ const (
 	// maxRetries is the maximum number of retry attempts for sending messages
 	maxRetries = 3
 	// baseRetryDelay is the initial delay between retries (doubles each attempt)
-	baseRetryDelay = 2 * time.Second
+	baseRetryDelay  = 2 * time.Second
+	requestTimeout  = 30 * time.Second
+	maxRetryAfter   = 30 * time.Second
+	telegramAPIHost = "api.telegram.org"
 )
+
+type contextHTTPClient struct {
+	ctx    context.Context
+	client *http.Client
+}
+
+func (c *contextHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	if err := validateTelegramRequest(req); err != nil {
+		return nil, err
+	}
+	// #nosec G704 -- the request and redirects are restricted to Telegram's
+	// fixed HTTPS API host immediately above and in CheckRedirect.
+	return c.client.Do(req.WithContext(c.ctx))
+}
+
+func validateTelegramRequest(req *http.Request) error {
+	if req.URL.Scheme != "https" || req.URL.Hostname() != telegramAPIHost {
+		return fmt.Errorf("refusing non-Telegram API request")
+	}
+	return nil
+}
 
 // TelegramClient handles Telegram notifications
 type TelegramClient struct {
@@ -34,11 +61,67 @@ type TelegramClient struct {
 	alertsChannel   int64
 	hostname        string
 	lastMessageTime time.Time // tracks last message for rate limiting (L-01 fix)
+	ctx             context.Context
+}
+
+// PartialDeliveryError reports that at least one durable Telegram side effect
+// occurred before delivery failed. Callers must not rerun the full analysis,
+// because doing so would duplicate messages, storage, and LLM cost.
+type PartialDeliveryError struct {
+	Destination    string
+	DeliveredParts int
+	TotalParts     int
+	Err            error
+}
+
+func (e *PartialDeliveryError) Error() string {
+	return fmt.Sprintf(
+		"partial Telegram delivery to %s (%d/%d parts): %v",
+		e.Destination,
+		e.DeliveredParts,
+		e.TotalParts,
+		e.Err,
+	)
+}
+
+func (e *PartialDeliveryError) Unwrap() error {
+	return e.Err
+}
+
+// IsPartialDelivery reports whether err represents a non-retry-safe partial
+// success rather than a total notification failure.
+func IsPartialDelivery(err error) bool {
+	var partial *PartialDeliveryError
+	return errors.As(err, &partial)
 }
 
 // NewTelegramClient creates a new Telegram client
-func NewTelegramClient(botToken string, archiveChannel, alertsChannel int64) (*TelegramClient, error) {
-	bot, err := tgbotapi.NewBotAPI(botToken)
+func NewTelegramClient(ctx context.Context, botToken string, archiveChannel, alertsChannel int64) (*TelegramClient, error) {
+	return newTelegramClient(ctx, botToken, archiveChannel, alertsChannel, nil)
+}
+
+func newTelegramClient(
+	ctx context.Context,
+	botToken string,
+	archiveChannel, alertsChannel int64,
+	baseClient *http.Client,
+) (*TelegramClient, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if baseClient == nil {
+		baseClient = &http.Client{}
+	}
+	configuredClient := *baseClient
+	configuredClient.Timeout = requestTimeout
+	configuredClient.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+		return validateTelegramRequest(req)
+	}
+	httpClient := &contextHTTPClient{
+		ctx:    ctx,
+		client: &configuredClient,
+	}
+	bot, err := tgbotapi.NewBotAPIWithClient(botToken, tgbotapi.APIEndpoint, httpClient)
 	if err != nil {
 		// Sanitize error to prevent bot token from appearing in error messages (M-01 fix)
 		return nil, internalerrors.Wrapf(err, "failed to create Telegram bot")
@@ -55,6 +138,7 @@ func NewTelegramClient(botToken string, archiveChannel, alertsChannel int64) (*T
 		archiveChannel: archiveChannel,
 		alertsChannel:  alertsChannel,
 		hostname:       hostname,
+		ctx:            ctx,
 	}, nil
 }
 
@@ -63,21 +147,58 @@ func NewTelegramClient(botToken string, archiveChannel, alertsChannel int64) (*T
 func (t *TelegramClient) SendAnalysisReport(analysis *ai.Analysis, stats *ai.Stats, logSourceType, siteName string) error {
 	// Format message
 	message := t.formatMessage(analysis, stats, logSourceType, siteName)
+	parts := len(t.splitMessage(message))
 
-	// Send to archive channel (always)
-	if err := t.sendToChannel(t.archiveChannel, message); err != nil {
-		return fmt.Errorf("failed to send to archive channel: %w", err)
+	// Send to archive channel (always). Only a failure before any part was
+	// delivered is fatal; a partial archive must not suppress the alert.
+	archiveErr := t.sendToChannel(t.archiveChannel, message)
+	if archiveErr != nil && !IsPartialDelivery(archiveErr) {
+		return fmt.Errorf("failed to send to archive channel: %w", archiveErr)
 	}
 
 	// Send to alerts channel if configured and status warrants it
-	if t.alertsChannel != 0 && ai.ShouldTriggerAlert(analysis.SystemStatus) {
-		if err := t.sendToChannel(t.alertsChannel, message); err != nil {
-			// Don't fail the whole operation if alerts channel fails
-			return fmt.Errorf("failed to send to alerts channel: %w", err)
-		}
+	sendAlerts := t.alertsChannel != 0 && ai.ShouldTriggerAlert(analysis.SystemStatus)
+	var alertsErr error
+	if sendAlerts {
+		alertsErr = t.sendToChannel(t.alertsChannel, message)
+	}
+	if archiveErr == nil && alertsErr == nil {
+		return nil
 	}
 
-	return nil
+	delivered, outcome := channelOutcome("archive", archiveErr, parts)
+	total := parts
+	var errs []error
+	if archiveErr != nil {
+		errs = append(errs, fmt.Errorf("failed to send to archive channel: %w", archiveErr))
+	}
+	if sendAlerts {
+		alertsDelivered, alertsOutcome := channelOutcome("alerts", alertsErr, parts)
+		delivered += alertsDelivered
+		total += parts
+		outcome += "; " + alertsOutcome
+		if alertsErr != nil {
+			errs = append(errs, fmt.Errorf("failed to send to alerts channel: %w", alertsErr))
+		}
+	}
+	return &PartialDeliveryError{
+		Destination:    "Telegram channels (" + outcome + ")",
+		DeliveredParts: delivered,
+		TotalParts:     total,
+		Err:            errors.Join(errs...),
+	}
+}
+
+// channelOutcome reports how many of a channel's message parts were delivered
+// and describes the result for a PartialDeliveryError.
+func channelOutcome(channel string, err error, parts int) (int, string) {
+	if err == nil {
+		return parts, channel + " delivered"
+	}
+	if partial, ok := errors.AsType[*PartialDeliveryError](err); ok {
+		return partial.DeliveredParts, channel + " partially delivered"
+	}
+	return 0, channel + " failed"
 }
 
 // writeSection writes a section with a header and numbered items to the message builder.
@@ -155,16 +276,18 @@ func (t *TelegramClient) sendToChannel(channelID int64, message string) error {
 	// Split message if it exceeds Telegram's limit
 	messages := t.splitMessage(message)
 
-	for _, msg := range messages {
+	for i, msg := range messages {
 		// Apply rate limiting before sending (L-01 fix)
-		t.waitForRateLimit()
+		if err := t.waitForRateLimit(); err != nil {
+			return channelDeliveryError(channelID, i, len(messages), err)
+		}
 
 		msgConfig := tgbotapi.NewMessage(channelID, msg)
 		msgConfig.ParseMode = "MarkdownV2"
 
 		// Send with exponential backoff retry
 		if err := t.sendWithRetry(msgConfig); err != nil {
-			return err
+			return channelDeliveryError(channelID, i, len(messages), err)
 		}
 
 		// Update last message time for rate limiting
@@ -174,16 +297,29 @@ func (t *TelegramClient) sendToChannel(channelID int64, message string) error {
 	return nil
 }
 
+func channelDeliveryError(channelID int64, deliveredParts, totalParts int, err error) error {
+	if deliveredParts == 0 {
+		return err
+	}
+	return &PartialDeliveryError{
+		Destination:    fmt.Sprintf("channel %d", channelID),
+		DeliveredParts: deliveredParts,
+		TotalParts:     totalParts,
+		Err:            err,
+	}
+}
+
 // waitForRateLimit ensures minimum interval between messages (L-01 fix)
-func (t *TelegramClient) waitForRateLimit() {
+func (t *TelegramClient) waitForRateLimit() error {
 	if t.lastMessageTime.IsZero() {
-		return
+		return nil
 	}
 
 	elapsed := time.Since(t.lastMessageTime)
 	if elapsed < minMessageInterval {
-		time.Sleep(minMessageInterval - elapsed)
+		return waitForContext(t.requestContext(), minMessageInterval-elapsed)
 	}
+	return nil
 }
 
 // sendWithRetry sends a message with exponential backoff retry (L-01 fix)
@@ -191,6 +327,9 @@ func (t *TelegramClient) sendWithRetry(msgConfig tgbotapi.MessageConfig) error {
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if err := t.requestContext().Err(); err != nil {
+			return err
+		}
 		_, err := t.bot.Send(msgConfig)
 		if err == nil {
 			return nil
@@ -199,11 +338,13 @@ func (t *TelegramClient) sendWithRetry(msgConfig tgbotapi.MessageConfig) error {
 		lastErr = err
 
 		// Check if this is a rate limit error (429)
-		if isRateLimitError(err) {
+		if isRateLimitError(err) && attempt < maxRetries {
 			// Wait longer for rate limit errors
 			retryAfter := extractRetryAfter(err)
 			if retryAfter > 0 {
-				time.Sleep(time.Duration(retryAfter) * time.Second)
+				if err := waitForContext(t.requestContext(), time.Duration(retryAfter)*time.Second); err != nil {
+					return err
+				}
 				continue
 			}
 		}
@@ -211,7 +352,9 @@ func (t *TelegramClient) sendWithRetry(msgConfig tgbotapi.MessageConfig) error {
 		// Exponential backoff for other errors
 		if attempt < maxRetries {
 			delay := baseRetryDelay * time.Duration(1<<(attempt-1)) // 2s, 4s, 8s...
-			time.Sleep(delay)
+			if err := waitForContext(t.requestContext(), delay); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -219,10 +362,31 @@ func (t *TelegramClient) sendWithRetry(msgConfig tgbotapi.MessageConfig) error {
 	return internalerrors.Wrapf(lastErr, "failed to send message after %d retries", maxRetries)
 }
 
+func (t *TelegramClient) requestContext() context.Context {
+	if t.ctx == nil {
+		return context.Background()
+	}
+	return t.ctx
+}
+
+func waitForContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 // isRateLimitError checks if the error is a Telegram rate limit error (429)
 func isRateLimitError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if telegramErr, ok := errors.AsType[*tgbotapi.Error](err); ok {
+		return telegramErr.Code == http.StatusTooManyRequests
 	}
 	errStr := strings.ToLower(err.Error())
 	return strings.Contains(errStr, "429") || strings.Contains(errStr, "too many requests")
@@ -232,6 +396,9 @@ func isRateLimitError(err error) bool {
 func extractRetryAfter(err error) int {
 	if err == nil {
 		return 0
+	}
+	if telegramErr, ok := errors.AsType[*tgbotapi.Error](err); ok && telegramErr.RetryAfter > 0 {
+		return capRetryAfter(telegramErr.RetryAfter)
 	}
 
 	// Telegram API errors typically include retry_after in the message
@@ -243,12 +410,20 @@ func extractRetryAfter(err error) int {
 		remaining := errStr[idx+len("retry after "):]
 		var seconds int
 		if _, err := fmt.Sscanf(remaining, "%d", &seconds); err == nil {
-			return seconds
+			return capRetryAfter(seconds)
 		}
 	}
 
 	// Default to a conservative wait time if we can't extract the value
 	return 30
+}
+
+func capRetryAfter(seconds int) int {
+	maxSeconds := int(maxRetryAfter / time.Second)
+	if seconds > maxSeconds {
+		return maxSeconds
+	}
+	return seconds
 }
 
 // splitMessage splits a long message into multiple messages
@@ -273,7 +448,7 @@ func (t *TelegramClient) splitMessage(message string) []string {
 			// If a single line is too long, split it on rune boundaries
 			// so we never emit a message that ends mid-UTF-8-sequence
 			// (invalid UTF-8 breaks Telegram MarkdownV2 parsing).
-			if len(line) > maxMessageLength {
+			if len(line) >= maxMessageLength {
 				var chunk strings.Builder
 				chunk.Grow(maxMessageLength)
 				for _, r := range line {

@@ -540,7 +540,7 @@ Add new configuration options:
 LOG_SOURCE_TYPE=logwatch
 
 # Logwatch Configuration (used when LOG_SOURCE_TYPE=logwatch)
-LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt
+LOGWATCH_OUTPUT_PATH=/var/log/logwatch-ai/logwatch-output.txt
 
 # Drupal Watchdog Configuration (used when LOG_SOURCE_TYPE=drupal_watchdog)
 DRUPAL_WATCHDOG_PATH=/var/log/drupal-watchdog.json

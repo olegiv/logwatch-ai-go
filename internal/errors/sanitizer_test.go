@@ -17,6 +17,11 @@ func TestSanitizeString(t *testing.T) {
 			expected: "simple error message",
 		},
 		{
+			name:     "authenticated proxy URL",
+			input:    `proxy error for "http://operator:proxy-password-sentinel@proxy.example.com:8080"`,
+			expected: `proxy error for "[REDACTED]proxy.example.com:8080"`,
+		},
+		{
 			name:     "anthropic API key",
 			input:    "failed to call API with key sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890",
 			expected: "failed to call API with key [REDACTED]",
@@ -30,6 +35,41 @@ func TestSanitizeString(t *testing.T) {
 			name:     "telegram bot token",
 			input:    "bot token 1234567890:ABCdefGHI_jklMNOpqrSTUvwxYZ-12345678",
 			expected: "bot token [REDACTED]",
+		},
+		{
+			name:     "short Telegram bot identifier",
+			input:    "bot token 123456:ABCdefGHI_jklMNOpqrSTUvwxYZ-12345678",
+			expected: "bot token [REDACTED]",
+		},
+		{
+			name:     "short accepted Telegram token suffix",
+			input:    "bot token 123456:ABC-def_GHI",
+			expected: "bot token [REDACTED]",
+		},
+		{
+			name:     "Telegram SDK transport URL",
+			input:    `Post "https://api.telegram.org/bot123456:ABC-def_GHI/getMe": dial tcp: no such host`,
+			expected: `Post "https://api.telegram.org/[REDACTED]/getMe": dial tcp: no such host`,
+		},
+		{
+			name:     "clock time is not a token",
+			input:    "cron finished at 12:30:45",
+			expected: "cron finished at 12:30:45",
+		},
+		{
+			name:     "local LLM endpoint is not a token",
+			input:    "dial tcp 127.0.0.1:11434: connect: connection refused",
+			expected: "dial tcp 127.0.0.1:11434: connect: connection refused",
+		},
+		{
+			name:     "UTC timestamp is not a token",
+			input:    "last summary at 2026-09-30T12:30:45Z",
+			expected: "last summary at 2026-09-30T12:30:45Z",
+		},
+		{
+			name:     "model tag is not a token",
+			input:    "model llama3.3:latest",
+			expected: "model llama3.3:latest",
 		},
 		{
 			name:     "bearer token",

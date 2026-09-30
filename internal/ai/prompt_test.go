@@ -529,6 +529,19 @@ func TestParseAnalysis_SizeLimit(t *testing.T) {
 	}
 }
 
+func TestParseAnalysisSkipsUnrelatedBraceObject(t *testing.T) {
+	response := `metadata: {"request_id":"abc"}
+analysis: {"systemStatus":"Good","summary":"valid analysis","criticalIssues":[],"warnings":[],"recommendations":[],"metrics":{}}`
+
+	analysis, err := ParseAnalysis(response)
+	if err != nil {
+		t.Fatalf("ParseAnalysis() error = %v", err)
+	}
+	if analysis.Summary != "valid analysis" {
+		t.Fatalf("ParseAnalysis() summary = %q", analysis.Summary)
+	}
+}
+
 func TestSanitizeLogContent(t *testing.T) {
 	tests := []struct {
 		name     string

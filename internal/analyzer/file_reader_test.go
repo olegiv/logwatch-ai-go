@@ -89,3 +89,37 @@ func TestReadSourceFileWithGuards_NilValidator(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestReadSourceFileWithGuards_RejectsNonRegularFile(t *testing.T) {
+	t.Parallel()
+
+	_, err := ReadSourceFileWithGuards(t.TempDir(), FileReadOptions{
+		SourceLabel: "sample",
+		MaxSizeMB:   1,
+	}, func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadSourceFileWithGuards_RejectsSymlink(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "secret.log")
+	link := filepath.Join(tmpDir, "source.log")
+	if err := os.WriteFile(target, []byte(strings.Repeat("secret\n", 20)), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	_, err := ReadSourceFileWithGuards(link, FileReadOptions{
+		SourceLabel: "sample",
+		MaxSizeMB:   1,
+	}, func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "failed to open sample file") {
+		t.Fatalf("expected symlink rejection, got: %v", err)
+	}
+}

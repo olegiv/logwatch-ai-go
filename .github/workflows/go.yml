@@ -29,9 +29,10 @@ jobs:
         echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
     # Use the same fail-closed gate that deploy.sh runs. This includes Go
-    # formatting, vet, pinned linting, Go tests, shellcheck and both deployment
-    # test suites. On Linux the state-machine tests exercise real GNU mv -T,
-    # readlink -f and the production shell semantics.
+    # formatting, vet, pinned linting, normal and race-enabled Go tests,
+    # shellcheck for deploy/ and scripts/, deployment state-machine tests, and
+    # a reachable-code vulnerability scan. On Linux the state-machine tests
+    # exercise real GNU mv -T, readlink -f and production shell semantics.
     - name: Quality gate
       run: make check
 

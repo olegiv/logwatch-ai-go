@@ -11,11 +11,11 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
+	"github.com/olegiv/logwatch-ai-go/internal/securefile"
 )
 
 // NoEntriesContent is returned when the watchdog file contains no log entries.
@@ -26,10 +26,16 @@ const NoEntriesContent = "=== NO WATCHDOG ENTRIES ===\n\nNo Drupal watchdog entr
 // timeFormatDateTime is the standard date-time format for watchdog entries.
 const timeFormatDateTime = "2006-01-02 15:04:05"
 
+var ipv4AddressPattern = regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}\b`)
+
 // maxNDJSONLineBytes is the maximum allowed size for a single NDJSON line.
 // It is set to 10MB to support very large watchdog messages while preventing
 // unbounded memory usage during parsing.
 const maxNDJSONLineBytes = 10 * 1024 * 1024
+
+// maxWatchdogFileAge catches stale exports when the producer was not run.
+// The 26-hour window allows daily schedules to cross daylight-saving changes.
+const maxWatchdogFileAge = 26 * time.Hour
 
 // IsNoEntriesContent checks if the content indicates no watchdog entries were found.
 func IsNoEntriesContent(content string) bool {
@@ -45,9 +51,6 @@ type InputFormat string
 const (
 	// FormatJSON is for JSON-exported watchdog entries (recommended)
 	FormatJSON InputFormat = "json"
-
-	// FormatDrush is for drush watchdog-show output
-	FormatDrush InputFormat = "drush"
 )
 
 // Reader handles reading and validating Drupal watchdog log files.
@@ -77,7 +80,7 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 	// Open once and run all checks against the handle so the metadata that
 	// is validated always describes the same inode that is read (no
 	// stat-then-read TOCTOU window).
-	file, err := os.Open(sourcePath) // #nosec G304 -- operator-configured watchdog export path; no untrusted input channel exists
+	file, err := securefile.OpenNoFollow(sourcePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("watchdog file not found: %s", sourcePath)
@@ -93,6 +96,12 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to stat watchdog file: %w", err)
 	}
+	if !fileInfo.Mode().IsRegular() {
+		return "", fmt.Errorf("watchdog path is not a regular file: %s", sourcePath)
+	}
+	if age := time.Since(fileInfo.ModTime()); age > maxWatchdogFileAge {
+		return "", fmt.Errorf("watchdog file is too old (%.1f hours), refusing stale export", age.Hours())
+	}
 
 	// Check file permissions
 	if fileInfo.Mode().Perm()&0o400 == 0 {
@@ -107,24 +116,20 @@ func (r *Reader) Read(sourcePath string) (string, error) {
 	}
 
 	// Read file content
-	content, err := io.ReadAll(file)
+	content, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("failed to read watchdog file: %w", err)
+	}
+	if int64(len(content)) > maxBytes {
+		return "", fmt.Errorf("watchdog file exceeded maximum size of %dMB while being read", r.maxSizeMB)
 	}
 
 	contentStr := string(content)
 
-	// Parse entries based on format
-	var entries []WatchdogEntry
-	switch r.format {
-	case FormatJSON:
-		entries, err = r.parseJSON(contentStr)
-	case FormatDrush:
-		entries, err = r.parseDrush(contentStr)
-	default:
+	if r.format != FormatJSON {
 		return "", fmt.Errorf("unsupported watchdog format: %s", r.format)
 	}
-
+	entries, err := r.parseJSON(contentStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse watchdog content: %w", err)
 	}
@@ -188,25 +193,75 @@ func (r *Reader) GetSourceInfo(sourcePath string) (map[string]any, error) {
 	return info, nil
 }
 
-// parseJSON parses JSON-formatted watchdog entries.
-// Supports both array of entries and single entry.
+// parseJSON parses arrays, single entries, Drush's wid-keyed object map, and
+// newline-delimited entries. Structurally valid but entry-less objects are
+// rejected so an unexpected Drush response cannot be reported as a clean day.
 func (r *Reader) parseJSON(content string) ([]WatchdogEntry, error) {
 	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, fmt.Errorf("failed to parse JSON: content is empty")
+	}
 
-	// Try parsing as array first
 	var entries []WatchdogEntry
-	if err := json.Unmarshal([]byte(content), &entries); err == nil {
+	if strings.HasPrefix(content, "[") {
+		if err := json.Unmarshal([]byte(content), &entries); err != nil {
+			return nil, fmt.Errorf("failed to parse JSON array: %w", err)
+		}
+		if err := validateWatchdogEntries(entries); err != nil {
+			return nil, err
+		}
 		return entries, nil
 	}
 
-	// Try parsing as single entry
-	var entry WatchdogEntry
-	if err := json.Unmarshal([]byte(content), &entry); err == nil {
-		return []WatchdogEntry{entry}, nil
+	if strings.HasPrefix(content, "{") {
+		if objectEntries, ok, err := parseWatchdogJSONObject(content); ok {
+			return objectEntries, err
+		}
 	}
 
-	// Try parsing as newline-delimited JSON (NDJSON)
-	entries = nil
+	return parseWatchdogNDJSON(content)
+}
+
+func parseWatchdogJSONObject(content string) ([]WatchdogEntry, bool, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &object); err != nil {
+		return nil, false, nil
+	}
+	if len(object) == 0 {
+		return nil, true, fmt.Errorf("failed to parse JSON: object contains no watchdog entries")
+	}
+	if _, isEntry := object["wid"]; isEntry {
+		var entry WatchdogEntry
+		if err := json.Unmarshal([]byte(content), &entry); err != nil {
+			return nil, true, fmt.Errorf("failed to parse watchdog entry: %w", err)
+		}
+		if err := validateWatchdogEntry(entry); err != nil {
+			return nil, true, err
+		}
+		return []WatchdogEntry{entry}, true, nil
+	}
+
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	entries := make([]WatchdogEntry, 0, len(keys))
+	for _, key := range keys {
+		var entry WatchdogEntry
+		if err := json.Unmarshal(object[key], &entry); err != nil {
+			return nil, true, fmt.Errorf("invalid Drush watchdog entry %q: %w", key, err)
+		}
+		if err := validateWatchdogEntry(entry); err != nil {
+			return nil, true, fmt.Errorf("invalid Drush watchdog entry %q: %w", key, err)
+		}
+		entries = append(entries, entry)
+	}
+	return entries, true, nil
+}
+
+func parseWatchdogNDJSON(content string) ([]WatchdogEntry, error) {
+	var entries []WatchdogEntry
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	scanner.Buffer(make([]byte, 1024), maxNDJSONLineBytes)
 	for scanner.Scan() {
@@ -219,7 +274,10 @@ func (r *Reader) parseJSON(content string) ([]WatchdogEntry, error) {
 
 		var entry WatchdogEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			continue // Skip invalid lines
+			return nil, fmt.Errorf("failed to parse NDJSON entry: %w", err)
+		}
+		if err := validateWatchdogEntry(entry); err != nil {
+			return nil, fmt.Errorf("invalid NDJSON entry: %w", err)
 		}
 		entries = append(entries, entry)
 	}
@@ -234,73 +292,32 @@ func (r *Reader) parseJSON(content string) ([]WatchdogEntry, error) {
 	return nil, fmt.Errorf("failed to parse JSON: no valid entries found")
 }
 
-// parseDrush parses drush watchdog-show output format.
-// Expected format:
-//
-//	ID      Date                 Type     Severity  Message
-//	------- -------------------- -------- --------- ----------------------------------------
-//	12345   2024-11-13 10:00:00  php      error     PDOException: SQLSTATE[HY000]...
-func (r *Reader) parseDrush(content string) ([]WatchdogEntry, error) {
-	var entries []WatchdogEntry
-
-	lines := strings.Split(content, "\n")
-	headerPassed := false
-
-	// Regex to parse drush output lines
-	// Matches: ID, Date, Type, Severity, Message
-	lineRegex := regexp.MustCompile(`^\s*(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(\S+)\s+(.*)$`)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+func validateWatchdogEntries(entries []WatchdogEntry) error {
+	for i, entry := range entries {
+		if err := validateWatchdogEntry(entry); err != nil {
+			return fmt.Errorf("invalid watchdog entry %d: %w", i, err)
 		}
-
-		// Skip header lines
-		if strings.HasPrefix(line, "ID") || strings.HasPrefix(line, "---") {
-			headerPassed = true
-			continue
-		}
-
-		if !headerPassed {
-			continue
-		}
-
-		matches := lineRegex.FindStringSubmatch(line)
-		if matches == nil {
-			continue
-		}
-
-		wid, err := strconv.ParseInt(matches[1], 10, 64)
-		if err != nil {
-			continue // Skip entries with invalid WID
-		}
-
-		timestamp, err := time.Parse(timeFormatDateTime, matches[2])
-		if err != nil {
-			continue // Skip entries with invalid timestamp
-		}
-
-		severity := SeverityFromName(strings.ToLower(matches[4]))
-		if severity == -1 {
-			severity = SeverityNotice // Default
-		}
-
-		entry := WatchdogEntry{
-			WID:       wid,
-			Timestamp: timestamp.Unix(),
-			Type:      matches[3],
-			Severity:  severity,
-			Message:   matches[5],
-		}
-		entries = append(entries, entry)
 	}
+	return nil
+}
 
-	if len(entries) == 0 {
-		return nil, fmt.Errorf("no valid entries found in drush output")
+func validateWatchdogEntry(entry WatchdogEntry) error {
+	if entry.WID <= 0 {
+		return fmt.Errorf("wid must be positive")
 	}
-
-	return entries, nil
+	if entry.Timestamp <= 0 {
+		return fmt.Errorf("timestamp must be positive")
+	}
+	if strings.TrimSpace(entry.Type) == "" {
+		return fmt.Errorf("type is required")
+	}
+	if strings.TrimSpace(entry.Message) == "" {
+		return fmt.Errorf("message is required")
+	}
+	if entry.Severity < SeverityEmergency || entry.Severity > SeverityDebug {
+		return fmt.Errorf("severity must be between %d and %d", SeverityEmergency, SeverityDebug)
+	}
+	return nil
 }
 
 // formatEntriesForAnalysis formats watchdog entries into a readable format for Claude.
@@ -359,12 +376,17 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 	// Critical and error entries (full detail)
 	criticalEntries := r.filterBySeverity(entries, SeverityEmergency, SeverityError)
 	if len(criticalEntries) > 0 {
-		sb.WriteString("## Critical/Error Entries (Full Detail)\n")
-		for i, entry := range criticalEntries {
-			if i >= 50 { // Limit to 50 critical entries
-				fmt.Fprintf(&sb, "\n... and %d more critical/error entries\n", len(criticalEntries)-50)
-				break
+		// Severity outranks recency inside the critical section. Without this,
+		// a large burst of newer errors can consume the prompt budget before an
+		// older emergency or alert is ever exposed to the model.
+		sort.SliceStable(criticalEntries, func(i, j int) bool {
+			if criticalEntries[i].Severity != criticalEntries[j].Severity {
+				return criticalEntries[i].Severity < criticalEntries[j].Severity
 			}
+			return criticalEntries[i].Timestamp > criticalEntries[j].Timestamp
+		})
+		sb.WriteString("## Critical/Error Entries (Full Detail)\n")
+		for _, entry := range criticalEntries {
 			sb.WriteString(r.formatEntry(entry))
 			sb.WriteString("\n")
 		}
@@ -377,8 +399,10 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 		sb.WriteString("## Warning Entries\n")
 		// Group by type and message pattern
 		warningGroups := r.groupByPattern(warningEntries)
-		for pattern, group := range warningGroups {
-			fmt.Fprintf(&sb, "- [%dx] %s: %s\n", len(group), group[0].Type, pattern)
+		for _, pattern := range sortedGroupPatterns(warningGroups) {
+			group := warningGroups[pattern]
+			fmt.Fprintf(&sb, "- [%dx] %s: %s (sources: %s)\n",
+				len(group), group[0].Type, pattern, strings.Join(groupOrigins(group), ", "))
 		}
 		sb.WriteString("\n")
 	}
@@ -388,8 +412,10 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 	if len(accessDenied) > 0 {
 		sb.WriteString("## Access/Permission Events\n")
 		accessGroups := r.groupByPattern(accessDenied)
-		for pattern, group := range accessGroups {
-			fmt.Fprintf(&sb, "- [%dx] %s\n", len(group), pattern)
+		for _, pattern := range sortedGroupPatterns(accessGroups) {
+			group := accessGroups[pattern]
+			fmt.Fprintf(&sb, "- [%dx] %s (sources: %s)\n",
+				len(group), pattern, strings.Join(groupOrigins(group), ", "))
 		}
 		sb.WriteString("\n")
 	}
@@ -401,7 +427,8 @@ func (r *Reader) formatEntriesForAnalysis(entries []WatchdogEntry) string {
 		fmt.Fprintf(&sb, "Total 404 errors: %d\n", len(notFound))
 		notFoundGroups := r.groupByPattern(notFound)
 		count := 0
-		for pattern, group := range notFoundGroups {
+		for _, pattern := range sortedGroupPatterns(notFoundGroups) {
+			group := notFoundGroups[pattern]
 			if count >= 10 {
 				fmt.Fprintf(&sb, "... and %d more unique 404 patterns\n", len(notFoundGroups)-10)
 				break
@@ -515,6 +542,36 @@ func (r *Reader) groupByPattern(entries []WatchdogEntry) map[string][]WatchdogEn
 		groups[pattern] = append(groups[pattern], e)
 	}
 	return groups
+}
+
+func sortedGroupPatterns(groups map[string][]WatchdogEntry) []string {
+	patterns := make([]string, 0, len(groups))
+	for pattern := range groups {
+		patterns = append(patterns, pattern)
+	}
+	sort.Strings(patterns)
+	return patterns
+}
+
+func groupOrigins(entries []WatchdogEntry) []string {
+	origins := make(map[string]struct{})
+	for _, entry := range entries {
+		if host := strings.TrimSpace(entry.Hostname); host != "" {
+			origins[host] = struct{}{}
+		}
+		for _, address := range ipv4AddressPattern.FindAllString(entry.Message, -1) {
+			origins[address] = struct{}{}
+		}
+	}
+	if len(origins) == 0 {
+		return []string{"unknown"}
+	}
+	result := make([]string, 0, len(origins))
+	for origin := range origins {
+		result = append(result, origin)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // normalizeMessage normalizes a message for pattern grouping.

@@ -1,13 +1,234 @@
 package notification
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type telegramHTTPClientFunc func(*http.Request) (*http.Response, error)
+
+func (f telegramHTTPClientFunc) Do(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func telegramJSONResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func telegramRateLimitError(retryAfter int) error {
+	err := &tgbotapi.Error{Code: 429}
+	err.RetryAfter = retryAfter
+
+	return err
+}
+
+func TestNewTelegramClientSanitizesTransportURL(t *testing.T) {
+	t.Parallel()
+
+	const token = "123456:ABC-def_GHI"
+	baseClient := &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("network unavailable")
+		}),
+	}
+	client, err := newTelegramClient(context.Background(), token, -1001, 0, baseClient)
+	if client != nil {
+		_ = client.Close()
+		t.Fatal("newTelegramClient() returned a client after transport failure")
+	}
+	if err == nil {
+		t.Fatal("newTelegramClient() error = nil")
+	}
+	if strings.Contains(err.Error(), token) || strings.Contains(err.Error(), "ABC-def_GHI") {
+		t.Fatalf("newTelegramClient() leaked token in error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Fatalf("newTelegramClient() error was not visibly redacted: %v", err)
+	}
+}
+
+func TestSendAnalysisReportRecordsArchiveSideEffectWhenAlertsFail(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	archiveRequests := 0
+	alertRequests := 0
+	httpClient := telegramHTTPClientFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/getMe") {
+			return telegramJSONResponse(`{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"test","username":"test_bot"}}`), nil
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		switch values.Get("chat_id") {
+		case "-1001":
+			archiveRequests++
+			return telegramJSONResponse(`{"ok":true,"result":{"message_id":1}}`), nil
+		case "-1002":
+			alertRequests++
+			cancel()
+			return nil, errors.New("alerts unavailable")
+		default:
+			return nil, fmt.Errorf("unexpected chat_id %q", values.Get("chat_id"))
+		}
+	})
+	bot, err := tgbotapi.NewBotAPIWithClient("123456:ABC-def_GHI", tgbotapi.APIEndpoint, httpClient)
+	if err != nil {
+		t.Fatalf("NewBotAPIWithClient() error = %v", err)
+	}
+	client := &TelegramClient{
+		bot:            bot,
+		archiveChannel: -1001,
+		alertsChannel:  -1002,
+		hostname:       "test-host",
+		ctx:            ctx,
+	}
+	analysis := &ai.Analysis{SystemStatus: "Bad", Summary: "incident"}
+	stats := &ai.Stats{Provider: "test", Model: "test"}
+
+	err = client.SendAnalysisReport(analysis, stats, "logwatch", "")
+	if err == nil {
+		t.Fatal("SendAnalysisReport() error = nil, want failed alert delivery")
+	}
+	if !IsPartialDelivery(err) {
+		t.Fatalf("SendAnalysisReport() error = %v, want durable archive side effect", err)
+	}
+	var partial *PartialDeliveryError
+	if !errors.As(err, &partial) || partial.DeliveredParts < 1 || partial.DeliveredParts >= partial.TotalParts {
+		t.Fatalf("partial delivery metadata = %+v, want archive delivered and alerts missing", partial)
+	}
+	if !strings.Contains(err.Error(), "alerts channel") {
+		t.Fatalf("SendAnalysisReport() error = %v, want alerts-channel context", err)
+	}
+	if archiveRequests != 1 || alertRequests != 1 {
+		t.Fatalf("delivery requests archive=%d alerts=%d, want 1 each", archiveRequests, alertRequests)
+	}
+}
+
+func TestSendAnalysisReportAlertsAfterPartialArchiveDelivery(t *testing.T) {
+	t.Parallel()
+
+	archiveDelivered := false
+	alertRequests := 0
+	httpClient := telegramHTTPClientFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/getMe") {
+			return telegramJSONResponse(`{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"test","username":"test_bot"}}`), nil
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		switch values.Get("chat_id") {
+		case "-1001":
+			if !archiveDelivered {
+				archiveDelivered = true
+				return telegramJSONResponse(`{"ok":true,"result":{"message_id":1}}`), nil
+			}
+			// A one-second retry_after keeps the exhausted retry loop short.
+			return telegramJSONResponse(`{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}`), nil
+		case "-1002":
+			alertRequests++
+			return telegramJSONResponse(`{"ok":true,"result":{"message_id":2}}`), nil
+		default:
+			return nil, fmt.Errorf("unexpected chat_id %q", values.Get("chat_id"))
+		}
+	})
+	bot, err := tgbotapi.NewBotAPIWithClient("123456:ABC-def_GHI", tgbotapi.APIEndpoint, httpClient)
+	if err != nil {
+		t.Fatalf("NewBotAPIWithClient() error = %v", err)
+	}
+	client := &TelegramClient{
+		bot:            bot,
+		archiveChannel: -1001,
+		alertsChannel:  -1002,
+		hostname:       "test-host",
+		ctx:            context.Background(),
+	}
+	analysis := &ai.Analysis{SystemStatus: "Bad", Summary: strings.Repeat("incident evidence line\n", 220)}
+	stats := &ai.Stats{Provider: "test", Model: "test"}
+	parts := len(client.splitMessage(client.formatMessage(analysis, stats, "logwatch", "")))
+	if parts < 2 {
+		t.Fatalf("report splits into %d parts, want at least 2", parts)
+	}
+
+	err = client.SendAnalysisReport(analysis, stats, "logwatch", "")
+	var partial *PartialDeliveryError
+	if !errors.As(err, &partial) {
+		t.Fatalf("SendAnalysisReport() error = %v, want partial delivery", err)
+	}
+	if partial.DeliveredParts != 1+parts || partial.TotalParts != 2*parts {
+		t.Fatalf("partial delivery metadata = %+v, want %d/%d parts", partial, 1+parts, 2*parts)
+	}
+	if alertRequests != parts {
+		t.Fatalf("alert requests = %d, want all %d parts sent after the partial archive", alertRequests, parts)
+	}
+	if !strings.Contains(err.Error(), "archive partially delivered") || !strings.Contains(err.Error(), "alerts delivered") {
+		t.Fatalf("SendAnalysisReport() error = %v, want archive and alerts outcomes", err)
+	}
+}
+
+func TestSendToChannelRecordsPartsDeliveredBeforeRateLimitCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	requests := 0
+	httpClient := telegramHTTPClientFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(req.URL.Path, "/getMe") {
+			return telegramJSONResponse(`{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"test","username":"test_bot"}}`), nil
+		}
+		requests++
+		cancel()
+		return telegramJSONResponse(`{"ok":true,"result":{"message_id":1}}`), nil
+	})
+	bot, err := tgbotapi.NewBotAPIWithClient("123456:ABC-def_GHI", tgbotapi.APIEndpoint, httpClient)
+	if err != nil {
+		t.Fatalf("NewBotAPIWithClient() error = %v", err)
+	}
+	client := &TelegramClient{bot: bot, ctx: ctx}
+	message := strings.Repeat("security evidence line\n", 500)
+
+	err = client.sendToChannel(-1001, message)
+	var partial *PartialDeliveryError
+	if !errors.As(err, &partial) {
+		t.Fatalf("sendToChannel() error = %v, want partial delivery", err)
+	}
+	if partial.DeliveredParts != 1 || partial.TotalParts < 2 {
+		t.Fatalf("partial delivery metadata = %+v, want first part recorded", partial)
+	}
+	if requests != 1 {
+		t.Fatalf("send requests = %d, want one delivered part before cancellation", requests)
+	}
+}
 
 func TestFormatMessage(t *testing.T) {
 	// Create a mock telegram client
@@ -431,6 +652,11 @@ func TestIsRateLimitError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "structured Telegram rate limit",
+			err:  telegramRateLimitError(17),
+			want: true,
+		},
+		{
 			name: "other error",
 			err:  fmt.Errorf("connection timeout"),
 			want: false,
@@ -614,12 +840,27 @@ func TestExtractRetryAfter(t *testing.T) {
 		{
 			name: "retry after 60",
 			err:  fmt.Errorf("telegram: 429 Too Many Requests: retry after 60 seconds"),
-			want: 60,
+			want: int(maxRetryAfter / time.Second),
 		},
 		{
 			name: "retry after 5",
 			err:  fmt.Errorf("error: retry after 5"),
 			want: 5,
+		},
+		{
+			name: "structured retry after",
+			err:  telegramRateLimitError(17),
+			want: 17,
+		},
+		{
+			name: "structured retry after is capped",
+			err:  telegramRateLimitError(86400),
+			want: int(maxRetryAfter / time.Second),
+		},
+		{
+			name: "text retry after is capped",
+			err:  fmt.Errorf("too many requests: retry after 86400"),
+			want: int(maxRetryAfter / time.Second),
 		},
 		{
 			name: "no retry after value - defaults to 30",
@@ -737,8 +978,11 @@ func TestWaitForRateLimit(t *testing.T) {
 			}
 
 			start := time.Now()
-			client.waitForRateLimit()
+			err := client.waitForRateLimit()
 			elapsed := time.Since(start)
+			if err != nil {
+				t.Fatalf("waitForRateLimit() error = %v", err)
+			}
 
 			if tt.expectWait {
 				// Should have waited some time (at least a few hundred ms)
@@ -755,6 +999,23 @@ func TestWaitForRateLimit(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWaitForRateLimitHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	client := &TelegramClient{
+		ctx:             ctx,
+		lastMessageTime: time.Now(),
+	}
+	start := time.Now()
+	err := client.waitForRateLimit()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForRateLimit() error = %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("cancelled wait took %v", elapsed)
 	}
 }
 
@@ -940,6 +1201,22 @@ func TestSplitMessage_EscapePairBoundary(t *testing.T) {
 				t.Error("joined chunks do not round-trip to the escaped input")
 			}
 		})
+	}
+}
+
+func TestSplitMessage_ExactLimitLineInsideLongMessage(t *testing.T) {
+	t.Parallel()
+
+	client := &TelegramClient{}
+	message := strings.Repeat("x", maxMessageLength) + "\ntail"
+	parts := client.splitMessage(message)
+	if len(parts) < 2 {
+		t.Fatalf("splitMessage() returned %d part(s), want at least 2", len(parts))
+	}
+	for i, part := range parts {
+		if len(part) > maxMessageLength {
+			t.Fatalf("part %d has %d bytes, exceeds %d", i, len(part), maxMessageLength)
+		}
 	}
 }
 

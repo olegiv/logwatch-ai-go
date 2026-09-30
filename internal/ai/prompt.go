@@ -39,8 +39,7 @@ a plain JSON string. Never an object, number, or null.
 
 // GlobalExclusionsBlock renders operator-defined global exclusion patterns
 // as a system-prompt section. Returns an empty string when the list is
-// empty so the no-exclusions case produces byte-identical prompt output
-// (important for Anthropic prompt cache hit rate).
+// empty so the no-exclusions case produces byte-identical prompt output.
 //
 // The block instructs the LLM not only to omit matching findings but also
 // to avoid letting them influence systemStatus, summary, and metrics —
@@ -194,26 +193,30 @@ func sanitizeJSONEscapes(s string) string {
 // coerceStringArray so object-valued items (e.g. {"description": "..."}) that
 // the LLM occasionally emits despite prompt instructions do not fail the run.
 func ParseAnalysis(response string) (*Analysis, error) {
-	// Extract JSON from response using balanced brace matching
-	jsonMatch := extractJSON(response)
-
-	if jsonMatch == "" {
+	candidates := extractJSONCandidates(response)
+	if len(candidates) == 0 {
 		return nil, fmt.Errorf("no JSON object found in response")
 	}
 
-	// Check JSON size limit to prevent memory exhaustion (M-05)
-	if len(jsonMatch) > maxJSONResponseSize {
-		return nil, fmt.Errorf("JSON response too large: %d bytes (max: %d)", len(jsonMatch), maxJSONResponseSize)
+	var lastErr error
+	for _, candidate := range candidates {
+		analysis, err := parseAnalysisCandidate(candidate)
+		if err == nil {
+			return analysis, nil
+		}
+		lastErr = err
 	}
+	return nil, lastErr
+}
 
-	// Sanitize invalid JSON escape sequences that LLMs sometimes produce
-	sanitizedJSON := sanitizeJSONEscapes(jsonMatch)
-
+func parseAnalysisCandidate(candidate string) (*Analysis, error) {
+	if len(candidate) > maxJSONResponseSize {
+		return nil, fmt.Errorf("JSON response too large: %d bytes (max: %d)", len(candidate), maxJSONResponseSize)
+	}
 	var raw rawAnalysis
-	if err := json.Unmarshal([]byte(sanitizedJSON), &raw); err != nil {
+	if err := json.Unmarshal([]byte(sanitizeJSONEscapes(candidate)), &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
 	}
-
 	analysis := &Analysis{
 		SystemStatus:    raw.SystemStatus,
 		Summary:         raw.Summary,
@@ -222,12 +225,9 @@ func ParseAnalysis(response string) (*Analysis, error) {
 		Recommendations: coerceStringArray(raw.Recommendations),
 		Metrics:         raw.Metrics,
 	}
-
-	// Validate required fields
 	if err := validateAnalysis(analysis); err != nil {
 		return nil, fmt.Errorf("analysis validation failed: %w", err)
 	}
-
 	return analysis, nil
 }
 
@@ -299,19 +299,32 @@ func ShouldTriggerAlert(status string) bool {
 // extractJSON extracts the first balanced JSON object from a response string.
 // This is more reliable than greedy regex matching (M-06 fix).
 func extractJSON(response string) string {
-	// Find the first opening brace
-	startIdx := strings.Index(response, "{")
-	if startIdx == -1 {
+	candidates := extractJSONCandidates(response)
+	if len(candidates) == 0 {
 		return ""
 	}
+	return candidates[0]
+}
 
-	// Track brace depth to find matching closing brace
+func extractJSONCandidates(response string) []string {
+	var candidates []string
+	startIdx := -1
+
 	depth := 0
 	inString := false
 	escaped := false
 
-	for i := startIdx; i < len(response); i++ {
+	for i := 0; i < len(response); i++ {
 		char := response[i]
+		if depth == 0 {
+			if char == '{' {
+				startIdx = i
+				depth = 1
+				inString = false
+				escaped = false
+			}
+			continue
+		}
 
 		if escaped {
 			escaped = false
@@ -338,10 +351,11 @@ func extractJSON(response string) string {
 		case '}':
 			depth--
 			if depth == 0 {
-				return response[startIdx : i+1]
+				candidates = append(candidates, response[startIdx:i+1])
+				startIdx = -1
 			}
 		}
 	}
 
-	return ""
+	return candidates
 }

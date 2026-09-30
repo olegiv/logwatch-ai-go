@@ -5,10 +5,16 @@ package ai
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/liushuangls/go-anthropic/v2"
+)
+
+var (
+	http429Pattern = regexp.MustCompile(`(^|[^0-9])429([^0-9]|$)`)
+	http503Pattern = regexp.MustCompile(`(^|[^0-9])503([^0-9]|$)`)
 )
 
 const (
@@ -31,12 +37,15 @@ func isRateLimitError(err error) bool {
 	if apiErr, ok := errors.AsType[*anthropic.APIError](err); ok {
 		return apiErr.IsRateLimitErr()
 	}
+	if requestErr, ok := errors.AsType[*anthropic.RequestError](err); ok {
+		return requestErr.StatusCode == 429
+	}
 
 	// Fallback: check error message for rate limit indicators
 	errStr := strings.ToLower(err.Error())
 	return strings.Contains(errStr, "rate_limit_error") ||
 		strings.Contains(errStr, "rate limit") ||
-		strings.Contains(errStr, "429") ||
+		http429Pattern.MatchString(errStr) ||
 		strings.Contains(errStr, "too many requests")
 }
 
@@ -51,11 +60,14 @@ func isOverloadedError(err error) bool {
 	if apiErr, ok := errors.AsType[*anthropic.APIError](err); ok {
 		return apiErr.IsOverloadedErr()
 	}
+	if requestErr, ok := errors.AsType[*anthropic.RequestError](err); ok {
+		return requestErr.StatusCode >= 500
+	}
 
 	// Fallback: check error message
 	errStr := strings.ToLower(err.Error())
 	return strings.Contains(errStr, "overloaded") ||
-		strings.Contains(errStr, "503")
+		http503Pattern.MatchString(errStr)
 }
 
 // getBackoffDuration returns the appropriate backoff duration based on error type.

@@ -9,12 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	internalerrors "github.com/olegiv/logwatch-ai-go/internal/errors"
+	"github.com/olegiv/logwatch-ai-go/internal/securefile"
 	_ "modernc.org/sqlite"
 )
 
@@ -28,7 +29,8 @@ type Summary struct {
 	ID              int64
 	Timestamp       time.Time
 	LogSourceType   string // "logwatch", "drupal_watchdog", or "ocms"
-	SiteName        string // Site identifier (empty for logwatch, site ID for Drupal/OCMS multi-site)
+	SiteID          string // Stable site identifier (empty for logwatch/single-site sources)
+	SiteName        string // Human-readable display name
 	SystemStatus    string
 	Summary         string
 	CriticalIssues  []string
@@ -43,7 +45,8 @@ type Summary struct {
 // SourceFilter specifies filtering criteria for log source and site
 type SourceFilter struct {
 	LogSourceType string // Required: "logwatch", "drupal_watchdog", or "ocms"
-	SiteName      string // Optional: site identifier for Drupal/OCMS multi-site
+	SiteID        string // Stable site identifier for Drupal/OCMS multi-site
+	SiteName      string // Deprecated compatibility fallback for callers predating SiteID
 }
 
 // Database configuration constants (L-04 fix)
@@ -56,19 +59,23 @@ const (
 	maxIdleConns = 1
 	// connMaxLifetime is how long a connection can be reused
 	connMaxLifetime = 30 * time.Minute
+	// Historical context is deliberately bounded so stored model output cannot
+	// consume the next request's entire context window.
+	maxHistoricalSummaries  = 20
+	maxHistoricalContextLen = 64 * 1024
+	maxHistoricalSummaryLen = 2048
 )
 
 // New creates a new storage instance
 func New(dbPath string) (*Storage, error) {
-	// Create directory if it doesn't exist (0700 for security - owner only)
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create database directory: %w", err)
+	absolutePath, err := validateDatabasePath(dbPath, true)
+	if err != nil {
+		return nil, err
 	}
 
 	// Open database with busy timeout to prevent indefinite waits (L-04 fix)
 	// The _busy_timeout pragma prevents "database is locked" errors by waiting
-	dsn := fmt.Sprintf("%s?_busy_timeout=%d", dbPath, busyTimeoutMs)
+	dsn := fmt.Sprintf("%s?_busy_timeout=%d", absolutePath, busyTimeoutMs)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -85,7 +92,6 @@ func New(dbPath string) (*Storage, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
-
 	storage := &Storage{db: db}
 
 	// Initialize schema
@@ -97,11 +103,52 @@ func New(dbPath string) (*Storage, error) {
 	return storage, nil
 }
 
+// ValidatePath applies the runtime database path checks without opening or
+// migrating SQLite. Missing private components are created exactly as they
+// would be during startup, while unsafe existing paths are never mutated.
+func ValidatePath(dbPath string) error {
+	_, err := validateDatabasePath(dbPath, false)
+	return err
+}
+
+func validateDatabasePath(dbPath string, createMissing bool) (string, error) {
+	if dbPath == "" || strings.HasPrefix(strings.ToLower(dbPath), "file:") || strings.ContainsAny(dbPath, "?\x00") {
+		return "", fmt.Errorf("database path must be a literal filesystem path without URI syntax")
+	}
+	absolutePath, err := filepath.Abs(dbPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve database path: %w", err)
+	}
+
+	// The parent must be a dedicated 0700 directory. Missing components are
+	// created privately; existing directories are validated without mutation.
+	dir := filepath.Dir(absolutePath)
+	var canonicalDir string
+	if createMissing {
+		canonicalDir, err = securefile.EnsurePrivateDirectory(dir)
+	} else {
+		canonicalDir, err = securefile.ValidatePrivateDirectory(dir)
+	}
+	if err != nil {
+		return "", fmt.Errorf("invalid database directory: %w", err)
+	}
+	absolutePath = filepath.Join(canonicalDir, filepath.Base(absolutePath))
+	if createMissing {
+		err = securefile.PreparePrivateRegular(absolutePath)
+	} else {
+		err = securefile.ValidatePrivateRegular(absolutePath)
+	}
+	if err != nil {
+		return "", fmt.Errorf("database path must be a private regular file: %w", err)
+	}
+	return absolutePath, nil
+}
+
 // Schema version constants
 const (
 	// currentSchemaVersion is the latest schema version
 	// Increment this when adding new migrations
-	currentSchemaVersion = 2
+	currentSchemaVersion = 3
 )
 
 // initSchema creates the database schema if it doesn't exist
@@ -136,19 +183,24 @@ func (s *Storage) getSchemaVersion() int {
 	return version
 }
 
-// setSchemaVersion updates the schema version
+// setSchemaVersion updates the schema version within the migration transaction.
+func setSchemaVersion(tx *sql.Tx, version int) error {
+	if _, err := tx.Exec(`DELETE FROM schema_version`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_version (version) VALUES (?)`, version); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Storage) setSchemaVersion(version int) error {
-	// Keep schema_version as a single-row table to avoid stale versions.
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.Exec(`DELETE FROM schema_version`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`INSERT INTO schema_version (version) VALUES (?)`, version); err != nil {
+	if err := setSchemaVersion(tx, version); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -156,40 +208,89 @@ func (s *Storage) setSchemaVersion(version int) error {
 
 // migrateSchema runs migrations from currentVersion to latest
 func (s *Storage) migrateSchema(currentVersion int) error {
-	if currentVersion >= currentSchemaVersion {
+	if currentVersion > currentSchemaVersion {
+		return fmt.Errorf("database schema version %d is newer than supported version %d", currentVersion, currentSchemaVersion)
+	}
+	if currentVersion == currentSchemaVersion {
 		return nil // Already up to date
 	}
 
 	log.Printf("storage: migrating schema from version %d to %d", currentVersion, currentSchemaVersion)
 
-	// Run each migration sequentially from current version to latest
-	// Uses a switch with fallthrough to run all migrations from currentVersion onwards
+	// Commit each migration and its version marker in one transaction.
 	for v := currentVersion; v < currentSchemaVersion; v++ {
-		switch v {
-		case 0:
-			// Migration 0 -> 1: Create base summaries table
-			if err := s.migrateV1(); err != nil {
-				return fmt.Errorf("migration v1 failed: %w", err)
-			}
-		case 1:
-			// Migration 1 -> 2: Add log_source_type and site_name columns
-			if err := s.migrateV2(); err != nil {
-				return fmt.Errorf("migration v2 failed: %w", err)
-			}
+		tx, err := s.db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin migration v%d: %w", v+1, err)
 		}
-	}
+		migrationErr := func() error {
+			defer func() { _ = tx.Rollback() }()
 
-	// Update schema version
-	if err := s.setSchemaVersion(currentSchemaVersion); err != nil {
-		return fmt.Errorf("failed to update schema version: %w", err)
+			switch v {
+			case 0:
+				// Migration 0 -> 1: Create base summaries table
+				if err := migrateV1(tx); err != nil {
+					return fmt.Errorf("migration v1 failed: %w", err)
+				}
+			case 1:
+				// Migration 1 -> 2: Add log_source_type and site_name columns
+				if err := migrateV2(tx); err != nil {
+					return fmt.Errorf("migration v2 failed: %w", err)
+				}
+			case 2:
+				// Migration 2 -> 3: Add stable site IDs and normalize timestamps to UTC.
+				if err := migrateV3(tx); err != nil {
+					return fmt.Errorf("migration v3 failed: %w", err)
+				}
+			}
+			if err := setSchemaVersion(tx, v+1); err != nil {
+				return fmt.Errorf("record schema version %d: %w", v+1, err)
+			}
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("commit migration v%d: %w", v+1, err)
+			}
+			return nil
+		}()
+		if migrationErr != nil {
+			return migrationErr
+		}
 	}
 
 	log.Printf("storage: schema migration completed successfully (now at version %d)", currentSchemaVersion)
 	return nil
 }
 
+func migrateV3(tx *sql.Tx) error {
+	log.Printf("storage: running migration v3 - add stable site IDs and normalize UTC timestamps")
+
+	var siteIDColumns int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('summaries') WHERE name = 'site_id'`).Scan(&siteIDColumns); err != nil {
+		return fmt.Errorf("inspect site_id column: %w", err)
+	}
+	if siteIDColumns == 0 {
+		if _, err := tx.Exec(`ALTER TABLE summaries ADD COLUMN site_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add site_id column: %w", err)
+		}
+	}
+	// A legacy site_name is a display label, not a stable identifier. Leave
+	// site_id empty until startup can reconcile it against the active site
+	// configuration. This also makes rows written by a rolled-back v2 binary
+	// recoverable when v3 starts again.
+	if _, err := tx.Exec(`
+		UPDATE summaries
+		SET timestamp = strftime('%Y-%m-%dT%H:%M:%SZ', timestamp)
+		WHERE strftime('%Y-%m-%dT%H:%M:%SZ', timestamp) IS NOT NULL
+	`); err != nil {
+		return fmt.Errorf("normalize timestamps: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_source_site_id ON summaries(log_source_type, site_id)`); err != nil {
+		return fmt.Errorf("create source_site_id index: %w", err)
+	}
+	return nil
+}
+
 // migrateV1 creates the base summaries table (original schema)
-func (s *Storage) migrateV1() error {
+func migrateV1(tx *sql.Tx) error {
 	log.Printf("storage: running migration v1 - create base tables")
 
 	schema := `
@@ -211,17 +312,17 @@ func (s *Storage) migrateV1() error {
 	CREATE INDEX IF NOT EXISTS idx_system_status ON summaries(system_status);
 	`
 
-	_, err := s.db.Exec(schema)
+	_, err := tx.Exec(schema)
 	return err
 }
 
 // migrateV2 adds log_source_type and site_name columns
-func (s *Storage) migrateV2() error {
+func migrateV2(tx *sql.Tx) error {
 	log.Printf("storage: running migration v2 - add log_source_type and site_name columns")
 
 	// Check if columns already exist (for databases migrated before version tracking)
-	var hasLogSourceType bool
-	rows, err := s.db.Query("PRAGMA table_info(summaries)")
+	columns := make(map[string]bool)
+	rows, err := tx.Query("PRAGMA table_info(summaries)")
 	if err != nil {
 		return fmt.Errorf("failed to get table info: %w", err)
 	}
@@ -234,26 +335,31 @@ func (s *Storage) migrateV2() error {
 			_ = rows.Close()
 			return fmt.Errorf("failed to scan column info: %w", err)
 		}
-		if name == "log_source_type" {
-			hasLogSourceType = true
-			break
-		}
+		columns[name] = true
 	}
-	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate table info: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close table info: %w", err)
+	}
 
-	// Only add columns if they don't exist
-	if !hasLogSourceType {
-		if _, err := s.db.Exec(`ALTER TABLE summaries ADD COLUMN log_source_type TEXT NOT NULL DEFAULT 'logwatch'`); err != nil {
+	// Check each column independently to repair databases left partially
+	// migrated by older, non-transactional releases.
+	if !columns["log_source_type"] {
+		if _, err := tx.Exec(`ALTER TABLE summaries ADD COLUMN log_source_type TEXT NOT NULL DEFAULT 'logwatch'`); err != nil {
 			return fmt.Errorf("failed to add log_source_type column: %w", err)
 		}
-
-		if _, err := s.db.Exec(`ALTER TABLE summaries ADD COLUMN site_name TEXT NOT NULL DEFAULT ''`); err != nil {
+	}
+	if !columns["site_name"] {
+		if _, err := tx.Exec(`ALTER TABLE summaries ADD COLUMN site_name TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("failed to add site_name column: %w", err)
 		}
 	}
 
 	// Create index (IF NOT EXISTS handles duplicates)
-	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_source_site ON summaries(log_source_type, site_name)`); err != nil {
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_source_site ON summaries(log_source_type, site_name)`); err != nil {
 		return fmt.Errorf("failed to create source_site index: %w", err)
 	}
 
@@ -292,16 +398,17 @@ func (s *Storage) SaveSummary(summary *Summary) error {
 	// Insert into database
 	query := `
 		INSERT INTO summaries (
-			timestamp, log_source_type, site_name, system_status, summary,
+			timestamp, log_source_type, site_id, site_name, system_status, summary,
 			critical_issues, warnings, recommendations, metrics,
 			input_tokens, output_tokens, cost_usd
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := s.db.Exec(
 		query,
-		summary.Timestamp.Format(time.RFC3339),
+		summary.Timestamp.UTC().Format(time.RFC3339Nano),
 		logSourceType,
+		stableSiteID(summary.SiteID, summary.SiteName),
 		summary.SiteName,
 		summary.SystemStatus,
 		summary.Summary,
@@ -326,34 +433,114 @@ func (s *Storage) SaveSummary(summary *Summary) error {
 	return nil
 }
 
+func stableSiteID(siteID, legacySiteName string) string {
+	if siteID != "" {
+		return siteID
+	}
+	return legacySiteName
+}
+
+// ReconcileSiteIdentity assigns the configured stable identifier to legacy
+// rows for the same source and any explicitly configured current or previous
+// display name. It repairs both v2 migrations and rows inserted by a v2 binary
+// after the database had already reached v3.
+func (s *Storage) ReconcileSiteIdentity(logSourceType, siteID string, siteNames ...string) (int64, error) {
+	if logSourceType == "" || siteID == "" || len(siteNames) == 0 {
+		return 0, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin site identity reconciliation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	seen := make(map[string]struct{}, len(siteNames))
+	var affected int64
+	for _, siteName := range siteNames {
+		if siteName == "" {
+			continue
+		}
+		if _, exists := seen[siteName]; exists {
+			continue
+		}
+		seen[siteName] = struct{}{}
+
+		result, execErr := tx.Exec(`
+			UPDATE summaries
+			SET site_id = ?
+			WHERE log_source_type = ?
+			  AND site_name = ?
+			  AND (site_id = '' OR site_id = site_name)
+		`, siteID, logSourceType, siteName)
+		if execErr != nil {
+			return 0, fmt.Errorf("reconcile site identity for %q: %w", siteName, execErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return 0, fmt.Errorf("count reconciled site rows for %q: %w", siteName, rowsErr)
+		}
+		affected += rows
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit site identity reconciliation: %w", err)
+	}
+	return affected, nil
+}
+
 // GetRecentSummaries retrieves summaries from the last N days, filtered by source and site
 func (s *Storage) GetRecentSummaries(days int, filter *SourceFilter) ([]*Summary, error) {
-	cutoffDate := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
+	return s.getRecentSummaries(days, filter, 0)
+}
+
+func (s *Storage) getRecentSummaries(days int, filter *SourceFilter, limit int) ([]*Summary, error) {
+	cutoffUnix := time.Now().UTC().AddDate(0, 0, -days).Unix()
 
 	var query string
 	var args []any
 
 	// Build complete query based on filter to avoid SQL fragment concatenation
 	if filter != nil && filter.LogSourceType != "" {
-		query = `
-			SELECT id, timestamp, log_source_type, site_name, system_status, summary,
-			       critical_issues, warnings, recommendations, metrics,
-			       input_tokens, output_tokens, cost_usd
-			FROM summaries
-			WHERE timestamp >= ? AND log_source_type = ? AND site_name = ?
-			ORDER BY timestamp DESC
-		`
-		args = []any{cutoffDate, filter.LogSourceType, filter.SiteName}
+		if filter.SiteName != "" {
+			query = `
+				SELECT id, timestamp, log_source_type, site_id, site_name, system_status, summary,
+				       critical_issues, warnings, recommendations, metrics,
+				       input_tokens, output_tokens, cost_usd
+				FROM summaries
+				WHERE unixepoch(timestamp) >= ? AND log_source_type = ?
+				  AND (site_id = ? OR ((site_id = '' OR site_id = site_name) AND site_name = ?))
+				ORDER BY unixepoch(timestamp) DESC, id DESC
+			`
+			args = []any{
+				cutoffUnix,
+				filter.LogSourceType,
+				stableSiteID(filter.SiteID, filter.SiteName),
+				filter.SiteName,
+			}
+		} else {
+			query = `
+				SELECT id, timestamp, log_source_type, site_id, site_name, system_status, summary,
+				       critical_issues, warnings, recommendations, metrics,
+				       input_tokens, output_tokens, cost_usd
+				FROM summaries
+				WHERE unixepoch(timestamp) >= ? AND log_source_type = ? AND site_id = ?
+				ORDER BY unixepoch(timestamp) DESC, id DESC
+			`
+			args = []any{cutoffUnix, filter.LogSourceType, stableSiteID(filter.SiteID, filter.SiteName)}
+		}
 	} else {
 		query = `
-			SELECT id, timestamp, log_source_type, site_name, system_status, summary,
+			SELECT id, timestamp, log_source_type, site_id, site_name, system_status, summary,
 			       critical_issues, warnings, recommendations, metrics,
 			       input_tokens, output_tokens, cost_usd
 			FROM summaries
-			WHERE timestamp >= ?
-			ORDER BY timestamp DESC
+			WHERE unixepoch(timestamp) >= ?
+			ORDER BY unixepoch(timestamp) DESC, id DESC
 		`
-		args = []any{cutoffDate}
+		args = []any{cutoffUnix}
+	}
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -383,7 +570,7 @@ func (s *Storage) GetRecentSummaries(days int, filter *SourceFilter) ([]*Summary
 // GetHistoricalContext retrieves recent summaries formatted for Claude context
 // If filter is provided, only summaries matching the source type and site are included
 func (s *Storage) GetHistoricalContext(days int, filter *SourceFilter) (string, error) {
-	summaries, err := s.GetRecentSummaries(days, filter)
+	summaries, err := s.getRecentSummaries(days, filter, maxHistoricalSummaries)
 	if err != nil {
 		return "", err
 	}
@@ -392,34 +579,56 @@ func (s *Storage) GetHistoricalContext(days int, filter *SourceFilter) (string, 
 		return "", nil
 	}
 
-	var context strings.Builder
-	fmt.Fprintf(&context, "Previous %d analysis summaries:\n\n", len(summaries))
-
-	for i, sum := range summaries {
-		fmt.Fprintf(&context, "%d. %s - Status: %s\n",
-			i+1,
+	entries := make([]string, 0, len(summaries))
+	totalLen := 64
+	for _, sum := range summaries {
+		var entry strings.Builder
+		fmt.Fprintf(&entry, "%d. %s - Status: %s\n",
+			len(entries)+1,
 			sum.Timestamp.Format("2006-01-02 15:04"),
-			sum.SystemStatus,
+			truncateText(sum.SystemStatus, 32),
 		)
-		fmt.Fprintf(&context, "   Summary: %s\n", sum.Summary)
+		fmt.Fprintf(&entry, "   Summary: %s\n", truncateText(sum.Summary, maxHistoricalSummaryLen))
 		if len(sum.CriticalIssues) > 0 {
-			fmt.Fprintf(&context, "   Critical Issues: %d\n", len(sum.CriticalIssues))
+			fmt.Fprintf(&entry, "   Critical Issues: %d\n", len(sum.CriticalIssues))
 		}
 		if len(sum.Warnings) > 0 {
-			fmt.Fprintf(&context, "   Warnings: %d\n", len(sum.Warnings))
+			fmt.Fprintf(&entry, "   Warnings: %d\n", len(sum.Warnings))
 		}
-		context.WriteString("\n")
+		entry.WriteString("\n")
+		if totalLen+entry.Len() > maxHistoricalContextLen {
+			break
+		}
+		entries = append(entries, entry.String())
+		totalLen += entry.Len()
+	}
+
+	var context strings.Builder
+	fmt.Fprintf(&context, "Previous %d analysis summaries:\n\n", len(entries))
+	for _, entry := range entries {
+		context.WriteString(entry)
 	}
 
 	return context.String(), nil
 }
 
+func truncateText(value string, maxLen int) string {
+	if len(value) <= maxLen {
+		return value
+	}
+	cut := maxLen - len("...")
+	for cut > 0 && !utf8.ValidString(value[:cut]) {
+		cut--
+	}
+	return value[:cut] + "..."
+}
+
 // CleanupOldSummaries deletes summaries older than N days
 func (s *Storage) CleanupOldSummaries(days int) (int64, error) {
-	cutoffDate := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
+	cutoffUnix := time.Now().UTC().AddDate(0, 0, -days).Unix()
 
-	query := `DELETE FROM summaries WHERE timestamp < ?`
-	result, err := s.db.Exec(query, cutoffDate)
+	query := `DELETE FROM summaries WHERE unixepoch(timestamp) < ?`
+	result, err := s.db.Exec(query, cutoffUnix)
 	if err != nil {
 		return 0, fmt.Errorf("failed to cleanup old summaries: %w", err)
 	}
@@ -441,10 +650,17 @@ func (s *Storage) GetStatistics(filter *SourceFilter) (map[string]any, error) {
 
 	// Build complete queries based on filter to avoid SQL fragment concatenation
 	if filter != nil && filter.LogSourceType != "" {
-		args = []any{filter.LogSourceType, filter.SiteName}
-		countQuery = `SELECT COUNT(*) FROM summaries WHERE log_source_type = ? AND site_name = ?`
-		statusQuery = `SELECT system_status, COUNT(*) FROM summaries WHERE log_source_type = ? AND site_name = ? GROUP BY system_status`
-		costQuery = `SELECT COALESCE(SUM(cost_usd), 0) FROM summaries WHERE log_source_type = ? AND site_name = ?`
+		if filter.SiteName != "" {
+			args = []any{filter.LogSourceType, stableSiteID(filter.SiteID, filter.SiteName), filter.SiteName}
+			countQuery = `SELECT COUNT(*) FROM summaries WHERE log_source_type = ? AND (site_id = ? OR ((site_id = '' OR site_id = site_name) AND site_name = ?))`
+			statusQuery = `SELECT system_status, COUNT(*) FROM summaries WHERE log_source_type = ? AND (site_id = ? OR ((site_id = '' OR site_id = site_name) AND site_name = ?)) GROUP BY system_status`
+			costQuery = `SELECT COALESCE(SUM(cost_usd), 0) FROM summaries WHERE log_source_type = ? AND (site_id = ? OR ((site_id = '' OR site_id = site_name) AND site_name = ?))`
+		} else {
+			args = []any{filter.LogSourceType, stableSiteID(filter.SiteID, filter.SiteName)}
+			countQuery = `SELECT COUNT(*) FROM summaries WHERE log_source_type = ? AND site_id = ?`
+			statusQuery = `SELECT system_status, COUNT(*) FROM summaries WHERE log_source_type = ? AND site_id = ? GROUP BY system_status`
+			costQuery = `SELECT COALESCE(SUM(cost_usd), 0) FROM summaries WHERE log_source_type = ? AND site_id = ?`
+		}
 	} else {
 		countQuery = `SELECT COUNT(*) FROM summaries`
 		statusQuery = `SELECT system_status, COUNT(*) FROM summaries GROUP BY system_status`
@@ -499,7 +715,7 @@ func (s *Storage) scanSummary(rows *sql.Rows) (*Summary, error) {
 	var (
 		id                                                    int64
 		timestamp                                             string
-		logSourceType, siteName                               string
+		logSourceType, siteID, siteName                       string
 		systemStatus, summaryText                             string
 		criticalIssuesJSON, warningsJSON, recommendationsJSON string
 		metricsJSON                                           string
@@ -508,7 +724,7 @@ func (s *Storage) scanSummary(rows *sql.Rows) (*Summary, error) {
 	)
 
 	err := rows.Scan(
-		&id, &timestamp, &logSourceType, &siteName, &systemStatus, &summaryText,
+		&id, &timestamp, &logSourceType, &siteID, &siteName, &systemStatus, &summaryText,
 		&criticalIssuesJSON, &warningsJSON, &recommendationsJSON,
 		&metricsJSON, &inputTokens, &outputTokens, &costUSD,
 	)
@@ -543,6 +759,7 @@ func (s *Storage) scanSummary(rows *sql.Rows) (*Summary, error) {
 		ID:              id,
 		Timestamp:       ts,
 		LogSourceType:   logSourceType,
+		SiteID:          siteID,
 		SiteName:        siteName,
 		SystemStatus:    systemStatus,
 		Summary:         summaryText,

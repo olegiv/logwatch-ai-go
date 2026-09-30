@@ -31,6 +31,7 @@
 package exclusions
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -43,6 +44,7 @@ import (
 
 	"github.com/olegiv/logwatch-ai-go/internal/ai"
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
+	"github.com/olegiv/logwatch-ai-go/internal/securefile"
 )
 
 // maxConfigFileSize caps the size of exclusions.json read from disk to
@@ -300,35 +302,16 @@ func Load(explicitPath string) (*Config, string, error) {
 			continue
 		}
 
-		// Open once and run all checks against the handle so the size that
-		// is validated belongs to the same inode that is read (no
-		// stat-then-read TOCTOU window).
-		file, err := os.Open(path) // #nosec G304 -- path comes from hardcoded search locations or the operator's -exclusions-config flag
+		data, err := securefile.ReadLimitedRegular(path, maxConfigFileSize)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, "", fmt.Errorf("failed to open %s: %w", path, err)
-		}
-		// At most one file is ever opened: every branch after a successful
-		// Open returns from the function within this loop iteration.
-		defer func() { _ = file.Close() }()
-
-		info, err := file.Stat()
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to stat %s: %w", path, err)
-		}
-		if info.Size() > maxConfigFileSize {
-			return nil, "", fmt.Errorf("exclusions config %s too large: %d bytes (max %d)", path, info.Size(), maxConfigFileSize)
-		}
-
-		data, err := io.ReadAll(file)
-		if err != nil {
 			return nil, "", fmt.Errorf("failed to read %s: %w", path, err)
 		}
 
-		var cfg Config
-		if err := json.Unmarshal(data, &cfg); err != nil {
+		cfg, err := decodeConfig(data)
+		if err != nil {
 			return nil, "", fmt.Errorf("failed to parse %s: %w", path, err)
 		}
 
@@ -336,7 +319,7 @@ func Load(explicitPath string) (*Config, string, error) {
 			return nil, "", fmt.Errorf("invalid exclusions config in %s: %w", path, err)
 		}
 
-		return &cfg, path, nil
+		return cfg, path, nil
 	}
 
 	if explicitPath != "" {
@@ -344,6 +327,24 @@ func Load(explicitPath string) (*Config, string, error) {
 	}
 
 	return nil, "", nil
+}
+
+func decodeConfig(data []byte) (*Config, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+
+	var cfg Config
+	if err := decoder.Decode(&cfg); err != nil {
+		return nil, err
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("multiple JSON values are not allowed")
+		}
+		return nil, err
+	}
+	return &cfg, nil
 }
 
 func buildSearchPaths(explicitPath string) []string {

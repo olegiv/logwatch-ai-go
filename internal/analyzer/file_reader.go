@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/olegiv/logwatch-ai-go/internal/securefile"
 )
 
 // FileReadOptions controls common source-file read guards used by log readers.
@@ -33,7 +35,7 @@ func ReadSourceFileWithGuards(
 		return "", fmt.Errorf("content validator is required")
 	}
 
-	file, err := os.Open(sourcePath) // #nosec G304 -- operator-supplied source path (CLI flag/env config); this cron-invoked CLI has no untrusted input channel
+	file, err := securefile.OpenNoFollow(sourcePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("%s file not found: %s: %w", opts.SourceLabel, sourcePath, err)
@@ -48,6 +50,9 @@ func ReadSourceFileWithGuards(
 	fileInfo, err := file.Stat()
 	if err != nil {
 		return "", fmt.Errorf("failed to stat %s file: %w", opts.SourceLabel, err)
+	}
+	if !fileInfo.Mode().IsRegular() {
+		return "", fmt.Errorf("%s path is not a regular file: %s", opts.SourceLabel, sourcePath)
 	}
 
 	if fileInfo.Mode().Perm()&0o400 == 0 {
@@ -67,9 +72,12 @@ func ReadSourceFileWithGuards(
 		}
 	}
 
-	content, err := io.ReadAll(file)
+	content, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("failed to read %s file: %w", opts.SourceLabel, err)
+	}
+	if int64(len(content)) > maxBytes {
+		return "", fmt.Errorf("%s file exceeded maximum size of %dMB while being read", opts.SourceLabel, opts.MaxSizeMB)
 	}
 	contentStr := string(content)
 

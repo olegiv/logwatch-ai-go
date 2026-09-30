@@ -68,14 +68,13 @@ func run() int {
 	}
 
 	// Setup signal handling for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 	go func() {
-		<-sigChan
-		cancel()
+		<-ctx.Done()
+		// Restore default signal handling after the first signal so a second
+		// SIGTERM/SIGINT terminates immediately instead of being swallowed.
+		stopSignals()
 	}()
 
 	// Load configuration with CLI overrides
@@ -84,11 +83,23 @@ func run() int {
 		_, _ = fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
 		return exitFailure
 	}
+	if cli.CheckRuntime {
+		if err := validateRuntime(cfg); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Runtime validation error: %v\n", err)
+			return exitFailure
+		}
+		fmt.Println("Runtime configuration and paths are valid")
+		return exitSuccess
+	}
 
 	// Initialize logger with credential sanitization (M-02 fix)
+	if err := logging.ValidateLogDestination(cfg.LogDir, "analyzer.log"); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Logging configuration error: %v\n", err)
+		return exitFailure
+	}
 	baseLog := logger.New(logger.Config{
 		Level:      cfg.LogLevel,
-		LogDir:     "./logs",
+		LogDir:     cfg.LogDir,
 		Filename:   "analyzer.log",
 		MaxSizeMB:  10,
 		MaxBackups: 5,
@@ -132,6 +143,18 @@ func run() int {
 	return exitSuccess
 }
 
+func validateRuntime(cfg *config.Config) error {
+	if err := logging.ValidateLogDestinationReadOnly(cfg.LogDir, "analyzer.log"); err != nil {
+		return fmt.Errorf("logging: %w", err)
+	}
+	if cfg.EnableDatabase {
+		if err := storage.ValidatePath(cfg.DatabasePath); err != nil {
+			return fmt.Errorf("database: %w", err)
+		}
+	}
+	return nil
+}
+
 func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLogger) error {
 	startTime := time.Now()
 
@@ -153,11 +176,26 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 				log.Warn().Err(err).Msg("Failed to close database")
 			}
 		}(store)
+		if siteID := cfg.SelectedSiteID(); siteID != "" {
+			siteNames := append([]string{cfg.SelectedSiteName()}, cfg.SelectedSiteLegacyNames()...)
+			reconciled, reconcileErr := store.ReconcileSiteIdentity(
+				cfg.LogSourceType,
+				siteID,
+				siteNames...,
+			)
+			if reconcileErr != nil {
+				return fmt.Errorf("failed to reconcile stored site identity: %w", reconcileErr)
+			}
+			if reconciled > 0 {
+				log.Info().Int64("rows", reconciled).Msg("Reconciled legacy site history")
+			}
+		}
 		log.Info().Str("path", cfg.DatabasePath).Msg("Database initialized")
 	}
 
 	// 2. Initialize Telegram client
 	telegramClient, err := notification.NewTelegramClient(
+		ctx,
 		cfg.TelegramBotToken,
 		cfg.TelegramArchiveChannel,
 		cfg.TelegramAlertsChannel,
@@ -177,20 +215,8 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		Str("username", botInfo["username"].(string)).
 		Msg("Telegram bot initialized")
 
-	// 3. Initialize LLM client based on provider
-	llmClient, err := createLLMClient(ctx, cfg, log)
-	if err != nil {
-		return fmt.Errorf("failed to initialize LLM client: %w", err)
-	}
-
-	modelInfo := llmClient.GetModelInfo()
-	log.Info().
-		Str("provider", llmClient.GetProviderName()).
-		Str("model", modelInfo["model"].(string)).
-		Int("max_tokens", modelInfo["max_tokens"].(int)).
-		Msg("LLM client initialized")
-
-	// 4. Initialize log source based on configuration
+	// 3. Initialize log source before the LLM. A valid no-entry report must
+	// not depend on local model availability or consume an Anthropic request.
 	logSource, err := createLogSource(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create log source: %w", err)
@@ -277,12 +303,26 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		return nil
 	}
 
+	// 4. Initialize LLM only after confirming there is content to analyze.
+	llmClient, err := createLLMClient(ctx, cfg, log)
+	if err != nil {
+		return fmt.Errorf("failed to initialize LLM client: %w", err)
+	}
+
+	modelInfo := llmClient.GetModelInfo()
+	log.Info().
+		Str("provider", llmClient.GetProviderName()).
+		Str("model", modelInfo["model"].(string)).
+		Int("max_tokens", modelInfo["max_tokens"].(int)).
+		Msg("LLM client initialized")
+
 	// Get historical context (if database enabled)
 	// Filter by source type and site to get relevant historical data only
 	var historicalContext string
 	sourceFilter := &storage.SourceFilter{
 		LogSourceType: cfg.LogSourceType,
-		SiteName:      cfg.SelectedSiteName(), // Empty for single-site logwatch/OCMS
+		SiteID:        cfg.SelectedSiteID(),
+		SiteName:      cfg.SelectedSiteName(),
 	}
 	if store != nil {
 		log.Info().Msg("Retrieving historical context...")
@@ -365,7 +405,8 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 		summary := &storage.Summary{
 			Timestamp:       time.Now(),
 			LogSourceType:   cfg.LogSourceType,
-			SiteName:        cfg.SelectedSiteName(), // Empty for single-site logwatch/OCMS
+			SiteID:          cfg.SelectedSiteID(),
+			SiteName:        cfg.SelectedSiteName(),
 			SystemStatus:    analysis.SystemStatus,
 			Summary:         analysis.Summary,
 			CriticalIssues:  analysis.CriticalIssues,
@@ -395,19 +436,29 @@ func runAnalyzer(ctx context.Context, cfg *config.Config, log *logging.SecureLog
 
 	// Send Telegram notifications
 	log.Info().Msg("Sending Telegram notifications...")
-	if err := telegramClient.SendAnalysisReport(analysis, stats, cfg.LogSourceType, cfg.SelectedSiteName()); err != nil {
-		return fmt.Errorf("failed to send Telegram notification: %w", err)
+	deliveryErr := telegramClient.SendAnalysisReport(analysis, stats, cfg.LogSourceType, cfg.SelectedSiteName())
+	if deliveryErr != nil {
+		if notification.IsPartialDelivery(deliveryErr) {
+			log.Error().
+				Err(deliveryErr).
+				Msg("Telegram delivery was incomplete after some messages were published; analysis will not be rerun")
+		} else {
+			return fmt.Errorf("failed to send Telegram notification: %w", deliveryErr)
+		}
 	}
 
-	if cfg.HasAlertsChannel() && ai.ShouldTriggerAlert(analysis.SystemStatus) {
+	if deliveryErr == nil && cfg.HasAlertsChannel() && ai.ShouldTriggerAlert(analysis.SystemStatus) {
 		log.Info().Msg("Alert notification sent (status warrants attention)")
 	}
 
 	// Final summary
 	totalDuration := time.Since(startTime)
-	log.Info().
-		Float64("total_duration_s", totalDuration.Seconds()).
-		Msg("All operations completed successfully")
+	completionLog := log.Info().Float64("total_duration_s", totalDuration.Seconds())
+	if deliveryErr != nil {
+		completionLog.Msg("Analysis completed with incomplete Telegram delivery")
+	} else {
+		completionLog.Msg("All operations completed successfully")
+	}
 
 	return nil
 }
@@ -429,6 +480,7 @@ func createLLMClient(ctx context.Context, cfg *config.Config, log *logging.Secur
 			Model:          cfg.OllamaModel,
 			TimeoutSeconds: cfg.AITimeoutSeconds,
 			MaxTokens:      cfg.AIMaxTokens,
+			ContextTokens:  cfg.OllamaContextTokens,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Ollama client: %w", err)
@@ -452,6 +504,7 @@ func createLLMClient(ctx context.Context, cfg *config.Config, log *logging.Secur
 			Model:          cfg.LMStudioModel,
 			TimeoutSeconds: cfg.AITimeoutSeconds,
 			MaxTokens:      cfg.AIMaxTokens,
+			ContextTokens:  cfg.LMStudioContextTokens,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create LM Studio client: %w", err)
@@ -510,12 +563,17 @@ func createLogSource(cfg *config.Config) (*analyzer.LogSource, error) {
 		if cfg.SelectedSiteName() != "" {
 			promptBuilder.SetSiteName(cfg.SelectedSiteName())
 		}
+		maxAge := time.Duration(0)
+		if cfg.OCMSLogRange == config.OCMSLogRangeYesterday {
+			maxAge = ocms.MaxYesterdayLogAge
+		}
 		return &analyzer.LogSource{
 			Type: analyzer.LogSourceOCMS,
-			Reader: ocms.NewReader(
+			Reader: ocms.NewReaderWithMaxAge(
 				cfg.MaxLogSizeMB,
 				false, // Reader preprocessing disabled — handled by preparePromptForAnalysis
 				cfg.MaxPreprocessingTokens,
+				maxAge,
 			),
 			Preprocessor:  ocms.NewPreprocessor(cfg.MaxPreprocessingTokens),
 			PromptBuilder: promptBuilder,

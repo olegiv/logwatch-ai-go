@@ -372,6 +372,48 @@ func TestLoadOCMSSitesConfig(t *testing.T) {
 	}
 }
 
+func TestOCMSSitesConfigValidateRejectsDuplicateDisplayNames(t *testing.T) {
+	t.Parallel()
+
+	cfg := &OCMSSitesConfig{
+		Sites: map[string]OCMSSiteConfig{
+			"first":  {Name: "Production"},
+			"second": {Name: "Production"},
+		},
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "same display name") {
+		t.Fatalf("Validate() error = %v, want duplicate display-name rejection", err)
+	}
+}
+
+func TestOCMSSitesConfigValidateRejectsFallbackNameCollision(t *testing.T) {
+	t.Parallel()
+
+	cfg := &OCMSSitesConfig{
+		Sites: map[string]OCMSSiteConfig{
+			"production": {},
+			"staging":    {Name: "production"},
+		},
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "same display name") {
+		t.Fatalf("Validate() error = %v, want fallback display-name collision rejection", err)
+	}
+}
+
+func TestOCMSSitesConfigValidateRejectsLegacyNameCollision(t *testing.T) {
+	t.Parallel()
+
+	cfg := &OCMSSitesConfig{
+		Sites: map[string]OCMSSiteConfig{
+			"first":  {Name: "Current", LegacyNames: []string{"Previous"}},
+			"second": {Name: "Previous"},
+		},
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "same display name or legacy name") {
+		t.Fatalf("Validate() error = %v, want legacy-name collision rejection", err)
+	}
+}
+
 func TestLoadOCMSSitesConfig_DefaultLogKindAll(t *testing.T) {
 	t.Parallel()
 
@@ -484,6 +526,18 @@ func TestLoadOCMSSitesConfig_InvalidConfig(t *testing.T) {
   }
 }`,
 			want: `unknown field "instance_dir"`,
+		},
+		{
+			name: "trailing JSON value rejected",
+			content: `{
+  "version": "1.0",
+  "sites": {
+    "example_com": {
+      "name": "Example Site"
+    }
+  }
+} {}`,
+			want: "trailing content",
 		},
 	}
 

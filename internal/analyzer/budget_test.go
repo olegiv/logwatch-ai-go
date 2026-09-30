@@ -57,10 +57,10 @@ func TestCalculateLogTokenBudget(t *testing.T) {
 		}
 	})
 
-	t.Run("enforces minimum budget", func(t *testing.T) {
+	t.Run("reports no safe budget instead of inventing capacity", func(t *testing.T) {
 		got := CalculateLogTokenBudget(5000, 4000, 800, 700)
-		if got != minLogTokenBudget {
-			t.Errorf("CalculateLogTokenBudget() = %d, want minimum %d", got, minLogTokenBudget)
+		if got != 0 {
+			t.Errorf("CalculateLogTokenBudget() = %d, want 0", got)
 		}
 	})
 }

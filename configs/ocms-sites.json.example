@@ -5,7 +5,8 @@
   "default_log_kind": "main",
   "sites": {
     "example_com": {
-      "name": "Example Site"
+      "name": "Example Site",
+      "legacy_names": ["Example Website"]
     },
     "app_example_com": {
       "name": "Example App",

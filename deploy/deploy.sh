@@ -22,9 +22,9 @@
 # contains. REF checks the tag out separately so the version ldflags and Go's
 # embedded vcs stamp describe the release.
 #
-# Why not scripts/install.sh: that is a first-time bootstrapper. It looks for
-# the host-arch binary name, overwrites repository-managed scripts, and
-# finishes with a recursive chown across .env and data/summaries.db.
+# Why not scripts/install.sh: that is a first-time bootstrapper which refreshes
+# repository-managed scripts and templates. Upgrades intentionally change only
+# the versioned binary and live symlink.
 
 set -euo pipefail
 
@@ -129,7 +129,8 @@ echo "==> Verifying on the host"
 # Values in this remote command are allowlisted above; the staged path and
 # digest are additionally validated by remote-verify.sh before use.
 # shellcheck disable=SC2029 # client-side expansion is allowlisted above
-ssh "$HOST" "BIN_SHA=$BIN_SHA STAGE_DIR=$STAGE_DIR bash -s" < "$SCRIPT_DIR/remote-verify.sh"
+ssh "$HOST" "BIN_SHA=$BIN_SHA STAGE_DIR=$STAGE_DIR INSTALL_DIR=$INSTALL_DIR bash -s" \
+  < "$SCRIPT_DIR/remote-verify.sh"
 
 [[ $STAGE_ONLY == 1 ]] && { echo "--stage-only: nothing installed."; exit 0; }
 

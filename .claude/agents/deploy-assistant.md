@@ -37,10 +37,8 @@ Development (macOS) → Integration → QA → Pre-Production → Production
 ## Installation Process
 
 > **Upgrading an existing install?** Use `deploy/` — `make deploy-stage`
-> then `make deploy` (see `docs/DEPLOYMENT.md`). The `install.sh` flow
-> below is for bootstrapping a NEW host only: it expects the host-arch
-> binary name, overwrites repository-managed scripts, and recursively chowns
-> `.env` and `data/summaries.db`.
+> then `make deploy` (see `docs/DEPLOYMENT.md`). The `scripts/install.sh`
+> flow below is only for bootstrapping a new host.
 
 ### Standard Installation (Using make install)
 
@@ -51,9 +49,9 @@ make build-linux-amd64
 # Transfer to server
 scp bin/logwatch-analyzer-linux-amd64 server:/tmp/
 
-# On server
-cd /tmp
-sudo ./scripts/install.sh
+# On server, from the transferred repository checkout
+sudo BINARY_PATH=/tmp/logwatch-analyzer-linux-amd64 \
+  SERVICE_USER=logwatch-ai ./scripts/install.sh
 ```
 
 **What `make install` does:**
@@ -84,25 +82,12 @@ sudo ./scripts/install.sh
     └── helper.sh
 ```
 
-### Manual Installation
+### Installation safety boundary
 
-If you can't use `make install`:
-
-```bash
-# 1. Create directories
-sudo mkdir -p /opt/logwatch-ai/{data,logs,scripts}
-
-# 2. Copy binary
-sudo cp logwatch-analyzer-linux-amd64 /opt/logwatch-ai/logwatch-analyzer
-sudo chmod +x /opt/logwatch-ai/logwatch-analyzer
-
-# 3. Copy scripts
-sudo cp scripts/* /opt/logwatch-ai/scripts/
-sudo chmod +x /opt/logwatch-ai/scripts/*.sh
-
-# 4. Create .env from template
-sudo cp configs/.env.example /opt/logwatch-ai/.env
-```
+Do not manually copy a binary over the stable executable path. Bootstrap a
+new host with `scripts/install.sh`; upgrade an existing host with `deploy/`.
+Those are the only supported paths because they enforce ownership, normalized
+install roots, atomic publication, locking, smoke tests, and rollback state.
 
 ## Environment Configuration
 
@@ -124,7 +109,7 @@ TELEGRAM_CHANNEL_ARCHIVE_ID=-1001234567890        # REQUIRED: Supergroup ID (< -
 TELEGRAM_CHANNEL_ALERTS_ID=-1009876543210         # Optional: Alerts only for Warning/Critical/Bad
 
 # Input/Output Paths
-LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt     # Where logwatch saves output
+LOGWATCH_OUTPUT_PATH=/var/log/logwatch-ai/logwatch-output.txt # Generated Logwatch report
 MAX_LOG_SIZE_MB=10                                 # Range: 1-100
 
 # Application Settings
@@ -184,7 +169,7 @@ DATABASE_PATH=./data/summaries.db
 **Example cron entry (for root):**
 ```cron
 # Run logwatch-ai-analyzer daily at 2:15 AM
-15 2 * * * /opt/logwatch-ai/logwatch-analyzer >> /opt/logwatch-ai/logs/cron.log 2>&1
+7 2 * * * /opt/logwatch-ai/run-cron.sh
 ```
 
 **Add to crontab:**
@@ -218,8 +203,8 @@ After=network.target
 Type=oneshot
 WorkingDirectory=/opt/logwatch-ai
 ExecStart=/opt/logwatch-ai/logwatch-analyzer
-StandardOutput=append:/opt/logwatch-ai/logs/service.log
-StandardError=append:/opt/logwatch-ai/logs/service.log
+StandardOutput=append:/var/log/logwatch-ai/service.log
+StandardError=append:/var/log/logwatch-ai/service.log
 
 [Install]
 WantedBy=multi-user.target
@@ -343,7 +328,7 @@ When creating deployment packages:
 ```bash
 # Create package
 mkdir -p logwatch-ai-deploy
-cp bin/logwatch-analyzer-linux-amd64 logwatch-ai-deploy/logwatch-analyzer
+install -m 0755 bin/logwatch-analyzer-linux-amd64 logwatch-ai-deploy/logwatch-analyzer-linux-amd64
 cp -r scripts logwatch-ai-deploy/
 cp configs/.env.example logwatch-ai-deploy/
 cp configs/drupal-sites.json.example logwatch-ai-deploy/
@@ -438,7 +423,7 @@ Before deploying to production:
 ### "Set up cron for daily runs"
 ```bash
 sudo crontab -e
-# Add: 15 2 * * * /opt/logwatch-ai/logwatch-analyzer >> /opt/logwatch-ai/logs/cron.log 2>&1
+# Add: 7 2 * * * /opt/logwatch-ai/run-cron.sh
 sudo crontab -l  # Verify
 ```
 
@@ -451,7 +436,8 @@ tail -f /opt/logwatch-ai/logs/analyzer.log
 1. Check permissions: `ls -la /opt/logwatch-ai/`
 2. Test binary: `/opt/logwatch-ai/logwatch-analyzer`
 3. Check logs: `tail -50 /opt/logwatch-ai/logs/analyzer.log`
-4. Verify config: `cat /opt/logwatch-ai/.env | grep -v API_KEY`
+4. Verify configured keys without printing values:
+   `sudo sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1=<redacted>/p' /opt/logwatch-ai/.env`
 
 ## Workflow
 

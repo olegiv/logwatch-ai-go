@@ -73,7 +73,7 @@ Execute the following steps:
    - Compare to expected costs ($0.011-0.022 per run)
    - Note any concerning trends
    - Suggest optimizations if costs are high
-   - Verify prompt caching is working (check logs)
+   - Confirm estimates use normal input pricing (cache control is not enabled)
 
 Expected costs:
 - Daily: $0.011-0.022

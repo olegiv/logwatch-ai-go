@@ -40,15 +40,13 @@ cost_usd = (input_tokens  / 1,000,000 × input_rate)
         + (cache_read_tokens  / 1,000,000 × cache_read_rate)
 ```
 
-**With Prompt Caching:**
-- First run: Cache creation (slightly higher cost due to cache-write premium)
-- Subsequent runs (within 5 min): Cache hits at ~10% of input price (90% savings)
+The current client does not send cache-control blocks. Calculate forecasts with
+normal input pricing; cache columns are retained only for forward compatibility.
 
 ## Expected Costs (Haiku 4.5 default)
 
 **Typical Daily Analysis:**
-- **First run (cache creation)**: ~$0.005 - $0.007
-- **Cached runs**: ~$0.003 - $0.005
+- **Typical run**: derive from actual input/output usage and configured model
 - **Monthly (30 days)**: ~$0.15
 - **Yearly (365 days)**: ~$1.80
 
@@ -56,7 +54,6 @@ cost_usd = (input_tokens  / 1,000,000 × input_rate)
 
 **Breakdown:**
 - Input tokens: 4,000-6,000 (includes prompt + historical context + log content)
-- Cached input: 2,000-3,000 (system prompt cached after first run)
 - Output tokens: 800-1,200 (analysis response)
 
 ## Cost Tracking in Database
@@ -279,9 +276,8 @@ Upgrade path (if extraction quality slips):
 - `claude-opus-4-7` ($5/$25) — usually overkill for this workload
 
 **E. Prompt Optimization**
-- Ensure prompt caching is working (check logs for cache hits)
-- Keep system prompt stable (changes invalidate cache)
-- Cache TTL: 5 minutes (nothing we can change)
+- Reduce repeated context while retaining the evidence needed for reliable triage
+- Keep prompts deterministic so cost comparisons remain meaningful
 
 ### 4. Forecasting Costs
 
@@ -334,19 +330,13 @@ LIMIT 30;
 
 ### Immediate Actions (No Quality Impact)
 
-1. **Verify prompt caching is working:**
-   ```bash
-   grep "cache_read_input_tokens" ./logs/analyzer.log
-   ```
-   Should see cache hits after first run.
-
-2. **Monitor preprocessing:**
+1. **Monitor preprocessing:**
    ```bash
    grep "preprocessing" ./logs/analyzer.log
    ```
    Should trigger for large logs.
 
-3. **Check for duplicate runs:**
+2. **Check for duplicate runs:**
    ```sql
    SELECT DATE(timestamp), COUNT(*) FROM summaries GROUP BY DATE(timestamp) HAVING COUNT(*) > 1;
    ```
@@ -417,7 +407,7 @@ HAVING SUM(cost_usd) > 0.15;
 - [ ] Check total costs for the week
 - [ ] Compare to previous week
 - [ ] Identify any anomalies
-- [ ] Verify prompt caching is working
+- [ ] Confirm forecasts use uncached input pricing
 - [ ] Review preprocessing effectiveness
 
 **Monthly review checklist:**
@@ -505,7 +495,7 @@ Remember:
 - Typical daily cost: $0.011-0.022
 - Monthly budget: ~$0.47
 - Yearly budget: ~$5.64
-- Prompt caching saves 90% on cached portions
+- The current client does not enable prompt caching
 - Preprocessing critical for large logs (saves significant costs)
 - Quality matters - don't over-optimize at expense of analysis quality
 - Monitor trends, not just absolute costs

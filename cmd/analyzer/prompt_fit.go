@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -16,10 +17,9 @@ import (
 )
 
 const (
-	anthropicPromptSafetyMarginTokens = 2000
-	maxAnthropicPromptFitAttempts     = 4
-	promptFitAdjustmentFactor         = 0.95
-	minPromptFitLogBudget             = 1
+	maxAnthropicPromptFitAttempts = 4
+	promptFitAdjustmentFactor     = 0.95
+	minPromptFitLogBudget         = 1
 )
 
 type promptPreparationResult struct {
@@ -36,6 +36,12 @@ func preparePromptForAnalysis(
 	contextualExclusions []string,
 	log *logging.SecureLogger,
 ) (*promptPreparationResult, error) {
+	// Prompt builders sanitize log content before it reaches an LLM. Perform
+	// that same idempotent transformation before budgeting so NFKC expansion
+	// or injection-marker replacement cannot make the final prompt larger than
+	// the content the preprocessor measured.
+	promptLogContent := ai.SanitizeLogContent(rawLogContent)
+
 	if llmClient.GetProviderName() == "Anthropic" {
 		counter, ok := llmClient.(ai.PromptTokenCounter)
 		if !ok {
@@ -49,7 +55,7 @@ func preparePromptForAnalysis(
 			counter,
 			logSource,
 			systemPrompt,
-			rawLogContent,
+			promptLogContent,
 			historicalContext,
 			contextualExclusions,
 			log,
@@ -61,7 +67,7 @@ func preparePromptForAnalysis(
 		llmClient,
 		logSource,
 		systemPrompt,
-		rawLogContent,
+		promptLogContent,
 		historicalContext,
 		contextualExclusions,
 		log,
@@ -79,11 +85,20 @@ func prepareAnthropicPromptForAnalysis(
 	log *logging.SecureLogger,
 ) (*promptPreparationResult, error) {
 	contextLimit := analyzer.ContextLimitFromModelInfo(llmClient.GetModelInfo())
-	targetInputTokens := max(contextLimit-cfg.AIMaxTokens-anthropicPromptSafetyMarginTokens, 1)
+	targetInputTokens := contextLimit - cfg.AIMaxTokens - analyzer.PromptSafetyMarginTokens(contextLimit)
+	if targetInputTokens < minPromptFitLogBudget {
+		return nil, fmt.Errorf(
+			"anthropic context window has no safe input capacity after reserving output and safety margin: %d tokens",
+			contextLimit,
+		)
+	}
 
 	baseUserPrompt := logSource.PromptBuilder.GetUserPrompt("", historicalContext, contextualExclusions)
 	exactBasePromptTokens, err := counter.CountPromptTokens(ctx, systemPrompt, baseUserPrompt)
 	if err != nil {
+		if terminalErr := promptTokenCountTerminalError(ctx, err); terminalErr != nil {
+			return nil, terminalErr
+		}
 		if log != nil {
 			log.Warn().Err(err).Msg("Anthropic token counting failed, falling back to heuristic sizing")
 		}
@@ -91,7 +106,14 @@ func prepareAnthropicPromptForAnalysis(
 		return prepareHeuristicPromptForAnalysis(cfg, llmClient, logSource, systemPrompt, rawLogContent, historicalContext, contextualExclusions, log)
 	}
 
-	targetLogTokensExact := max(targetInputTokens-exactBasePromptTokens, minPromptFitLogBudget)
+	if exactBasePromptTokens >= targetInputTokens {
+		return nil, fmt.Errorf(
+			"fixed Anthropic prompt is too large for the context window: %d tokens >= target %d",
+			exactBasePromptTokens,
+			targetInputTokens,
+		)
+	}
+	targetLogTokensExact := targetInputTokens - exactBasePromptTokens
 
 	if log != nil {
 		log.Info().
@@ -122,14 +144,13 @@ func prepareAnthropicPromptForAnalysis(
 		userPrompt = logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext, contextualExclusions)
 		exactPromptTokens, err = counter.CountPromptTokens(ctx, systemPrompt, userPrompt)
 		if err != nil {
+			if terminalErr := promptTokenCountTerminalError(ctx, err); terminalErr != nil {
+				return nil, terminalErr
+			}
 			if log != nil {
 				log.Warn().Err(err).Msg("Anthropic token counting failed during fitting, using heuristic result")
 			}
-			// Return what we have so far — preprocessing already ran this iteration
-			return &promptPreparationResult{
-				LogContent: logContent,
-				UserPrompt: userPrompt,
-			}, nil
+			return validateHeuristicPromptFit(cfg, llmClient, systemPrompt, logContent, userPrompt)
 		}
 
 		if log != nil {
@@ -183,6 +204,16 @@ func prepareAnthropicPromptForAnalysis(
 	)
 }
 
+func promptTokenCountTerminalError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return nil
+}
+
 func prepareHeuristicPromptForAnalysis(
 	cfg *config.Config,
 	llmClient ai.Provider,
@@ -192,10 +223,10 @@ func prepareHeuristicPromptForAnalysis(
 	log *logging.SecureLogger,
 ) (*promptPreparationResult, error) {
 	logContent := rawLogContent
+	modelInfo := llmClient.GetModelInfo()
+	contextLimit := analyzer.ContextLimitFromModelInfo(modelInfo)
 
 	if cfg.EnablePreprocessing {
-		modelInfo := llmClient.GetModelInfo()
-		contextLimit := analyzer.ContextLimitFromModelInfo(modelInfo)
 		systemPromptTokens := analyzer.EstimateTokens(systemPrompt)
 		userPromptOverheadTokens := analyzer.EstimateTokens(
 			logSource.PromptBuilder.GetUserPrompt("", historicalContext, contextualExclusions),
@@ -206,6 +237,12 @@ func prepareHeuristicPromptForAnalysis(
 			systemPromptTokens,
 			userPromptOverheadTokens,
 		)
+		if logTokenBudget == 0 {
+			return nil, fmt.Errorf(
+				"fixed prompt leaves no safe capacity for log content in the %d-token context window",
+				contextLimit,
+			)
+		}
 
 		if log != nil {
 			log.Info().
@@ -238,10 +275,26 @@ func prepareHeuristicPromptForAnalysis(
 		}
 	}
 
-	return &promptPreparationResult{
-		LogContent: logContent,
-		UserPrompt: logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext, contextualExclusions),
-	}, nil
+	userPrompt := logSource.PromptBuilder.GetUserPrompt(logContent, historicalContext, contextualExclusions)
+	return validateHeuristicPromptFit(cfg, llmClient, systemPrompt, logContent, userPrompt)
+}
+
+func validateHeuristicPromptFit(
+	cfg *config.Config,
+	llmClient ai.Provider,
+	systemPrompt, logContent, userPrompt string,
+) (*promptPreparationResult, error) {
+	contextLimit := analyzer.ContextLimitFromModelInfo(llmClient.GetModelInfo())
+	targetInputTokens := contextLimit - cfg.AIMaxTokens - analyzer.PromptSafetyMarginTokens(contextLimit)
+	estimatedPromptTokens := analyzer.EstimateTokens(systemPrompt) + analyzer.EstimateTokens(userPrompt)
+	if targetInputTokens < minPromptFitLogBudget || estimatedPromptTokens > targetInputTokens {
+		return nil, fmt.Errorf(
+			"prompt is too large for the configured context window: estimated %d input tokens > safe target %d",
+			estimatedPromptTokens,
+			max(targetInputTokens, 0),
+		)
+	}
+	return &promptPreparationResult{LogContent: logContent, UserPrompt: userPrompt}, nil
 }
 
 func preprocessLogContent(

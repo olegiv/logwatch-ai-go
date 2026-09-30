@@ -208,7 +208,7 @@ nano /opt/logwatch-ai/.env
 
 **Symptom:**
 ```
-Error: failed to read logwatch file: open /tmp/logwatch-output.txt: no such file or directory
+Error: failed to read logwatch file: open /var/log/logwatch-ai/logwatch-output.txt: no such file or directory
 ```
 
 **Cause:** Logwatch output file doesn't exist or wrong path.
@@ -219,13 +219,13 @@ Error: failed to read logwatch file: open /tmp/logwatch-output.txt: no such file
 which logwatch
 
 # Check if logwatch output exists
-ls -lh /tmp/logwatch-output.txt
+ls -lh /var/log/logwatch-ai/logwatch-output.txt
 
 # Generate logwatch report manually
 sudo /opt/logwatch-ai/scripts/generate-logwatch.sh
 
 # Or run logwatch directly
-sudo logwatch --output file --filename /tmp/logwatch-output.txt --range today --detail high
+sudo /opt/logwatch-ai/scripts/generate-logwatch.sh /var/log/logwatch-ai/logwatch-output.txt 10 today
 
 # Verify .env has correct path
 grep LOGWATCH_OUTPUT_PATH /opt/logwatch-ai/.env
@@ -415,16 +415,15 @@ pkill -9 logwatch-analyzer
 ls -l /opt/logwatch-ai/data/summaries.db
 ls -ld /opt/logwatch-ai/data/
 
-# Ensure proper permissions
-sudo chown -R <your-user>:<your-group> /opt/logwatch-ai/data/
-chmod 755 /opt/logwatch-ai/data/
-chmod 644 /opt/logwatch-ai/data/summaries.db
+# The installed cron runs the analyzer as root. Keep its database directory
+# private to that same account so the log-reading service user cannot swap the
+# database path before a root process opens it.
+sudo chown -R root:root /opt/logwatch-ai/data/
+sudo chmod 700 /opt/logwatch-ai/data/
+sudo chmod 600 /opt/logwatch-ai/data/summaries.db
 
-# If still locked, check for .db-shm or .db-wal files
-ls -la /opt/logwatch-ai/data/
-# Remove if found (only if no process is running!)
-rm /opt/logwatch-ai/data/summaries.db-shm
-rm /opt/logwatch-ai/data/summaries.db-wal
+# Do not delete SQLite -wal/-shm files by hand. Stop all writers and use
+# SQLite's integrity/recovery tooling or restore a verified backup.
 ```
 
 ### "Failed to create database"
@@ -441,9 +440,9 @@ Error: failed to initialize storage: unable to open database file
 # Create data directory if missing
 mkdir -p /opt/logwatch-ai/data
 
-# Set correct permissions
-chmod 755 /opt/logwatch-ai/data
-chown <your-user>:<your-group> /opt/logwatch-ai/data
+# Set permissions for the root-owned cron installation
+sudo chown root:root /opt/logwatch-ai/data
+sudo chmod 700 /opt/logwatch-ai/data
 
 # Verify DATABASE_PATH in .env
 grep DATABASE_PATH /opt/logwatch-ai/.env
@@ -452,7 +451,7 @@ grep DATABASE_PATH /opt/logwatch-ai/.env
 
 # Test database creation
 cd /opt/logwatch-ai
-sqlite3 data/summaries.db "SELECT 1;"
+sudo sqlite3 data/summaries.db "SELECT 1;"
 ```
 
 ### Database Corruption
@@ -503,15 +502,15 @@ journalctl -u cron | tail -20          # systemd
 # 2. Verify crontab entry
 crontab -l | grep logwatch
 
-# 3. Add full paths and redirect output for debugging
+# 3. Use the unified runner; it writes its own root-controlled cron log
 # Edit crontab
 crontab -e
 
 # Update entry to:
-15 2 * * * cd /opt/logwatch-ai && /opt/logwatch-ai/logwatch-analyzer >> /opt/logwatch-ai/logs/cron.log 2>&1
+7 2 * * * /opt/logwatch-ai/run-cron.sh
 
 # 4. Check logs after next run
-tail -f /opt/logwatch-ai/logs/cron.log
+tail -f /var/log/logwatch-ai/cron.log
 
 # 5. Ensure .env is in the working directory
 ls -la /opt/logwatch-ai/.env
@@ -532,7 +531,7 @@ echo "LOG_LEVEL=debug" >> /opt/logwatch-ai/.env
 tail -50 /opt/logwatch-ai/logs/analyzer.log
 
 # Check cron output
-tail -50 /opt/logwatch-ai/logs/cron.log
+tail -50 /var/log/logwatch-ai/cron.log
 
 # Test manually as the cron user
 sudo -u <cron-user> bash
@@ -540,7 +539,7 @@ cd /opt/logwatch-ai
 ./logwatch-analyzer
 
 # Verify .env loads correctly
-cat /opt/logwatch-ai/.env | grep -v "^#" | grep -v "^$"
+sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1=<redacted>/p' /opt/logwatch-ai/.env
 ```
 
 ---
@@ -606,7 +605,7 @@ sqlite3 /opt/logwatch-ai/data/summaries.db \
   "SELECT timestamp, system_status, summary FROM summaries ORDER BY timestamp DESC LIMIT 10;"
 
 # 2. Check actual log content
-cat /tmp/logwatch-output.txt | less
+less /var/log/logwatch-ai/logwatch-output.txt
 
 # 3. Review critical issues
 sqlite3 /opt/logwatch-ai/data/summaries.db \
@@ -699,8 +698,8 @@ go version
 ls -lh /opt/logwatch-ai/logwatch-analyzer
 file /opt/logwatch-ai/logwatch-analyzer
 
-# Configuration (REMOVE SENSITIVE DATA!)
-cat /opt/logwatch-ai/.env | grep -v "API_KEY\|BOT_TOKEN"
+# Configuration keys only (values stay redacted)
+sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1=<redacted>/p' /opt/logwatch-ai/.env
 
 # Recent logs
 tail -50 /opt/logwatch-ai/logs/analyzer.log

@@ -112,6 +112,22 @@ func TestValidate(t *testing.T) {
 			errorContains: "invalid format",
 		},
 		{
+			name: "Telegram Bot Token with too-short bot ID",
+			config: &Config{
+				LLMProvider:            "anthropic",
+				ClaudeModel:            "claude-haiku-4-5-20251001",
+				AnthropicAPIKey:        "sk-ant-test-key-1234567890",
+				TelegramBotToken:       "1234:ABCdefGHIjklMNOpqrsTUVwxyz",
+				TelegramArchiveChannel: -1001234567890,
+				LogSourceType:          "logwatch",
+				LogwatchOutputPath:     "/tmp/logwatch.txt",
+				MaxLogSizeMB:           10,
+				LogLevel:               "info",
+			},
+			expectError:   true,
+			errorContains: "invalid format",
+		},
+		{
 			name: "Missing Telegram Archive Channel",
 			config: &Config{
 				LLMProvider:        "anthropic",
@@ -503,9 +519,6 @@ func TestGetProxyURL(t *testing.T) {
 }
 
 func TestSetDefaults(t *testing.T) {
-	// Clear any existing environment variables
-	os.Clearenv()
-
 	// Call setDefaults
 	setDefaults()
 
@@ -653,6 +666,7 @@ func TestLogLevelCaseInsensitive(t *testing.T) {
 }
 
 func TestLoad(t *testing.T) {
+	t.Chdir(t.TempDir())
 	// Set environment variables for the test (t.Setenv automatically cleans up)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-1234567890")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
@@ -679,12 +693,84 @@ func TestLoad(t *testing.T) {
 }
 
 func TestLoad_ValidationFails(t *testing.T) {
-	// Clear environment to trigger validation errors
-	os.Clearenv()
+	t.Chdir(t.TempDir())
+	// Clear required values without mutating unrelated process state.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("TELEGRAM_CHANNEL_ARCHIVE_ID", "")
 
 	_, err := Load()
 	if err == nil {
 		t.Error("Expected Load to fail when required env vars are missing")
+	}
+}
+
+func TestLoadDotEnvOverridesProcessEnvironment(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-process-key-1234567890")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "123456789:process-token")
+	t.Setenv("TELEGRAM_CHANNEL_ARCHIVE_ID", "-1001111111111")
+	if err := os.WriteFile(".env", []byte(
+		"ANTHROPIC_API_KEY=sk-ant-file-key-1234567890\n"+
+			"TELEGRAM_BOT_TOKEN=123456789:file-token\n"+
+			"TELEGRAM_CHANNEL_ARCHIVE_ID=-1002222222222\n",
+	), 0o600); err != nil {
+		t.Fatalf("Write .env: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AnthropicAPIKey != "sk-ant-file-key-1234567890" {
+		t.Fatalf("Expected .env to override process environment, got %q", cfg.AnthropicAPIKey)
+	}
+	if cfg.TelegramArchiveChannel != -1002222222222 {
+		t.Fatalf("Expected .env channel, got %d", cfg.TelegramArchiveChannel)
+	}
+}
+
+func TestLoadRejectsMalformedDotEnv(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile(".env", []byte("BROKEN='unterminated\n"), 0o600); err != nil {
+		t.Fatalf("Write .env: %v", err)
+	}
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "failed to load .env") {
+		t.Fatalf("Load() error = %v, want malformed .env rejection", err)
+	}
+}
+
+func TestLoadRejectsNoncanonicalBooleans(t *testing.T) {
+	for _, key := range []string{"ENABLE_DATABASE", "ENABLE_PREPROCESSING"} {
+		t.Run(key, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-1234567890")
+			t.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+			t.Setenv("TELEGRAM_CHANNEL_ARCHIVE_ID", "-1001234567890")
+			t.Setenv(key, "definitely")
+
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), key+" must be exactly true or false") {
+				t.Fatalf("Load() error = %v, want strict %s rejection", err, key)
+			}
+		})
+	}
+}
+
+func TestTelegramChannelIDRequiresMinus100Prefix(t *testing.T) {
+	tests := map[int64]bool{
+		-1001234567890: true,
+		-1012345678900: false,
+		-100:           false,
+		-9999999999999: false,
+		1001234567890:  false,
+	}
+	for id, want := range tests {
+		if got := isTelegramChannelID(id); got != want {
+			t.Errorf("isTelegramChannelID(%d) = %t, want %t", id, got, want)
+		}
 	}
 }
 
@@ -800,13 +886,14 @@ func TestValidateLogSource(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Valid drupal_watchdog config with drush format",
+			name: "Invalid drupal_watchdog config with raw drush format",
 			setup: func(c *Config) {
 				c.LogSourceType = "drupal_watchdog"
 				c.DrupalWatchdogPath = "/var/log/drupal-watchdog.txt"
 				c.DrupalWatchdogFormat = "drush"
 			},
-			expectError: false,
+			expectError:   true,
+			errorContains: "watchdog_format must be 'json'",
 		},
 		{
 			name: "Valid ocms config",
@@ -861,7 +948,7 @@ func TestValidateLogSource(t *testing.T) {
 				c.DrupalWatchdogFormat = "invalid"
 			},
 			expectError:   true,
-			errorContains: "watchdog_format must be 'json' or 'drush' in drupal-sites.json",
+			errorContains: "watchdog_format must be 'json' in drupal-sites.json",
 		},
 	}
 
@@ -959,7 +1046,8 @@ all_example_com /var/www/vhosts/all.example.com/ocms all_example_com 8083
   "default_log_kind": "main",
   "sites": {
     "example_com": {
-      "name": "Example Site"
+      "name": "Example Site",
+      "legacy_names": ["Old Example Site"]
     },
     "app_example_com": {
       "name": "Example App",
@@ -996,6 +1084,14 @@ func TestApplyOCMSMultiSiteConfig_DerivesMainLogPath(t *testing.T) {
 	}
 	if cfg.SelectedSiteName() != "Example Site" {
 		t.Fatalf("SelectedSiteName() = %q", cfg.SelectedSiteName())
+	}
+	legacyNames := cfg.SelectedSiteLegacyNames()
+	if len(legacyNames) != 1 || legacyNames[0] != "Old Example Site" {
+		t.Fatalf("SelectedSiteLegacyNames() = %q", legacyNames)
+	}
+	legacyNames[0] = "mutated"
+	if cfg.SelectedSiteLegacyNames()[0] != "Old Example Site" {
+		t.Fatal("SelectedSiteLegacyNames() returned aliased storage")
 	}
 	if cfg.OCMSSitesConfigPath != configPath {
 		t.Fatalf("OCMSSitesConfigPath = %q", cfg.OCMSSitesConfigPath)
@@ -1118,12 +1214,9 @@ func TestApplyOCMSMultiSiteConfig_RangeInvalid(t *testing.T) {
 }
 
 func TestApplyOCMSSourcePathOverride_DefaultsToYesterday(t *testing.T) {
-	_, configPath, _ := ocmsMultiSiteFixtures(t)
 	cfg := &Config{LogSourceType: "ocms", OCMSLogsPath: "/tmp/manual.log"}
 	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
-		SourcePath:      "/tmp/manual.log",
-		OCMSSite:        "example_com",
-		OCMSSitesConfig: configPath,
+		SourcePath: "/tmp/manual.log",
 	})
 	if err != nil {
 		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
@@ -1134,16 +1227,13 @@ func TestApplyOCMSSourcePathOverride_DefaultsToYesterday(t *testing.T) {
 }
 
 func TestApplyOCMSSourcePathOverride_RangeInvalid(t *testing.T) {
-	_, configPath, _ := ocmsMultiSiteFixtures(t)
 	cfg := &Config{
 		LogSourceType: "ocms",
 		OCMSLogsPath:  "/tmp/manual.log",
 		OCMSLogRange:  "lastweek",
 	}
 	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
-		SourcePath:      "/tmp/manual.log",
-		OCMSSite:        "example_com",
-		OCMSSitesConfig: configPath,
+		SourcePath: "/tmp/manual.log",
 	})
 	if err == nil {
 		t.Fatal("applyOCMSSourcePathOverride() expected error for invalid range, got nil")
@@ -1162,7 +1252,7 @@ func TestApplyOCMSMultiSiteConfig_UsesDefaultSite(t *testing.T) {
 	}
 }
 
-func TestApplyOCMSMultiSiteConfig_SourcePathOverridesRegistry(t *testing.T) {
+func TestApplyOCMSMultiSiteConfig_SourcePathRejectsSiteIdentity(t *testing.T) {
 	_, configPath, _ := ocmsMultiSiteFixtures(t)
 	cfg := &Config{
 		LogSourceType: "ocms",
@@ -1175,41 +1265,16 @@ func TestApplyOCMSMultiSiteConfig_SourcePathOverridesRegistry(t *testing.T) {
 		OCMSSitesConfig: configPath,
 		OCMSLogKind:     OCMSLogKindAll,
 	})
-	if err != nil {
-		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
-	}
-	if cfg.OCMSLogsPath != "/tmp/manual.log" {
-		t.Fatalf("OCMSLogsPath = %q", cfg.OCMSLogsPath)
-	}
-	paths := cfg.GetOCMSLogPaths()
-	if len(paths) != 1 || paths[0].Path != "/tmp/manual.log" {
-		t.Fatalf("GetOCMSLogPaths() = %+v, want manual source path only", paths)
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("applyOCMSMultiSiteConfig() error = %v, want conflicting-flag rejection", err)
 	}
 }
 
-func TestApplyOCMSMultiSiteConfig_SourcePathSkipsRegistryLookup(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "ocms-sites.json")
-	configContent := `{
-  "version": "1.0",
-  "default_site": "example_com",
-  "registry_path": "` + filepath.Join(tmpDir, "missing-sites.conf") + `",
-  "default_log_kind": "all",
-  "sites": {
-    "example_com": {
-      "name": "Example Site"
-    }
-  }
-}`
-	if err := os.WriteFile(configPath, []byte(configContent), 0o600); err != nil {
-		t.Fatalf("write ocms config: %v", err)
-	}
-
+func TestApplyOCMSMultiSiteConfig_SourcePathSkipsAutoDiscovery(t *testing.T) {
 	cfg := &Config{LogSourceType: "ocms"}
 	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{
-		SourcePath:      "/tmp/manual.log",
-		OCMSSitesConfig: configPath,
-		OCMSLogKind:     OCMSLogKindError,
+		SourcePath:  "/tmp/manual.log",
+		OCMSLogKind: OCMSLogKindError,
 	})
 	if err != nil {
 		t.Fatalf("applyOCMSMultiSiteConfig() error = %v", err)
@@ -1288,6 +1353,25 @@ func TestApplyOCMSMultiSiteConfig_SingleSiteModeUnchanged(t *testing.T) {
 	}
 	if cfg.SelectedSiteID() != "" {
 		t.Fatalf("SelectedSiteID() = %q", cfg.SelectedSiteID())
+	}
+	if cfg.OCMSLogRange != OCMSLogRangeYesterday {
+		t.Fatalf("OCMSLogRange = %q, want %q", cfg.OCMSLogRange, OCMSLogRangeYesterday)
+	}
+}
+
+func TestApplyOCMSMultiSiteConfig_SingleSiteRejectsInvalidRange(t *testing.T) {
+	cfg := &Config{
+		LogSourceType: "ocms",
+		OCMSLogsPath:  "/tmp/ocms.log",
+		OCMSLogKind:   OCMSLogKindMain,
+		OCMSLogRange:  "lastweek",
+	}
+	err := cfg.applyOCMSMultiSiteConfig(&CLIOptions{})
+	if err == nil {
+		t.Fatal("applyOCMSMultiSiteConfig() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "must be 'today' or 'yesterday'") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -1469,6 +1553,7 @@ func TestCLIOptionsStructure(t *testing.T) {
 		OCMSLogKind:       "error",
 		ListOCMSSites:     true,
 		ExclusionsConfig:  "/etc/exclusions.json",
+		CheckRuntime:      true,
 		ShowHelp:          true,
 		ShowVersion:       true,
 	}
@@ -1511,6 +1596,9 @@ func TestCLIOptionsStructure(t *testing.T) {
 	}
 	if !opts.ShowVersion {
 		t.Errorf("ShowVersion not set correctly")
+	}
+	if !opts.CheckRuntime {
+		t.Errorf("CheckRuntime not set correctly")
 	}
 }
 
@@ -1556,6 +1644,9 @@ func TestCLIOptionsDefaults(t *testing.T) {
 	}
 	if opts.ShowVersion {
 		t.Errorf("Expected ShowVersion to be false by default")
+	}
+	if opts.CheckRuntime {
+		t.Errorf("Expected CheckRuntime to be false by default")
 	}
 }
 
@@ -1610,6 +1701,22 @@ func TestValidateOllamaProvider(t *testing.T) {
 			},
 			expectError:   true,
 			errorContains: "must use http:// or https:// scheme",
+		},
+		{
+			name: "Ollama URL credentials rejected",
+			setup: func(c *Config) {
+				c.OllamaBaseURL = "https://user:secret@ollama.example.com"
+			},
+			expectError:   true,
+			errorContains: "must not contain URL credentials",
+		},
+		{
+			name: "Ollama context must exceed output",
+			setup: func(c *Config) {
+				c.OllamaContextTokens = c.AIMaxTokens
+			},
+			expectError:   true,
+			errorContains: "greater than AI_MAX_TOKENS",
 		},
 		{
 			name: "Valid Ollama with HTTPS",

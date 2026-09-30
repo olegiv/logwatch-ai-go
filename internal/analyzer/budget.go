@@ -57,12 +57,21 @@ func CalculateLogTokenBudget(contextLimit, responseReserve, systemPromptTokens, 
 		userPromptOverheadTokens = 0
 	}
 
-	safetyMargin := max(contextLimit/promptSafetyMarginDivisor, minPromptSafetyMarginTokens)
+	safetyMargin := PromptSafetyMarginTokens(contextLimit)
 
 	budget := contextLimit - responseReserve - systemPromptTokens - userPromptOverheadTokens - safetyMargin
 	if budget < minLogTokenBudget {
-		return minLogTokenBudget
+		return 0
 	}
 
 	return budget
+}
+
+// PromptSafetyMarginTokens returns the conservative input-space reserve used
+// by heuristic prompt fitting.
+func PromptSafetyMarginTokens(contextLimit int) int {
+	if contextLimit <= 0 {
+		contextLimit = DefaultContextLimit
+	}
+	return max(contextLimit/promptSafetyMarginDivisor, minPromptSafetyMarginTokens)
 }

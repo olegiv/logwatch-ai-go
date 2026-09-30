@@ -13,12 +13,18 @@ import (
 
 // Credential patterns to redact from error messages
 var credentialPatterns = []*regexp.Regexp{
+	// Authenticated HTTP(S) proxy or service URL userinfo.
+	regexp.MustCompile(`(?i)https?://[^/\s:@]+:[^@\s/]+@`),
 	// Anthropic API key: sk-ant-api03-... or sk-ant-... (variable length, min 10 chars after prefix)
 	regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{10,}`),
 	// Generic OpenAI-style API key patterns
 	regexp.MustCompile(`sk-[a-zA-Z0-9_-]{32,}`),
-	// Telegram bot token: 123456789:ABC-DEF... (token part is typically 35-36 chars)
-	regexp.MustCompile(`\d{8,12}:[a-zA-Z0-9_-]{30,}`),
+	// Telegram bot token. Configuration validation requires at least five
+	// bot-ID digits, so every accepted token is redacted while clock times,
+	// host:port pairs and model tags (12:30:45, 127.0.0.1:11434,
+	// llama3.3:latest) are left intact. The optional bot prefix covers SDK
+	// transport URLs such as /bot123456:secret/getMe.
+	regexp.MustCompile(`(bot)?[0-9]{5,16}:[a-zA-Z0-9_-]+`),
 	// Bearer tokens in headers
 	regexp.MustCompile(`Bearer\s+[a-zA-Z0-9_.-]+`),
 	// Authorization headers (matches "authorization: value" or "authorization value")
@@ -127,9 +133,9 @@ func MaskCredential(s string) string {
 	}
 
 	// Check for Telegram bot token format (number:token)
-	if idx := strings.Index(s, ":"); idx > 0 && idx < 15 {
+	if idx := strings.Index(s, ":"); idx > 0 && idx <= 16 {
 		parts := strings.SplitN(s, ":", 2)
-		if len(parts) == 2 && len(parts[0]) <= 12 {
+		if len(parts) == 2 && len(parts[0]) <= 16 {
 			return parts[0] + ":***..."
 		}
 	}

@@ -4,21 +4,13 @@ This document covers cost analysis and optimization for Logwatch AI Analyzer.
 
 ## Anthropic Claude (Cloud) Costs
 
-### Typical Daily Costs
+### Cost accounting
 
-| Run Type | Cost |
-|----------|------|
-| First run (cache creation) | $0.016-0.022 |
-| Cached runs | $0.011-0.015 |
-| Monthly estimate | ~$0.47 |
-| Yearly estimate | ~$5.64 |
-
-### Prompt Caching Behavior
-
-- System prompt is marked with `ephemeral` cache control
-- First run creates cache (incurs cache write cost: $3.75/MTok)
-- Subsequent runs (within 5 min) use cache (90% savings: $0.30/MTok vs $3/MTok)
-- Historical context is included in user prompt (not cached)
+The analyzer calculates each run from the input and output usage returned by
+Anthropic and the model-aware pricing table. It does not currently send cache
+control blocks, so budget estimates must use normal input pricing. Cached-token
+fields remain in storage and reporting for forward compatibility but are not
+advertised as an active optimization.
 
 ### Cost Reduction Strategies
 
@@ -50,6 +42,7 @@ Configure in `.env`:
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.3:latest
+OLLAMA_CONTEXT_TOKENS=32768
 ```
 
 ### Trade-offs
@@ -77,6 +70,7 @@ Configure in `.env`:
 LLM_PROVIDER=lmstudio
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=local-model
+LMSTUDIO_CONTEXT_TOKENS=32768
 ```
 
 ### Recommended Models

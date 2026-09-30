@@ -71,7 +71,7 @@ type PromptBuilder interface {
 	// instruction block telling the LLM to ignore matching findings and
 	// their influence on systemStatus, summary, and metrics. Pass nil for
 	// no exclusions; the resulting prompt is byte-identical to the
-	// pre-exclusion output, which preserves Anthropic prompt-cache hits.
+	// pre-exclusion output, which preserves deterministic prompt construction.
 	GetSystemPrompt(globalExclusions []string) string
 
 	// GetUserPrompt constructs the user prompt with log content and history.

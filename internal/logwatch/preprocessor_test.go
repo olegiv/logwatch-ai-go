@@ -275,7 +275,7 @@ func TestDeduplicateContent(t *testing.T) {
 		shouldNotContain string
 	}{
 		{
-			name: "Duplicate log lines",
+			name: "Distinct security origins are not duplicates",
 			content: `Failed login from 192.168.1.100
 Failed login from 192.168.1.101
 Failed login from 192.168.1.102
@@ -288,8 +288,23 @@ Failed login from 192.168.1.108
 Failed login from 192.168.1.109
 Failed login from 192.168.1.110
 Some other message`,
-			shouldContain:    "occurred",
-			shouldNotContain: "192.168.1.105",
+			shouldContain:    "192.168.1.105",
+			shouldNotContain: "occurred",
+		},
+		{
+			name: "Exact duplicate security lines are grouped",
+			content: `Failed login from 192.168.1.100
+Failed login from 192.168.1.100
+Failed login from 192.168.1.100
+Failed login from 192.168.1.100
+Failed login from 192.168.1.100
+Failed login from 192.168.1.100
+Failed login from 192.168.1.100
+Failed login from 192.168.1.100
+Failed login from 192.168.1.100
+Failed login from 192.168.1.100
+Failed login from 192.168.1.100`,
+			shouldContain: "occurred 11 times",
 		},
 		{
 			name: "Short content - no deduplication",
@@ -795,5 +810,31 @@ func TestProcessWithBudget_EnforcesTokenLimit(t *testing.T) {
 
 	if !strings.Contains(result, "SSH Security") {
 		t.Error("expected compressed output to preserve section headers")
+	}
+}
+
+func TestProcessWithBudgetPrioritizesLaterSecuritySection(t *testing.T) {
+	preprocessor := NewPreprocessor(5000)
+	var noisy strings.Builder
+	for i := range 26 {
+		label := strings.Repeat(string(rune('a'+i)), 80)
+		fmt.Fprintf(&noisy, "network diagnostic %s\n", label)
+	}
+	content := `################### Network ###################
+` + noisy.String() + `
+################### SSH Security ###################
+Critical unauthorized root login from 203.0.113.77
+`
+
+	const budget = 60
+	result, err := preprocessor.ProcessWithBudget(content, budget)
+	if err != nil {
+		t.Fatalf("ProcessWithBudget() error = %v", err)
+	}
+	if tokens := preprocessor.EstimateTokens(result); tokens > budget {
+		t.Fatalf("ProcessWithBudget() produced %d tokens, want <= %d", tokens, budget)
+	}
+	if !strings.Contains(result, "SSH Security") || !strings.Contains(result, "203.0.113.77") {
+		t.Fatalf("terminal fallback discarded later high-priority evidence: %q", result)
 	}
 }

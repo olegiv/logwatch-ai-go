@@ -11,8 +11,7 @@ Patterns are rendered directly into the prompt sent to the LLM, which is
 why they must not contain secrets.
 
 The feature is **opt-in**: if no `exclusions.json` file is present the
-analyzer behaves exactly as before (byte-identical prompt output, so
-Anthropic prompt-cache hits are preserved).
+analyzer behaves exactly as before with byte-identical prompt output.
 
 ## Quick Start
 
@@ -67,8 +66,8 @@ If the file is absent the feature is a silent no-op.
 |------------|----------------------------------------------------------------------------------------------------------|
 | `version`  | Config format version. `"1.2"` (recommended), `"1.1"` (no `ocms` list), or `"1.0"` (global+sites only). |
 | `global`   | Applies to every run. Rendered into the **system prompt** (stable, cache-friendly for Anthropic).        |
-| `logwatch` | Applies only to logwatch runs. Rendered into the **user prompt**. (v1.1 only.)                           |
-| `drupal`   | Applies only to Drupal watchdog runs, regardless of site. Rendered into the **user prompt**. (v1.1.)     |
+| `logwatch` | Applies only to logwatch runs. Rendered into the **user prompt**. (v1.1+.)                              |
+| `drupal`   | Applies only to Drupal watchdog runs, regardless of site. Rendered into the **user prompt**. (v1.1+.)    |
 | `ocms`     | Applies only to OCMS runs. Rendered into the **user prompt**. (v1.2.)                                      |
 | `sites`    | Map keyed by Drupal site ID (from `drupal-sites.json`). Stacked on top of `drupal`. User-prompt section. |
 
@@ -127,7 +126,7 @@ disabled for that run.
 
 `exclusions.json` is validated on load. The analyzer refuses to start if:
 
-- `version` is missing or is anything other than `"1.0"` or `"1.1"`.
+- `version` is missing or is anything other than `"1.0"`, `"1.1"`, or `"1.2"`.
 - Any pattern is blank or whitespace-only.
 - The same pattern appears twice (case-insensitively) in the same list.
 - Any site key is empty.
@@ -176,8 +175,8 @@ or `logwatch: too many patterns`).
   retention window). New analyses will not reintroduce them, because the
   LLM is instructed to ignore them regardless of where they appear.
 - `exclusions.json.v1.0` files continue to work unchanged. Add `logwatch`
-  and `drupal` fields and bump the version to `"1.1"` to use the new
-  source-wide scopes.
+  and `drupal` fields and bump the version to `"1.1"` for those source-wide
+  scopes; use `"1.2"` when adding the `ocms` scope.
 
 ## When _Not_ to Use This
 

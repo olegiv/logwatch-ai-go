@@ -89,6 +89,9 @@ func TestLMStudioClient_GetModelInfo(t *testing.T) {
 	if info["base_url"] != "http://localhost:1234" {
 		t.Errorf("GetModelInfo() base_url = %v, want http://localhost:1234", info["base_url"])
 	}
+	if info["context_limit"] != 32768 {
+		t.Errorf("GetModelInfo() context_limit = %v, want 32768", info["context_limit"])
+	}
 }
 
 func TestLMStudioClient_GetProviderName(t *testing.T) {
@@ -145,6 +148,16 @@ func TestLMStudioClient_CheckConnection(t *testing.T) {
 				"data": []map[string]any{
 					{"id": "llama-2-7b", "object": "model"},
 				},
+			},
+			statusCode: http.StatusOK,
+			wantErr:    true,
+		},
+		{
+			name:  "similar substring is not an exact model",
+			model: "llama-2-7b",
+			response: map[string]any{
+				"object": "list",
+				"data":   []map[string]any{{"id": "vendor/llama-2-7b-tuned", "object": "model"}},
 			},
 			statusCode: http.StatusOK,
 			wantErr:    true,
@@ -299,6 +312,11 @@ func TestLMStudioClient_Analyze_Error(t *testing.T) {
 			name:       "invalid JSON in content",
 			statusCode: http.StatusOK,
 			response:   `{"choices": [{"message": {"role": "assistant", "content": "not valid json"}}]}`,
+		},
+		{
+			name:       "token-limited response",
+			statusCode: http.StatusOK,
+			response:   `{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"{\"systemStatus\":\"Good\",\"summary\":\"partial\"}"}}]}`,
 		},
 	}
 

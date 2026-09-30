@@ -110,6 +110,25 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
+func TestNewClientMalformedAuthenticatedProxyDoesNotLeakPassword(t *testing.T) {
+	t.Parallel()
+
+	const password = "proxy-password-%zz-sentinel"
+	_, err := NewClient(
+		"sk-ant-test-key",
+		"claude-sonnet-4.5",
+		"http://operator:"+password+"@proxy.example.com:8080",
+		120,
+		8000,
+	)
+	if err == nil {
+		t.Fatal("NewClient() accepted a malformed authenticated proxy URL")
+	}
+	if strings.Contains(err.Error(), password) || strings.Contains(err.Error(), "operator:") {
+		t.Fatalf("NewClient() exposed proxy userinfo: %v", err)
+	}
+}
+
 func TestCountPromptTokens(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -339,6 +358,40 @@ func TestContextCancellation(t *testing.T) {
 	if err == nil {
 		t.Log("Note: Expected an error due to cancelled context or API failure")
 		// Don't fail the test as the actual API behavior may vary
+	}
+}
+
+func TestAnalyzeRejectsMaxTokensStopReason(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":          "msg_test",
+			"type":        "message",
+			"role":        "assistant",
+			"model":       "claude-test",
+			"stop_reason": "max_tokens",
+			"content": []map[string]any{{
+				"type": "text",
+				"text": `{"systemStatus":"Good","summary":"partial"}`,
+			}},
+			"usage": map[string]int{"input_tokens": 10, "output_tokens": 10},
+		})
+	}))
+	defer server.Close()
+
+	client := &Client{
+		client: anthropic.NewClient(
+			"sk-ant-test-key",
+			anthropic.WithBaseURL(server.URL),
+			anthropic.WithHTTPClient(server.Client()),
+		),
+		model:     "claude-test",
+		maxTokens: 10,
+	}
+	_, _, err := client.Analyze(context.Background(), "system", "user")
+	if err == nil || !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("Analyze() error = %v, want truncation error", err)
 	}
 }
 

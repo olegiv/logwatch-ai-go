@@ -129,6 +129,35 @@ func TestReader_ReadFiles_MissingSecondFileTolerated(t *testing.T) {
 	}
 }
 
+func TestReader_ReadFiles_EmptySecondFileTolerated(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	mainLog := filepath.Join(tmpDir, "ocms.log")
+	errorLog := filepath.Join(tmpDir, "error.log")
+	mainContent := "2026-04-26T02:15:00Z INFO main log event\n"
+	if err := os.WriteFile(mainLog, []byte(mainContent), 0o600); err != nil {
+		t.Fatalf("failed to write main log: %v", err)
+	}
+	if err := os.WriteFile(errorLog, nil, 0o600); err != nil {
+		t.Fatalf("failed to write empty error log: %v", err)
+	}
+
+	got, err := NewReader(10, false, 1000).ReadFiles([]LogFile{
+		{Kind: "main", Path: mainLog},
+		{Kind: "error", Path: errorLog},
+	})
+	if err != nil {
+		t.Fatalf("ReadFiles() should tolerate empty error log; got error = %v", err)
+	}
+	if !strings.Contains(got, "### OCMS MAIN LOG") || !strings.Contains(got, mainContent) {
+		t.Fatalf("combined content missing main log section:\n%s", got)
+	}
+	if strings.Contains(got, "### OCMS ERROR LOG") {
+		t.Fatalf("combined content unexpectedly includes empty ERROR section:\n%s", got)
+	}
+}
+
 func TestReader_ReadFiles_AllMissingFails(t *testing.T) {
 	t.Parallel()
 
@@ -144,12 +173,12 @@ func TestReader_ReadFiles_AllMissingFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("ReadFiles() expected error when all files are missing")
 	}
-	if !strings.Contains(err.Error(), "all missing") {
-		t.Fatalf("error = %v, want 'all missing'", err)
+	if !strings.Contains(err.Error(), "missing or empty") {
+		t.Fatalf("error = %v, want explicit no-entry reason", err)
 	}
 }
 
-func TestReader_Read_TooOld(t *testing.T) {
+func TestReader_Read_AcceptsQuietRotatedLog(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -163,10 +192,27 @@ func TestReader_Read_TooOld(t *testing.T) {
 		t.Fatalf("failed to set mtime: %v", err)
 	}
 
-	reader := NewReader(10, false, 1000)
-	_, err := reader.Read(testFile)
-	if err == nil || !strings.Contains(err.Error(), "too old") {
-		t.Fatalf("expected too old error, got: %v", err)
+	reader := NewReaderWithMaxAge(10, false, 1000, MaxYesterdayLogAge)
+	if _, err := reader.Read(testFile); err != nil {
+		t.Fatalf("quiet rotated log within the accepted age should remain valid: %v", err)
+	}
+}
+
+func TestReader_Read_RejectsStaleRotatedLog(t *testing.T) {
+	t.Parallel()
+
+	testFile := filepath.Join(t.TempDir(), "ocms.log.1")
+	if err := os.WriteFile(testFile, []byte("WARN stale OCMS event\n"), 0o600); err != nil {
+		t.Fatalf("write rotated log: %v", err)
+	}
+	old := time.Now().Add(-MaxYesterdayLogAge - time.Hour)
+	if err := os.Chtimes(testFile, old, old); err != nil {
+		t.Fatalf("set stale mtime: %v", err)
+	}
+
+	reader := NewReaderWithMaxAge(10, false, 1000, MaxYesterdayLogAge)
+	if _, err := reader.Read(testFile); err == nil || !strings.Contains(err.Error(), "too old") {
+		t.Fatalf("Read() should reject stale rotated log, got %v", err)
 	}
 }
 

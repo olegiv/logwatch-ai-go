@@ -6,11 +6,12 @@ GO=go
 
 GOLANGCI_LINT_VERSION := v2.13.1
 GOFUMPT_VERSION       := v0.11.0
+GOVULNCHECK_VERSION   := v1.7.0
 
 .DEFAULT_GOAL := help
 
 .PHONY: all help build build-prod build-linux-amd64 build-darwin-arm64 build-all-platforms \
-        test test-race coverage coverage-html fmt fmt-check vet lint lint-go check deps tidy clean install-tools \
+        test test-race coverage coverage-html fmt fmt-check vet lint lint-go govuln check deps tidy clean install-tools \
         install run \
         deploy deploy-stage rollback lint-sh test-sh
 
@@ -91,16 +92,20 @@ lint-sh: ## Lint deployment shell scripts (requires shellcheck)
 		echo "error: shellcheck is required; run 'make install-tools'" >&2; \
 		exit 127; \
 	}
-	shellcheck -x deploy/*.sh
-	bash -n deploy/*.sh
+	shellcheck -x deploy/*.sh scripts/*.sh scripts/*.sh.example
+	bash -n deploy/*.sh scripts/*.sh scripts/*.sh.example
 
 test-sh: ## Run shell helper and deployment state-machine tests
 	bash deploy/lib_test.sh
 	bash deploy/remote_install_test.sh
+	bash scripts/security_test.sh
 
 lint: lint-go lint-sh ## Run all linters
 
-check: fmt-check vet lint test test-sh ## Run the full local quality gate
+govuln: ## Scan reachable Go code for known vulnerabilities
+	govulncheck ./...
+
+check: fmt-check vet lint test test-race test-sh govuln ## Run the full local quality gate
 
 deps: ## Download Go module dependencies
 	$(GO) mod download
@@ -116,6 +121,7 @@ clean: ## Remove build artifacts
 install-tools: ## Install required Go and shell quality tools
 	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	$(GO) install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
+	$(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	@# shellcheck is not a Go tool, so install it with the host package manager.
 	@if command -v shellcheck >/dev/null 2>&1; then \
 		echo "shellcheck: $$(shellcheck --version | awk '/version:/{print $$2}') (already installed)"; \
@@ -134,18 +140,9 @@ install-tools: ## Install required Go and shell quality tools
 	fi
 
 install: build-prod ## Install optimized binary to system directory
-	@echo "Installing to $(INSTALL_DIR)..."
-	@sudo mkdir -p $(INSTALL_DIR)
-	@sudo cp $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/
-	@sudo cp -r scripts $(INSTALL_DIR)/
-	@sudo chmod +x $(INSTALL_DIR)/scripts/*.sh
-	@sudo mkdir -p $(INSTALL_DIR)/data
-	@sudo mkdir -p $(INSTALL_DIR)/logs
-	@if [ ! -f $(INSTALL_DIR)/.env ]; then \
-		sudo cp configs/.env.example $(INSTALL_DIR)/.env; \
-		echo "Created .env file - please configure it"; \
-	fi
-	@echo "Installation complete!"
+	@sudo env INSTALL_DIR="$(INSTALL_DIR)" \
+		BINARY_PATH="$(CURDIR)/$(BUILD_DIR)/$(BINARY_NAME)" \
+		"$(CURDIR)/scripts/install.sh"
 
 run: build ## Build and run the application
 	@$(BUILD_DIR)/$(BINARY_NAME)

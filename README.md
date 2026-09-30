@@ -24,7 +24,7 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 - **Smart Notifications**: Dual-channel Telegram notifications (archive + alerts)
 - **Historical Tracking**: SQLite database stores analysis history for trend detection
 - **Intelligent Preprocessing**: Handles large log files (up to 800KB-1MB) with smart content reduction
-- **Cost Optimization**: Implements Claude prompt caching (16-30% cost savings)
+- **Cost Tracking**: Records model-aware input/output token costs per analysis
 - **Proxy Support**: Full HTTP/HTTPS proxy support for corporate environments
 - **Secure Logging**: Automatic credential sanitization prevents API keys from appearing in logs
 - **Rate Limiting**: Telegram API rate limiting with exponential backoff retry
@@ -90,12 +90,14 @@ CLAUDE_MODEL=claude-haiku-4-5-20251001
 # Requires Ollama running locally: https://ollama.ai
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.3:latest
+OLLAMA_CONTEXT_TOKENS=32768
 
 # LM Studio Configuration (used when LLM_PROVIDER=lmstudio)
 # Requires LM Studio running locally: https://lmstudio.ai
 # See "LM Studio Setup" section for recommended models
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=local-model
+LMSTUDIO_CONTEXT_TOKENS=32768
 
 # AI Settings (applies to all providers)
 AI_TIMEOUT_SECONDS=120
@@ -111,12 +113,12 @@ TELEGRAM_CHANNEL_ALERTS_ID=-1009876543210     # Optional
 LOG_SOURCE_TYPE=logwatch
 
 # Logwatch Configuration (used when LOG_SOURCE_TYPE=logwatch)
-LOGWATCH_OUTPUT_PATH=/tmp/logwatch-output.txt
+LOGWATCH_OUTPUT_PATH=/var/log/logwatch-ai/logwatch-output.txt
 
 # OCMS Configuration (used when LOG_SOURCE_TYPE=ocms)
 # Single-site mode uses OCMS_LOGS_PATH directly.
 # Multi-site mode uses ocms-sites.json with log kinds: main, error, or all.
-OCMS_LOGS_PATH=/tmp/ocms.log
+OCMS_LOGS_PATH=/var/log/logwatch-ai/ocms.log
 
 # Drupal Watchdog Configuration (used when LOG_SOURCE_TYPE=drupal_watchdog)
 # Configure in drupal-sites.json (see configs/drupal-sites.json.example)
@@ -126,6 +128,7 @@ MAX_LOG_SIZE_MB=10
 
 # Application
 LOG_LEVEL=info
+LOG_DIR=/var/log/logwatch-ai
 ENABLE_DATABASE=true
 DATABASE_PATH=./data/summaries.db
 
@@ -186,6 +189,7 @@ ollama serve
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.3:latest
+OLLAMA_CONTEXT_TOKENS=32768  # Must match the context allocated by Ollama
 ```
 
 **Recommended Models:**
@@ -224,6 +228,7 @@ LM Studio provides a user-friendly desktop application for running local LLMs:
 LLM_PROVIDER=lmstudio
 LMSTUDIO_BASE_URL=http://localhost:1234
 LMSTUDIO_MODEL=local-model
+LMSTUDIO_CONTEXT_TOKENS=32768  # Must match the loaded model's server setting
 ```
 
 **Note:** The `local-model` identifier uses whatever model is currently loaded in LM Studio. You can also specify a specific model name if multiple models are loaded.
@@ -270,7 +275,7 @@ sudo $EDITOR /opt/logwatch-ai/run-cron.sh
 # 3. Add ONE cron entry (root cron — logwatch needs /var/log/* access):
 sudo crontab -e
 #   #@desc: Logwatch AI
-#   7 2 * * * /opt/logwatch-ai/run-cron.sh >> /opt/logwatch-ai/logs/cron.log 2>&1
+#   7 2 * * * /opt/logwatch-ai/run-cron.sh
 ```
 
 See [docs/CRON_SETUP.md](docs/CRON_SETUP.md) for detailed setup
@@ -294,10 +299,12 @@ To analyze Drupal watchdog logs instead of logwatch:
   "sites": {
     "production": {
       "name": "Production Site",
+      "legacy_names": ["Previous Production Name"],
       "drupal_root": "/var/www/html",
-      "watchdog_path": "/var/log/drupal-watchdog.json",
+      "system_user": "www-data",
+      "watchdog_path": "/var/log/logwatch-ai/production-watchdog.json",
       "watchdog_format": "json",
-      "min_severity": 3,
+      "min_severity": 4,
       "watchdog_limit": 100
     }
   }
@@ -308,8 +315,8 @@ To analyze Drupal watchdog logs instead of logwatch:
    [docs/CRON_SETUP.md](docs/CRON_SETUP.md)):
 ```bash
 # In /opt/logwatch-ai/run-cron.sh:
-run_job "drupal/production/generate" ./scripts/generate-drupal-watchdog.sh --site production
-run_job "drupal/production/analyze"  ./logwatch-analyzer -source-type drupal_watchdog -drupal-site production
+run_job "drupal/production/generate" ./scripts/generate-drupal-watchdog.sh --site production && \
+  run_job "drupal/production/analyze" ./logwatch-analyzer -source-type drupal_watchdog -drupal-site production
 ```
 
 **Drupal Watchdog JSON Format:**
@@ -344,15 +351,17 @@ For organizations managing multiple Drupal sites, the analyzer supports a centra
     "production": {
       "name": "Production Site",
       "drupal_root": "/var/www/production/drupal",
-      "watchdog_path": "/var/log/drupal/production-watchdog.json",
+      "system_user": "www-data",
+      "watchdog_path": "/var/log/logwatch-ai/production-watchdog.json",
       "watchdog_format": "json",
-      "min_severity": 3,
+      "min_severity": 4,
       "watchdog_limit": 100
     },
     "staging": {
       "name": "Staging Site",
       "drupal_root": "/var/www/staging/drupal",
-      "watchdog_path": "/var/log/drupal/staging-watchdog.json",
+      "system_user": "www-data",
+      "watchdog_path": "/var/log/logwatch-ai/staging-watchdog.json",
       "watchdog_format": "json",
       "min_severity": 4,
       "watchdog_limit": 200
@@ -383,10 +392,10 @@ For organizations managing multiple Drupal sites, the analyzer supports a centra
 5. **Automated multi-site cron** (analyze all sites daily):
    Add one `run_job` block per site to `/opt/logwatch-ai/run-cron.sh`:
 ```bash
-run_job "drupal/production/generate" ./scripts/generate-drupal-watchdog.sh --site production
-run_job "drupal/production/analyze"  ./logwatch-analyzer -source-type drupal_watchdog -drupal-site production
-run_job "drupal/staging/generate"    ./scripts/generate-drupal-watchdog.sh --site staging
-run_job "drupal/staging/analyze"     ./logwatch-analyzer -source-type drupal_watchdog -drupal-site staging
+run_job "drupal/production/generate" ./scripts/generate-drupal-watchdog.sh --site production && \
+  run_job "drupal/production/analyze" ./logwatch-analyzer -source-type drupal_watchdog -drupal-site production
+run_job "drupal/staging/generate" ./scripts/generate-drupal-watchdog.sh --site staging && \
+  run_job "drupal/staging/analyze" ./logwatch-analyzer -source-type drupal_watchdog -drupal-site staging
 ```
    The runner executes them sequentially in one cron tick — no staggered
    minutes, one log file, one exit code.
@@ -395,11 +404,13 @@ run_job "drupal/staging/analyze"     ./logwatch-analyzer -source-type drupal_wat
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | No | Human-readable site name for reports |
+| `legacy_names` | No | Previous display names used to attach v2 database history after a rename; values must be unique across all current and legacy site names |
 | `drupal_root` | Yes | Path to Drupal installation root |
-| `watchdog_path` | Yes | Path to watchdog export file |
-| `watchdog_format` | No | `json` (default) or `drush` |
-| `min_severity` | No | RFC 5424 severity level 0-7 (default: 3=error) |
-| `watchdog_limit` | No | Max entries in output (default: 100) |
+| `system_user` | No | Non-root Unix user used for Drush. Under root cron, omission securely infers the Drupal root owner; inference fails if that owner is root or invalid. An explicit value is recommended. |
+| `watchdog_path` | Yes | Absolute export path below `/var/log/logwatch-ai` or `/opt/logwatch-ai/logs`; basename must be `watchdog.json` or `*-watchdog.json` |
+| `watchdog_format` | No | `json` (the only supported format) |
+| `min_severity` | No | RFC 5424 severity level 0-7 (default: 4=warning). Authentication/access security events are retained even under a stricter numeric threshold. |
+| `watchdog_limit` | No | Maximum entries written to the export, 1-100000 (default: 100); severe and security entries are kept first |
 
 ### Multi-Site OCMS Support
 
@@ -416,7 +427,8 @@ per-site log paths in JSON; the analyzer derives them from the registry
   "default_log_kind": "main",
   "sites": {
     "example_com": {
-      "name": "Example Site"
+      "name": "Example Site",
+      "legacy_names": ["Previous Example Name"]
     },
     "app_example_com": {
       "name": "Example App",
@@ -446,6 +458,7 @@ Derived OCMS logs:
 | `default_log_kind` | No | Default log kind for sites without `sites.<id>.log_kind`. Allowed: `main`, `error`, `all`. Defaults to `main`. |
 | `sites` | Yes | Map keyed by OCMS site ID. IDs must exist in `/etc/ocms/sites.conf`. |
 | `sites.<id>.name` | No | Human-readable site name for reports. |
+| `sites.<id>.legacy_names` | No | Previous display names used to attach v2 database history after a rename; values must be unique across all current and legacy site names. |
 | `sites.<id>.log_kind` | No | Per-site log kind override. Allowed: `main`, `error`, `all`. |
 
 Log-kind precedence: CLI `-ocms-log-kind`, then `sites.<id>.log_kind`, then
@@ -481,6 +494,7 @@ Options:
   -list-drupal-sites         List available Drupal sites and exit
   -ocms-site string          OCMS site ID from ocms-sites.json
   -ocms-sites-config string  Path to ocms-sites.json configuration file
+  -ocms-sites-registry string  Path to the external OCMS sites registry
   -ocms-log-kind string      OCMS log kind: main, error, or all
   -ocms-range string         OCMS log range: yesterday (default, reads .log.1) or today (live log)
   -list-ocms-sites           List available OCMS sites and exit
@@ -512,11 +526,15 @@ Options:
 ./logwatch-analyzer -drupal-site production
 
 # Use custom watchdog file
-./logwatch-analyzer -source-type drupal_watchdog -source-path /tmp/custom-watchdog.json
+./logwatch-analyzer -source-type drupal_watchdog -source-path /var/log/logwatch-ai/custom-watchdog.json
 
 # List available Drupal sites
 ./logwatch-analyzer -list-drupal-sites
 ```
+
+For OCMS, `-source-path` selects direct single-path mode and cannot be mixed
+with `-ocms-site`, `-ocms-sites-config`, or `-ocms-sites-registry`. The
+`-ocms-log-kind` and `-ocms-range` selectors remain valid with a direct path.
 
 ### Build Options
 
@@ -639,11 +657,9 @@ logwatch-ai-go/
 
 Canonical pricing table lives in `internal/ai/pricing.go`.
 
-**Typical Costs (Haiku 4.5 default):**
-- **First run**: ~$0.005 (cache creation)
-- **Cached run**: ~$0.003-$0.005 (cache hits)
-- **Monthly (daily)**: ~$0.15/month
-- **Yearly**: ~$1.80/year
+Actual cost is calculated from the usage counters returned by Anthropic and
+the pricing table in `internal/ai/pricing.go`. This client does not currently
+request Anthropic prompt caching, so estimates must use normal input pricing.
 
 Sonnet 4.6 multiplies these by ~3; Opus 4.7 by ~5.
 
@@ -709,11 +725,10 @@ This Go implementation provides feature parity with the original Node.js version
 ### Maintained Features
 
 - ✅ Identical AI prompts and analysis logic
-- ✅ Same database schema (compatible with Node.js version)
+- ✅ Versioned SQLite migrations with stable multi-site history keys
 - ✅ Same preprocessing algorithm
 - ✅ Same notification format and dual-channel logic
 - ✅ Same cost tracking and token estimation
-- ✅ Prompt caching support
 - ✅ Proxy configuration
 
 ## Development
@@ -751,7 +766,7 @@ go test -v ./internal/logwatch
 
 **"Logwatch file is too old"**
 - Check if logwatch cron is running: `sudo crontab -l`
-- Verify logwatch output exists: `ls -lh /tmp/logwatch-output.txt`
+- Verify logwatch output exists: `ls -lh /var/log/logwatch-ai/logwatch-output.txt`
 
 **"Failed to send to archive channel"**
 - Verify bot is added as admin to the channel

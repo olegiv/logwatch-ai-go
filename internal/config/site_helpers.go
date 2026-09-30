@@ -4,11 +4,35 @@
 package config
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+
+	"github.com/olegiv/logwatch-ai-go/internal/securefile"
 )
+
+const maxSiteConfigBytes = 1024 * 1024
+
+func decodeStrictJSON(data []byte, destination any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = fmt.Errorf("multiple JSON values")
+		}
+		return fmt.Errorf("trailing content: %w", err)
+	}
+	return nil
+}
 
 func sortedSiteIDs[T any](sites map[string]T) []string {
 	ids := make([]string, 0, len(sites))
@@ -30,6 +54,35 @@ func resolveSiteID(sourceName, flagName, selectedID, defaultID, listFlag string)
 		sourceName, flagName, listFlag)
 }
 
+func registerSiteIdentityNames(
+	identities map[string]string,
+	siteID, displayName string,
+	legacyNames []string,
+) error {
+	names := make([]string, 0, len(legacyNames)+1)
+	names = append(names, displayName)
+	names = append(names, legacyNames...)
+	for index, name := range names {
+		if name == "" || name != strings.TrimSpace(name) {
+			field := "display name"
+			if index > 0 {
+				field = "legacy_names entry"
+			}
+			return fmt.Errorf("site '%s': %s must be non-empty without surrounding whitespace", siteID, field)
+		}
+		if existingSiteID, exists := identities[name]; exists {
+			return fmt.Errorf(
+				"sites '%s' and '%s' use the same display name or legacy name %q",
+				existingSiteID,
+				siteID,
+				name,
+			)
+		}
+		identities[name] = siteID
+	}
+	return nil
+}
+
 func loadFirstExistingFile(explicitPath, notFoundLabel string, searchPaths []string) ([]byte, string, error) {
 	if explicitPath != "" {
 		searchPaths = []string{explicitPath}
@@ -40,7 +93,7 @@ func loadFirstExistingFile(explicitPath, notFoundLabel string, searchPaths []str
 			continue
 		}
 
-		data, err := os.ReadFile(path) // #nosec G304 -- path comes from hardcoded search locations or an operator-supplied CLI flag
+		data, err := securefile.ReadLimitedRegular(path, maxSiteConfigBytes)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue

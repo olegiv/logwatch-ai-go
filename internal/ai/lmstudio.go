@@ -23,10 +23,11 @@ import (
 //
 // Use GGUF quantized versions (Q4_K_M, Q5_K_M) for better VRAM efficiency.
 type LMStudioClient struct {
-	baseURL    string
-	model      string
-	maxTokens  int
-	httpClient *http.Client
+	baseURL       string
+	model         string
+	maxTokens     int
+	contextTokens int
+	httpClient    *http.Client
 }
 
 // LMStudioConfig holds LM Studio-specific configuration
@@ -35,6 +36,7 @@ type LMStudioConfig struct {
 	Model          string // e.g., "local-model" (LM Studio model identifier)
 	TimeoutSeconds int    // Request timeout
 	MaxTokens      int    // Max tokens in response
+	ContextTokens  int    // Context window configured for the loaded model
 }
 
 // openAIChatRequest is the request body for OpenAI-compatible /v1/chat/completions endpoint
@@ -109,11 +111,18 @@ func NewLMStudioClient(cfg LMStudioConfig) (*LMStudioClient, error) {
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 8000
 	}
+	if cfg.ContextTokens <= 0 {
+		cfg.ContextTokens = 32768
+	}
+	if cfg.ContextTokens <= cfg.MaxTokens {
+		return nil, fmt.Errorf("LM Studio context tokens must exceed max output tokens")
+	}
 
 	return &LMStudioClient{
-		baseURL:   cfg.BaseURL,
-		model:     cfg.Model,
-		maxTokens: cfg.MaxTokens,
+		baseURL:       cfg.BaseURL,
+		model:         cfg.Model,
+		maxTokens:     cfg.MaxTokens,
+		contextTokens: cfg.ContextTokens,
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second,
 		},
@@ -125,7 +134,7 @@ func (c *LMStudioClient) Analyze(ctx context.Context, systemPrompt, userPrompt s
 	startTime := time.Now()
 
 	// Create request with retry logic
-	response, err := retryWithBackoff(defaultMaxRetries, func() (*openAIChatResponse, error) {
+	response, err := retryWithBackoff(ctx, defaultMaxRetries, func() (*openAIChatResponse, error) {
 		return c.callAPI(ctx, systemPrompt, userPrompt)
 	})
 	if err != nil {
@@ -140,6 +149,9 @@ func (c *LMStudioClient) Analyze(ctx context.Context, systemPrompt, userPrompt s
 	responseText := response.Choices[0].Message.Content
 	if responseText == "" {
 		return nil, nil, fmt.Errorf("empty response from LM Studio")
+	}
+	if response.Choices[0].FinishReason == "length" {
+		return nil, nil, fmt.Errorf("LM Studio response was truncated at the configured token limit")
 	}
 
 	// Parse analysis
@@ -202,7 +214,7 @@ func (c *LMStudioClient) GetModelInfo() map[string]any {
 		"provider":      "LMStudio",
 		"max_tokens":    c.maxTokens,
 		"base_url":      c.baseURL,
-		"context_limit": 128000, // Varies by model, using common default
+		"context_limit": c.contextTokens,
 	}
 }
 
@@ -256,7 +268,7 @@ func (c *LMStudioClient) CheckConnection(ctx context.Context) error {
 	if c.model != "local-model" {
 		modelFound := false
 		for _, m := range modelsResp.Data {
-			if m.ID == c.model || strings.Contains(m.ID, c.model) {
+			if m.ID == c.model {
 				modelFound = true
 				break
 			}

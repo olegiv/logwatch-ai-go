@@ -92,6 +92,9 @@ func TestOllamaClient_GetModelInfo(t *testing.T) {
 	if info["base_url"] != "http://localhost:11434" {
 		t.Errorf("GetModelInfo() base_url = %v, want http://localhost:11434", info["base_url"])
 	}
+	if info["context_limit"] != 32768 {
+		t.Errorf("GetModelInfo() context_limit = %v, want 32768", info["context_limit"])
+	}
 }
 
 func TestOllamaClient_GetProviderName(t *testing.T) {
@@ -134,6 +137,15 @@ func TestOllamaClient_CheckConnection(t *testing.T) {
 				"models": []map[string]any{
 					{"name": "llama3.3:latest"},
 				},
+			},
+			statusCode: http.StatusOK,
+			wantErr:    true,
+		},
+		{
+			name:  "similar prefix is not an exact model",
+			model: "llama3.3:latest",
+			response: map[string]any{
+				"models": []map[string]any{{"name": "llama3.30:latest"}},
 			},
 			statusCode: http.StatusOK,
 			wantErr:    true,
@@ -295,6 +307,11 @@ func TestOllamaClient_Analyze_Error(t *testing.T) {
 			name:       "invalid JSON in content",
 			statusCode: http.StatusOK,
 			response:   `{"done": true, "message": {"role": "assistant", "content": "not valid json"}}`,
+		},
+		{
+			name:       "token-limited response",
+			statusCode: http.StatusOK,
+			response:   `{"done":true,"done_reason":"length","message":{"role":"assistant","content":"{\"systemStatus\":\"Good\",\"summary\":\"partial\"}"}}`,
 		},
 	}
 

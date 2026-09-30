@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/olegiv/logwatch-ai-go/internal/analyzer"
 )
@@ -23,6 +24,25 @@ func TestNewReader(t *testing.T) {
 	}
 	if r.format != FormatJSON {
 		t.Errorf("format = %s, want %s", r.format, FormatJSON)
+	}
+}
+
+func TestReaderReadRejectsStaleExport(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "watchdog.json")
+	content := `[{"wid":1,"type":"php","message":"failure","severity":3,"timestamp":1699900800}]`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write watchdog fixture: %v", err)
+	}
+	stale := time.Now().Add(-maxWatchdogFileAge - time.Hour)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatalf("age watchdog fixture: %v", err)
+	}
+
+	_, err := NewReader(10, false, 150000, FormatJSON).Read(path)
+	if err == nil || !strings.Contains(err.Error(), "too old") {
+		t.Fatalf("expected stale-export rejection, got %v", err)
 	}
 }
 
@@ -146,6 +166,21 @@ func TestReader_parseJSON(t *testing.T) {
 			wantCount: 0,
 			wantErr:   true,
 		},
+		{
+			name:      "empty object is not an empty report",
+			content:   `{}`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name: "Drush object map",
+			content: `{
+				"2": {"wid": 2, "type": "php", "message": "Error", "severity": 3, "timestamp": 1699900801},
+				"1": {"wid": 1, "type": "cron", "message": "Done", "severity": 6, "timestamp": 1699900800}
+			}`,
+			wantCount: 2,
+			wantErr:   false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -176,50 +211,6 @@ func TestReader_parseJSON_NDJSONLongLineReturnsError(t *testing.T) {
 	}
 	if entries != nil {
 		t.Fatalf("parseJSON() returned entries on scanner error, got %d entries", len(entries))
-	}
-}
-
-func TestReader_parseDrush(t *testing.T) {
-	r := NewReader(10, false, 150000, FormatDrush)
-
-	content := `ID      Date                 Type     Severity  Message
-------- -------------------- -------- --------- ----------------------------------------
-12345   2024-11-13 10:00:00  php      error     PDOException: SQLSTATE[HY000]
-12344   2024-11-13 09:55:00  access   notice    Access check for admin
-`
-
-	entries, err := r.parseDrush(content)
-	if err != nil {
-		t.Fatalf("parseDrush() error = %v", err)
-	}
-
-	if len(entries) != 2 {
-		t.Errorf("parseDrush() returned %d entries, want 2", len(entries))
-	}
-
-	if entries[0].WID != 12345 {
-		t.Errorf("entries[0].WID = %d, want 12345", entries[0].WID)
-	}
-
-	if entries[0].Type != "php" {
-		t.Errorf("entries[0].Type = %s, want php", entries[0].Type)
-	}
-
-	if entries[0].Severity != SeverityError {
-		t.Errorf("entries[0].Severity = %d, want %d", entries[0].Severity, SeverityError)
-	}
-}
-
-func TestReader_parseDrush_Empty(t *testing.T) {
-	r := NewReader(10, false, 150000, FormatDrush)
-
-	content := `ID      Date                 Type     Severity  Message
-------- -------------------- -------- --------- ----------------------------------------
-`
-
-	_, err := r.parseDrush(content)
-	if err == nil {
-		t.Error("parseDrush() should return error for empty entries")
 	}
 }
 
@@ -320,6 +311,61 @@ func TestReader_formatEntriesForAnalysis(t *testing.T) {
 	// Check for severity entries
 	if !strings.Contains(result, "ERROR") {
 		t.Error("formatEntriesForAnalysis() missing ERROR severity")
+	}
+}
+
+func TestReaderFormatEntriesPreservesGroupedSecurityOrigins(t *testing.T) {
+	r := NewReader(10, false, 150000, FormatJSON)
+	entries := []WatchdogEntry{
+		{
+			WID: 1, Type: "user", Message: "Login failed from 203.0.113.10",
+			Severity: SeverityWarning, Timestamp: 1699900800,
+		},
+		{
+			WID: 2, Type: "user", Message: "Login failed from 203.0.113.11",
+			Severity: SeverityWarning, Timestamp: 1699900801,
+		},
+		{
+			WID: 3, Type: "access denied", Message: "Access denied for /admin/config",
+			Hostname: "198.51.100.20", Severity: SeverityWarning, Timestamp: 1699900802,
+		},
+		{
+			WID: 4, Type: "access denied", Message: "Access denied for /admin/people",
+			Hostname: "198.51.100.21", Severity: SeverityWarning, Timestamp: 1699900803,
+		},
+	}
+
+	result := r.formatEntriesForAnalysis(entries)
+	for _, origin := range []string{
+		"203.0.113.10", "203.0.113.11", "198.51.100.20", "198.51.100.21",
+	} {
+		if !strings.Contains(result, origin) {
+			t.Errorf("grouped watchdog output discarded origin %s: %q", origin, result)
+		}
+	}
+}
+
+func TestReaderFormatEntriesRetainsCriticalDiversityBeyondFifty(t *testing.T) {
+	r := NewReader(10, false, 150000, FormatJSON)
+	entries := make([]WatchdogEntry, 0, 51)
+	for i := range 50 {
+		entries = append(entries, WatchdogEntry{
+			WID: int64(i + 1), Type: "php", Message: "Repeated newer PHP failure",
+			Severity: SeverityError, Timestamp: int64(1700000100 + i),
+		})
+	}
+	entries = append(entries, WatchdogEntry{
+		WID: 51, Type: "system", Message: "Unique older emergency evidence",
+		Severity: SeverityEmergency, Timestamp: 1699990000,
+	})
+
+	result := r.formatEntriesForAnalysis(entries)
+	if !strings.Contains(result, "Unique older emergency evidence") {
+		t.Fatalf("critical detail cap hid a distinct emergency: %q", result)
+	}
+	if emergencyAt, errorAt := strings.Index(result, "Unique older emergency evidence"),
+		strings.Index(result, "Repeated newer PHP failure"); emergencyAt < 0 || errorAt < 0 || emergencyAt > errorAt {
+		t.Fatalf("older emergency was ordered behind lower-severity errors: %q", result)
 	}
 }
 

@@ -1,64 +1,38 @@
-Prepare a complete deployment package for Linux production servers.
+Prepare and validate a deployment using the repository's canonical tooling.
 
-Execute the following steps:
-
-1. Clean and build for Linux:
+1. Run the complete local quality gate:
    ```bash
-   make clean
+   make check
+   ```
+
+2. Build the Linux artifact:
+   ```bash
    make build-linux-amd64
    ```
 
-2. Create deployment directory:
+3. For a new host, transfer the repository plus the verified artifact and run
+   the root-owned bootstrap installer:
    ```bash
-   mkdir -p logwatch-ai-deploy
+   sudo BINARY_PATH=/absolute/path/to/bin/logwatch-analyzer-linux-amd64 \
+     SERVICE_USER=logwatch-ai ./scripts/install.sh
    ```
 
-3. Copy necessary files:
+4. For every existing installation, use the transactional deployment flow:
    ```bash
-   cp bin/logwatch-analyzer-linux-amd64 logwatch-ai-deploy/logwatch-analyzer
-   cp -r scripts logwatch-ai-deploy/
-   cp configs/.env.example logwatch-ai-deploy/
-   cp configs/drupal-sites.json.example logwatch-ai-deploy/
-   cp configs/ocms-sites.json.example logwatch-ai-deploy/
-   cp configs/exclusions.json.example logwatch-ai-deploy/
+   make deploy-stage
+   make deploy
    ```
 
-4. Set correct permissions:
+5. If post-deploy verification fails, use:
    ```bash
-   chmod +x logwatch-ai-deploy/logwatch-analyzer
-   chmod +x logwatch-ai-deploy/scripts/*.sh
+   make rollback
    ```
 
-5. Generate checksums:
-   ```bash
-   cd logwatch-ai-deploy
-   shasum -a 256 logwatch-analyzer scripts/*.sh > checksums.txt
-   cd ..
-   ```
+Never overwrite `/opt/logwatch-ai/logwatch-analyzer` with `cp`: upgrades must
+retain the immutable predecessor, atomic live symlink, transaction journal,
+lock, smoke test, and rollback record provided by `deploy/`.
 
-6. Create deployment tarball:
-   ```bash
-   tar -czf logwatch-ai-deploy.tar.gz logwatch-ai-deploy/
-   ```
-
-7. Generate final checksum:
-   ```bash
-   shasum -a 256 logwatch-ai-deploy.tar.gz
-   ```
-
-8. Show deployment package details:
-   ```bash
-   ls -lh logwatch-ai-deploy.tar.gz
-   tar -tzf logwatch-ai-deploy.tar.gz
-   ```
-
-9. Provide deployment instructions:
-   - Transfer: `scp logwatch-ai-deploy.tar.gz user@server:/tmp/`
-   - Extract: `tar -xzf logwatch-ai-deploy.tar.gz`
-   - Install: `sudo cp logwatch-ai-deploy/logwatch-analyzer /opt/logwatch-ai/`
-   - Configure: Edit `/opt/logwatch-ai/.env` with production credentials
-   - Optional: `cp exclusions.json.example /opt/logwatch-ai/exclusions.json` to enable finding-exclusion filtering (see `docs/EXCLUSIONS.md`)
-   - Test: Run `/opt/logwatch-ai/logwatch-analyzer` manually
-   - Schedule: Add to cron or systemd timer
-
-Deployment package is ready for transfer to production server(s).
+Report the artifact checksum, target host, staged version, verification result,
+and whether the deployment was staged, installed, or rolled back. Do not print
+credential values from `.env`; list only variable names when diagnostics need
+to confirm configuration presence.

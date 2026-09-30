@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -22,15 +23,15 @@ func TestDrupalSitesConfig_Validate(t *testing.T) {
 					"production": {
 						Name:           "Production",
 						DrupalRoot:     "/var/www/prod",
-						WatchdogPath:   "/tmp/prod.json",
+						WatchdogPath:   "/var/log/logwatch-ai/prod-watchdog.json",
 						WatchdogFormat: "json",
 						MinSeverity:    3,
 					},
 					"staging": {
 						Name:           "Staging",
 						DrupalRoot:     "/var/www/staging",
-						WatchdogPath:   "/tmp/staging.json",
-						WatchdogFormat: "drush",
+						WatchdogPath:   "/var/log/logwatch-ai/staging-watchdog.json",
+						WatchdogFormat: "json",
 						MinSeverity:    4,
 					},
 				},
@@ -45,7 +46,7 @@ func TestDrupalSitesConfig_Validate(t *testing.T) {
 					"mysite": {
 						Name:         "My Site",
 						DrupalRoot:   "/var/www/mysite",
-						WatchdogPath: "/tmp/mysite.json",
+						WatchdogPath: "/var/log/logwatch-ai/mysite-watchdog.json",
 					},
 				},
 			},
@@ -59,6 +60,48 @@ func TestDrupalSitesConfig_Validate(t *testing.T) {
 			},
 			wantErr: true,
 			errMsg:  "no sites defined",
+		},
+		{
+			name: "duplicate display names",
+			config: DrupalSitesConfig{
+				Sites: map[string]DrupalSite{
+					"first":  {Name: "Production", DrupalRoot: "/srv/first", WatchdogPath: "/var/log/logwatch-ai/first-watchdog.json"},
+					"second": {Name: "Production", DrupalRoot: "/srv/second", WatchdogPath: "/var/log/logwatch-ai/second-watchdog.json"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "same display name",
+		},
+		{
+			name: "display name collides with empty-name fallback",
+			config: DrupalSitesConfig{
+				Sites: map[string]DrupalSite{
+					"production": {DrupalRoot: "/srv/production", WatchdogPath: "/var/log/logwatch-ai/production-watchdog.json"},
+					"staging":    {Name: "production", DrupalRoot: "/srv/staging", WatchdogPath: "/var/log/logwatch-ai/staging-watchdog.json"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "same display name",
+		},
+		{
+			name: "legacy name collides with another current name",
+			config: DrupalSitesConfig{
+				Sites: map[string]DrupalSite{
+					"production": {
+						Name:         "Production New",
+						LegacyNames:  []string{"Production Old"},
+						DrupalRoot:   "/srv/production",
+						WatchdogPath: "/var/log/logwatch-ai/production-watchdog.json",
+					},
+					"replacement": {
+						Name:         "Production Old",
+						DrupalRoot:   "/srv/replacement",
+						WatchdogPath: "/var/log/logwatch-ai/replacement-watchdog.json",
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "same display name or legacy name",
 		},
 		{
 			name: "nil sites",
@@ -76,7 +119,7 @@ func TestDrupalSitesConfig_Validate(t *testing.T) {
 				Sites: map[string]DrupalSite{
 					"production": {
 						DrupalRoot:   "/var/www/prod",
-						WatchdogPath: "/tmp/prod.json",
+						WatchdogPath: "/var/log/logwatch-ai/prod-watchdog.json",
 					},
 				},
 			},
@@ -89,7 +132,7 @@ func TestDrupalSitesConfig_Validate(t *testing.T) {
 				Version: "1.0",
 				Sites: map[string]DrupalSite{
 					"mysite": {
-						WatchdogPath: "/tmp/mysite.json",
+						WatchdogPath: "/var/log/logwatch-ai/mysite-watchdog.json",
 					},
 				},
 			},
@@ -110,19 +153,45 @@ func TestDrupalSitesConfig_Validate(t *testing.T) {
 			errMsg:  "watchdog_path is required",
 		},
 		{
+			name: "watchdog path outside producer roots",
+			config: DrupalSitesConfig{
+				Sites: map[string]DrupalSite{
+					"mysite": {
+						DrupalRoot:   "/var/www/mysite",
+						WatchdogPath: "/tmp/mysite-watchdog.json",
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must be below /var/log/logwatch-ai or /opt/logwatch-ai/logs",
+		},
+		{
+			name: "watchdog path has incompatible basename",
+			config: DrupalSitesConfig{
+				Sites: map[string]DrupalSite{
+					"mysite": {
+						DrupalRoot:   "/var/www/mysite",
+						WatchdogPath: "/var/log/logwatch-ai/mysite.json",
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "basename must be watchdog.json or end in -watchdog.json",
+		},
+		{
 			name: "invalid watchdog_format",
 			config: DrupalSitesConfig{
 				Version: "1.0",
 				Sites: map[string]DrupalSite{
 					"mysite": {
 						DrupalRoot:     "/var/www/mysite",
-						WatchdogPath:   "/tmp/mysite.json",
+						WatchdogPath:   "/var/log/logwatch-ai/mysite-watchdog.json",
 						WatchdogFormat: "invalid",
 					},
 				},
 			},
 			wantErr: true,
-			errMsg:  "watchdog_format must be 'json' or 'drush'",
+			errMsg:  "watchdog_format must be 'json'",
 		},
 		{
 			name: "invalid min_severity too high",
@@ -131,7 +200,7 @@ func TestDrupalSitesConfig_Validate(t *testing.T) {
 				Sites: map[string]DrupalSite{
 					"mysite": {
 						DrupalRoot:   "/var/www/mysite",
-						WatchdogPath: "/tmp/mysite.json",
+						WatchdogPath: "/var/log/logwatch-ai/mysite-watchdog.json",
 						MinSeverity:  8,
 					},
 				},
@@ -146,7 +215,7 @@ func TestDrupalSitesConfig_Validate(t *testing.T) {
 				Sites: map[string]DrupalSite{
 					"mysite": {
 						DrupalRoot:   "/var/www/mysite",
-						WatchdogPath: "/tmp/mysite.json",
+						WatchdogPath: "/var/log/logwatch-ai/mysite-watchdog.json",
 						MinSeverity:  -1,
 					},
 				},
@@ -182,13 +251,13 @@ func TestDrupalSitesConfig_GetSite(t *testing.T) {
 			"production": {
 				Name:         "Production",
 				DrupalRoot:   "/var/www/prod",
-				WatchdogPath: "/tmp/prod.json",
+				WatchdogPath: "/var/log/logwatch-ai/prod-watchdog.json",
 				MinSeverity:  3,
 			},
 			"staging": {
 				Name:         "Staging",
 				DrupalRoot:   "/var/www/staging",
-				WatchdogPath: "/tmp/staging.json",
+				WatchdogPath: "/var/log/logwatch-ai/staging-watchdog.json",
 				MinSeverity:  4,
 			},
 		},
@@ -258,7 +327,7 @@ func TestDrupalSitesConfig_GetSite_NoDefault(t *testing.T) {
 		Sites: map[string]DrupalSite{
 			"production": {
 				DrupalRoot:   "/var/www/prod",
-				WatchdogPath: "/tmp/prod.json",
+				WatchdogPath: "/var/log/logwatch-ai/prod-watchdog.json",
 			},
 		},
 	}
@@ -275,9 +344,9 @@ func TestDrupalSitesConfig_GetSite_NoDefault(t *testing.T) {
 func TestDrupalSitesConfig_ListSites(t *testing.T) {
 	config := &DrupalSitesConfig{
 		Sites: map[string]DrupalSite{
-			"zebra": {DrupalRoot: "/a", WatchdogPath: "/a"},
-			"alpha": {DrupalRoot: "/b", WatchdogPath: "/b"},
-			"beta":  {DrupalRoot: "/c", WatchdogPath: "/c"},
+			"zebra": {DrupalRoot: "/a", WatchdogPath: "/var/log/logwatch-ai/zebra-watchdog.json"},
+			"alpha": {DrupalRoot: "/b", WatchdogPath: "/var/log/logwatch-ai/alpha-watchdog.json"},
+			"beta":  {DrupalRoot: "/c", WatchdogPath: "/var/log/logwatch-ai/beta-watchdog.json"},
 		},
 	}
 
@@ -338,12 +407,25 @@ func TestLoadDrupalSitesConfig_FromTestdata(t *testing.T) {
 		}
 	}
 
-	// Check dev site uses drush format
+	// Check dev site uses the required JSON format
 	dev, exists := config.Sites["dev"]
 	if !exists {
 		t.Error("config.Sites['dev'] does not exist")
-	} else if dev.WatchdogFormat != "drush" {
-		t.Errorf("dev.WatchdogFormat = %q, want %q", dev.WatchdogFormat, "drush")
+	} else if dev.WatchdogFormat != "json" {
+		t.Errorf("dev.WatchdogFormat = %q, want %q", dev.WatchdogFormat, "json")
+	}
+}
+
+func TestLoadDrupalSitesConfigRejectsExplicitZeroWatchdogLimit(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "drupal-sites.json")
+	data := `{"version":"1.0","default_site":"test","sites":{"test":{"drupal_root":"/srv/drupal","watchdog_path":"/var/log/logwatch-ai/test-watchdog.json","watchdog_format":"json","watchdog_limit":0}}}`
+	if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, _, err := LoadDrupalSitesConfig(configPath); err == nil || !strings.Contains(err.Error(), "watchdog_limit must be 1-") {
+		t.Fatalf("LoadDrupalSitesConfig() should reject explicit zero, got %v", err)
 	}
 }
 
@@ -394,6 +476,52 @@ func TestLoadDrupalSitesConfig_InvalidJSON(t *testing.T) {
 	}
 	if !contains(err.Error(), "failed to parse") {
 		t.Errorf("LoadDrupalSitesConfig() error = %v, want error containing 'failed to parse'", err)
+	}
+}
+
+func TestLoadDrupalSitesConfigRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "drupal-sites.json")
+	data := `{"version":"1.0","default_site":"test","sites":{"test":{"drupal_root":"/srv/drupal","watchdog_path":"/var/log/logwatch-ai/test-watchdog.json","watchdog_format":"json","system_usr":"www-data"}}}`
+	if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, _, err := LoadDrupalSitesConfig(configPath)
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("LoadDrupalSitesConfig() error = %v, want unknown-field rejection", err)
+	}
+}
+
+func TestLoadDrupalSitesConfigRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "drupal-sites.json")
+	data := `{"version":"1.0","default_site":"test","sites":{"test":{"drupal_root":"/srv/drupal","watchdog_path":"/var/log/logwatch-ai/test-watchdog.json"}}} {}`
+	if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, _, err := LoadDrupalSitesConfig(configPath)
+	if err == nil || !strings.Contains(err.Error(), "trailing content") {
+		t.Fatalf("LoadDrupalSitesConfig() error = %v, want trailing-value rejection", err)
+	}
+}
+
+func TestLoadDrupalSitesConfigRejectsSymlink(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	link := filepath.Join(dir, "drupal-sites.json")
+	data := `{"version":"1.0","default_site":"test","sites":{"test":{"drupal_root":"/srv/drupal","watchdog_path":"/var/log/logwatch-ai/test-watchdog.json"}}}`
+	if err := os.WriteFile(target, []byte(data), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("create config symlink: %v", err)
+	}
+	if _, _, err := LoadDrupalSitesConfig(link); err == nil {
+		t.Fatal("LoadDrupalSitesConfig() should reject symlink")
 	}
 }
 

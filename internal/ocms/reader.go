@@ -25,17 +25,36 @@ type Reader struct {
 	maxSizeMB           int
 	enablePreprocessing bool
 	maxTokens           int
+	maxAge              time.Duration
 	preprocessor        *Preprocessor
 }
 
 var _ analyzer.LogReader = (*Reader)(nil)
 
+var errEmptyLog = errors.New("ocms log file is empty")
+
+// MaxYesterdayLogAge prevents a missed or broken rotation from replaying the
+// same `.1` file indefinitely. Three days tolerates DST and delayed schedules.
+const MaxYesterdayLogAge = 72 * time.Hour
+
 // NewReader creates a new OCMS reader.
 func NewReader(maxSizeMB int, enablePreprocessing bool, maxTokens int) *Reader {
+	return NewReaderWithMaxAge(maxSizeMB, enablePreprocessing, maxTokens, 0)
+}
+
+// NewReaderWithMaxAge creates a reader that rejects source files older than
+// maxAge. A zero duration disables the age guard for live-log reads.
+func NewReaderWithMaxAge(
+	maxSizeMB int,
+	enablePreprocessing bool,
+	maxTokens int,
+	maxAge time.Duration,
+) *Reader {
 	return &Reader{
 		maxSizeMB:           maxSizeMB,
 		enablePreprocessing: enablePreprocessing,
 		maxTokens:           maxTokens,
+		maxAge:              maxAge,
 		preprocessor:        NewPreprocessor(maxTokens),
 	}
 }
@@ -56,7 +75,7 @@ func (r *Reader) readRaw(sourcePath string) (string, error) {
 		analyzer.FileReadOptions{
 			SourceLabel: "ocms log",
 			MaxSizeMB:   r.maxSizeMB,
-			MaxAge:      24 * time.Hour,
+			MaxAge:      r.maxAge,
 		},
 		r.validateContent,
 	)
@@ -86,7 +105,7 @@ func (r *Reader) preprocessIfNeeded(content string) (string, error) {
 // labels so the LLM can distinguish main and error log sections. Missing
 // files are tolerated in multi-file mode — a site with no errors won't have
 // error.log (or its rotated .1) and that's a normal case. Fails only if
-// every requested file is missing.
+// every requested file is missing or empty.
 func (r *Reader) ReadFiles(files []LogFile) (string, error) {
 	if len(files) == 0 {
 		return "", fmt.Errorf("no OCMS log files specified")
@@ -105,7 +124,7 @@ func (r *Reader) ReadFiles(files []LogFile) (string, error) {
 			// separate os.Stat call — going through readRaw alone keeps the
 			// existence check and the read in one path lookup, removing a
 			// TOCTOU window.
-			if errors.Is(err, fs.ErrNotExist) {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, errEmptyLog) {
 				skipped = append(skipped, fmt.Sprintf("%s (%s)", file.Kind, file.Path))
 				continue
 			}
@@ -126,7 +145,7 @@ func (r *Reader) ReadFiles(files []LogFile) (string, error) {
 	}
 
 	if written == 0 {
-		return "", fmt.Errorf("no readable OCMS log files (all missing): %s", strings.Join(skipped, ", "))
+		return "", fmt.Errorf("no OCMS log entries (all requested files are missing or empty): %s", strings.Join(skipped, ", "))
 	}
 
 	return r.preprocessIfNeeded(combined.String())
@@ -139,7 +158,7 @@ func (r *Reader) Validate(content string) error {
 
 func (r *Reader) validateContent(content string) error {
 	if len(content) == 0 {
-		return fmt.Errorf("ocms log file is empty")
+		return errEmptyLog
 	}
 
 	return nil

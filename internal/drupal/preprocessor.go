@@ -190,7 +190,7 @@ func (p *Preprocessor) determinePriority(name, content string) int {
 
 	// Check medium priority keywords
 	for _, keyword := range drupalMediumPriorityKeywords {
-		if strings.Contains(nameLower, keyword) {
+		if strings.Contains(nameLower, keyword) || strings.Contains(contentLower, keyword) {
 			return priorityMedium
 		}
 	}
@@ -318,37 +318,98 @@ func (p *Preprocessor) normalizeLine(line string) string {
 // is still too large. The returned content is verified to fit maxTokens
 // (for maxTokens > 0).
 func (p *Preprocessor) aggressiveCompressWithLimit(content string, maxTokens int) string {
-	lines := strings.Split(content, "\n")
+	sections := p.parseSections(content)
+	var result strings.Builder
+	criticalKeywords := []string{"error", "critical", "emergency", "alert", "security", "failed", "exception"}
+	const truncationNotice = "[... truncated to fit token budget ...]"
+	omitted := false
 
-	// Keep only essential lines
-	var essential []string
-	for _, line := range lines {
-		lineLower := strings.ToLower(line)
+	// Preserve each formatted watchdog record as one block. In particular, an
+	// Error header and its following indented Message line must either both fit
+	// or both be omitted.
+	for _, priority := range []int{priorityHigh, priorityMedium, priorityLow} {
+		for _, section := range sections {
+			if p.determinePriority(section.name, section.content) != priority {
+				continue
+			}
+			blocks := splitDrupalCompressionBlocks(section.content)
+			kept := make([]string, 0, len(blocks))
+			if priority == priorityHigh {
+				// High-priority sections include access-denied summaries whose
+				// individual blocks may contain only a count, path, and origins.
+				// Section classification is authoritative; do not apply a second,
+				// narrower keyword filter that deletes those security events.
+				kept = append(kept, blocks...)
+			} else {
+				for _, block := range blocks {
+					blockLower := strings.ToLower(block)
+					for _, keyword := range criticalKeywords {
+						if strings.Contains(blockLower, keyword) {
+							kept = append(kept, block)
+							break
+						}
+					}
+				}
+			}
+			if len(kept) < len(blocks) {
+				omitted = true
+			}
+			if len(kept) == 0 {
+				continue
+			}
 
-		// Keep section headers
-		if strings.HasPrefix(line, "##") || strings.HasPrefix(line, "===") {
-			essential = append(essential, line)
-			continue
-		}
-
-		// Keep lines with critical keywords
-		isCritical := false
-		for _, kw := range []string{"error", "critical", "emergency", "alert", "security", "failed", "exception"} {
-			if strings.Contains(lineLower, kw) {
-				isCritical = true
-				break
+			header := "## " + section.name + "\n"
+			sectionStarted := false
+			for _, block := range kept {
+				candidate := block
+				if !sectionStarted {
+					candidate = header + block
+				}
+				if result.Len() > 0 {
+					candidate = "\n" + candidate
+				}
+				withNotice := result.String() + candidate + "\n" + truncationNotice
+				if p.EstimateTokens(withNotice) > maxTokens {
+					omitted = true
+					continue
+				}
+				result.WriteString(candidate)
+				sectionStarted = true
 			}
 		}
-		if isCritical {
-			essential = append(essential, line)
+	}
+	if omitted {
+		if result.Len() > 0 {
+			result.WriteString("\n")
 		}
+		result.WriteString(truncationNotice)
 	}
 
-	// Enforce the budget with the shared verified binary-search trim: a
-	// line-count heuristic underestimates long lines (serialized payloads,
-	// stack traces) and over-trims short ones. The reader formats entries
-	// newest-first, so first-N retention keeps the most recent entries.
-	return analyzer.TrimToTokenBudget(strings.Join(essential, "\n"), maxTokens)
+	return result.String()
+}
+
+var formattedWatchdogEntry = regexp.MustCompile(`^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]`)
+
+func splitDrupalCompressionBlocks(content string) []string {
+	lines := strings.Split(content, "\n")
+	blocks := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); {
+		if !formattedWatchdogEntry.MatchString(lines[i]) {
+			blocks = append(blocks, lines[i])
+			i++
+			continue
+		}
+		start := i
+		i++
+		for i < len(lines) && !formattedWatchdogEntry.MatchString(lines[i]) {
+			if strings.HasPrefix(lines[i], "##") || strings.HasPrefix(lines[i], "===") {
+				break
+			}
+			i++
+		}
+		blocks = append(blocks, strings.Join(lines[start:i], "\n"))
+	}
+	return blocks
 }
 
 // aggressiveCompress preserves the previous fixed-budget behavior for tests and callers
