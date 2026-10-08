@@ -4,28 +4,62 @@ This document covers cost analysis and optimization for Logwatch AI Analyzer.
 
 ## Anthropic Claude (Cloud) Costs
 
-### Typical Daily Costs
+### Haiku 5.5 Pricing
 
-| Run Type | Cost |
-|----------|------|
-| First run (cache creation) | $0.016-0.022 |
-| Cached runs | $0.011-0.015 |
-| Monthly estimate | ~$0.47 |
-| Yearly estimate | ~$5.64 |
+`claude-haiku-5-5` is the runtime and sample-configuration default. Rates
+below are USD per million tokens, using the 5-minute cache-write tier.
+
+| Total prompt tokens | Input | Output | Cache write | Cache read |
+|---------------------|------:|-------:|------------:|-----------:|
+| Up to 100,000       | $0.10 | $0.50  | $0.125      | $0.01      |
+| Over 100,000        | $0.50 | $2.50  | $0.625      | $0.05      |
+
+The selected tier applies to the entire request. Prompt length includes
+uncached input, cache writes and cache reads; output does not select the
+tier. `ModelPricing.Cost()` uses these usage counts for stored costs and
+Telegram reports. See [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+
+### Daily Cost Examples
+
+These are uncached examples, not estimates of every production report.
+Output counts include thinking tokens; multiply by the number of daily jobs.
+
+| Input / output tokens per run | Per run | 30 daily runs | 365 daily runs |
+|-------------------------------|--------:|--------------:|---------------:|
+| 10,000 / 2,000                 | $0.002  | $0.06         | $0.73          |
+| 150,000 / 2,000                | $0.08   | $2.40         | $29.20         |
 
 ### Prompt Caching Behavior
 
-- System prompt is marked with `ephemeral` cache control
-- First run creates cache (incurs cache write cost: $3.75/MTok)
-- Subsequent runs (within 5 min) use cache (90% savings: $0.30/MTok vs $3/MTok)
-- Historical context is included in user prompt (not cached)
+The current Go client sends no `cache_control`, so it does not request
+prompt caching. It tracks cache creation/read usage if returned by the API.
+Do not assume consecutive or daily jobs receive cache discounts. Enabling
+cache requests would require a separate client change.
+
+### Token and Thinking Budgets
+
+Haiku 5.5 uses a newer tokenizer, which produces approximately 30% more
+tokens for the same text than Haiku 4.5. Use the model's token-counting API
+and actual usage rather than reusing old counts. The analyzer already counts
+the assembled Anthropic prompt when fitting it to the input budget.
+
+Adaptive thinking is on by default. `AI_MAX_TOKENS=8000` covers thinking
+plus the JSON response, so a small budget can leave an incomplete answer
+or no text at all. If that happens, increase the setting up to the supported
+16,000 limit and inspect the next result. The client uses the model's default
+effort and exposes no effort configuration. See the
+[Haiku 5.5 migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).
 
 ### Cost Reduction Strategies
 
-1. Increase `MAX_PREPROCESSING_TOKENS` compression
-2. Reduce historical context days (currently 7)
-3. Adjust section priority classification
-4. Use smaller model (not recommended - quality drop)
+1. Lower `MAX_PREPROCESSING_TOKENS` to trigger compression earlier; verify
+   that the resulting report still preserves important events. This setting
+   is an estimate for log content, not a guarantee that the full prompt is
+   below the 100,000-token pricing threshold.
+2. Review the amount of historical context included (currently 7 days).
+3. Adjust section priority classification only after checking retained findings.
+4. Compare actual token usage and costs across representative reports before
+   choosing a different model.
 
 ## Ollama (Local) - Zero Cost
 

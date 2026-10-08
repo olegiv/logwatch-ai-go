@@ -12,7 +12,7 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 - **OCMS** - OCMS application logs (single-site or multi-site with main/error/combined log kinds)
 
 **Supported LLM Providers:**
-- **Anthropic Claude** - Cloud-based AI (Claude Haiku 4.5 default; Sonnet 4.6 and Opus 4.7 supported)
+- **Anthropic Claude** - Cloud-based AI (Claude Haiku 5.5 default; other models selectable through `CLAUDE_MODEL`)
 - **Ollama** - Local LLM inference for privacy and zero-cost operation
 - **LM Studio** - Local LLM inference with user-friendly GUI
 
@@ -24,7 +24,7 @@ An intelligent log analyzer that uses LLM (Large Language Models) to analyze log
 - **Smart Notifications**: Dual-channel Telegram notifications (archive + alerts)
 - **Historical Tracking**: SQLite database stores analysis history for trend detection
 - **Intelligent Preprocessing**: Handles large log files (up to 800KB-1MB) with smart content reduction
-- **Cost Optimization**: Implements Claude prompt caching (16-30% cost savings)
+- **Cost Tracking**: Model-specific token pricing, including Haiku 5.5 prompt-length tiers and reported cache usage
 - **Proxy Support**: Full HTTP/HTTPS proxy support for corporate environments
 - **Secure Logging**: Automatic credential sanitization prevents API keys from appearing in logs
 - **Rate Limiting**: Telegram API rate limiting with exponential backoff retry
@@ -84,7 +84,7 @@ LLM_PROVIDER=anthropic
 
 # Anthropic/Claude Configuration (used when LLM_PROVIDER=anthropic)
 ANTHROPIC_API_KEY=sk-ant-xxxxx
-CLAUDE_MODEL=claude-haiku-4-5-20251001
+CLAUDE_MODEL=claude-haiku-5-5
 
 # Ollama Configuration (used when LLM_PROVIDER=ollama)
 # Requires Ollama running locally: https://ollama.ai
@@ -99,6 +99,7 @@ LMSTUDIO_MODEL=local-model
 
 # AI Settings (applies to all providers)
 AI_TIMEOUT_SECONDS=120
+# Includes Haiku 5.5 thinking and response text; allowed range: 1000-16000
 AI_MAX_TOKENS=8000
 
 # Telegram
@@ -614,7 +615,7 @@ logwatch-ai-go/
 3. **File Reading**: Source-specific reader validates and parses log content
 4. **Preprocessing**: Large files are intelligently compressed with source-aware priority
 5. **Historical Context**: Retrieves last 7 days of analysis from database
-6. **AI Analysis**: Claude (Haiku 4.5 by default) analyzes with source-specific prompts
+6. **AI Analysis**: Claude (Haiku 5.5 by default) analyzes with source-specific prompts
 7. **Storage**: Results saved to SQLite database
 8. **Notifications**: Sent to Telegram (archive channel always, alerts channel conditionally)
 9. **Cleanup**: Old database entries (>90 days) are removed
@@ -627,7 +628,9 @@ logwatch-ai-go/
 
 | Model                         | Input | Output | Cache write | Cache read |
 |-------------------------------|------:|-------:|------------:|-----------:|
-| claude-haiku-4-5-20251001 (default) | $1  | $5   | $1.25       | $0.10      |
+| claude-haiku-5-5 (default, prompt ≤100K) | $0.10 | $0.50 | $0.125 | $0.01 |
+| claude-haiku-5-5 (prompt >100K) | $0.50 | $2.50 | $0.625 | $0.05 |
+| claude-haiku-4-5-20251001      | $1    | $5     | $1.25       | $0.10      |
 | claude-sonnet-5               | $2    | $10    | $2.50       | $0.20      |
 | claude-sonnet-4-6             | $3    | $15    | $3.75       | $0.30      |
 | claude-sonnet-4-5             | $3    | $15    | $3.75       | $0.30      |
@@ -637,15 +640,28 @@ logwatch-ai-go/
 | claude-opus-4-6               | $5    | $25    | $6.25       | $0.50      |
 | claude-fable-5                | $10   | $50    | $12.50      | $1.00      |
 
-Canonical pricing table lives in `internal/ai/pricing.go`.
+Cache-write rates above are for the 5-minute tier. Haiku 5.5 selects one
+pricing tier for the entire request using total prompt tokens, including
+cache writes and reads; output tokens do not select the tier. The current
+client does not enable prompt caching, so budget for uncached calls.
+Canonical application rates live in `internal/ai/pricing.go`; see
+[Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing).
 
-**Typical Costs (Haiku 4.5 default):**
-- **First run**: ~$0.005 (cache creation)
-- **Cached run**: ~$0.003-$0.005 (cache hits)
-- **Monthly (daily)**: ~$0.15/month
-- **Yearly**: ~$1.80/year
+**Haiku 5.5 cost examples (uncached, one daily run):**
 
-Sonnet 4.6 multiplies these by ~3; Opus 4.7 by ~5.
+| Input / output tokens per run | Per run | 30 days | 365 days |
+|-------------------------------|--------:|--------:|---------:|
+| 10,000 / 2,000                 | $0.002  | $0.06   | $0.73    |
+| 150,000 / 2,000                | $0.08   | $2.40   | $29.20   |
+
+These examples use Haiku 5.5 token counts, with thinking included in output
+usage. Actual cost depends on report size and reasoning. Its tokenizer
+produces approximately 30% more tokens for the same text than Haiku 4.5.
+Adaptive thinking is on by default and shares `AI_MAX_TOKENS` with the JSON
+response. Keep the default 8,000 initially; if output is truncated or empty,
+increase it up to the application's 16,000 limit. See the
+[migration notes](docs/TROUBLESHOOTING.md#upgrading-to-haiku-55) and
+[cost guide](docs/COST_OPTIMIZATION.md).
 
 ### Ollama / LM Studio (Local)
 
@@ -663,13 +679,13 @@ Trade-off: Requires capable hardware (see [Ollama Setup](#ollama-setup-optional)
 🟢 Status: Good
 
 📋 Execution Stats
-• LLM: claude-haiku-4-5-20251001 (Anthropic)
+• LLM: claude-haiku-5-5 (Anthropic)
 • Critical Issues: 0
 • Warnings: 2
 • Recommendations: 3
-• Cost: $0.0154
+• Cost: $0.0020
 • Duration: 12.62s
-• Cache Read: 1234 tokens
+• Cache Read: 0 tokens
 
 📊 Summary
 System is operating normally with minor warnings...
@@ -713,7 +729,7 @@ This Go implementation provides feature parity with the original Node.js version
 - ✅ Same preprocessing algorithm
 - ✅ Same notification format and dual-channel logic
 - ✅ Same cost tracking and token estimation
-- ✅ Prompt caching support
+- ✅ Prompt cache usage tracking when reported by the API
 - ✅ Proxy configuration
 
 ## Development

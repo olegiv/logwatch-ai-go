@@ -548,7 +548,7 @@ func loadOCMSRegistrySite(cliRegistryPath, jsonRegistryPath, siteID string) (*OC
 func setDefaults() {
 	// LLM Provider defaults
 	viper.SetDefault("LLM_PROVIDER", "anthropic")
-	viper.SetDefault("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+	viper.SetDefault("CLAUDE_MODEL", "claude-haiku-5-5")
 	viper.SetDefault("OLLAMA_BASE_URL", "http://localhost:11434")
 	viper.SetDefault("OLLAMA_MODEL", "llama3.3:latest")
 	viper.SetDefault("LMSTUDIO_BASE_URL", "http://localhost:1234")
@@ -694,7 +694,7 @@ func (c *Config) validateLLMProvider() error {
 		// both fit this pattern.
 		claudeModelRegex := regexp.MustCompile(`^claude-[a-z0-9-]+$`)
 		if !claudeModelRegex.MatchString(c.ClaudeModel) {
-			return fmt.Errorf("CLAUDE_MODEL has invalid format (expected model ID like 'claude-haiku-4-5-20251001')")
+			return fmt.Errorf("CLAUDE_MODEL has invalid format (expected model ID like 'claude-haiku-5-5')")
 		}
 
 	case "ollama":

@@ -18,6 +18,7 @@ func TestResolvePricing(t *testing.T) {
 	}{
 		{"Haiku 4.5 dated", "claude-haiku-4-5-20251001", true, 1.0, 5.0},
 		{"Haiku 4.5 alias", "claude-haiku-4-5", true, 1.0, 5.0},
+		{"Haiku 5.5", "claude-haiku-5-5", true, 0.10, 0.50},
 		{"Sonnet 4.6", "claude-sonnet-4-6", true, 3.0, 15.0},
 		{"Sonnet 4.5 dated", "claude-sonnet-4-5-20250929", true, 3.0, 15.0},
 		{"Opus 4.7", "claude-opus-4-7", true, 5.0, 25.0},
@@ -43,6 +44,34 @@ func TestResolvePricing(t *testing.T) {
 			if p.Input != tt.wantInput || p.Output != tt.wantOutput {
 				t.Errorf("ResolvePricing(%q) = {Input: %.2f, Output: %.2f}, want {Input: %.2f, Output: %.2f}",
 					tt.model, p.Input, p.Output, tt.wantInput, tt.wantOutput)
+			}
+		})
+	}
+}
+
+// Haiku 5.5 applies one rate tier to the entire request, selected by total
+// prompt tokens including cache writes and reads, but excluding output.
+func TestModelPricing_Cost_Haiku55(t *testing.T) {
+	p, _ := ResolvePricing("claude-haiku-5-5")
+	tests := []struct {
+		name                                 string
+		input, output, cacheWrite, cacheRead int
+		want                                 float64
+	}{
+		{"below threshold", 99_999, 1000, 0, 0, 0.0104999},
+		{"at threshold", 100_000, 1000, 0, 0, 0.0105},
+		{"above threshold", 100_001, 1000, 0, 0, 0.0525005},
+		{"output does not select tier", 1000, 100_000, 0, 0, 0.0501},
+		{"cached prompt at threshold", 1000, 1000, 49_000, 50_000, 0.007225},
+		{"cache write crosses threshold", 1000, 1000, 49_001, 50_000, 0.036125625},
+		{"cache read crosses threshold", 1000, 1000, 49_000, 50_001, 0.03612505},
+		{"negative counts clamp before tier selection", -1000, 1000, 100_001, -1000, 0.065000625},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := p.Cost(tt.input, tt.output, tt.cacheWrite, tt.cacheRead)
+			if delta := got - tt.want; delta < -1e-10 || delta > 1e-10 {
+				t.Errorf("Cost() = %.12f, want %.12f", got, tt.want)
 			}
 		})
 	}

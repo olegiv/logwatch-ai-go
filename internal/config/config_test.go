@@ -1,3 +1,6 @@
+// Copyright (c) 2025-2026 Oleg Ivanchenko
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package config
 
 import (
@@ -5,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
 // checkError is a helper to verify error expectations in tests
@@ -675,6 +680,45 @@ func TestLoad(t *testing.T) {
 	// Verify environment variables were loaded
 	if config.AnthropicAPIKey != "sk-ant-test-key-1234567890" {
 		t.Error("AnthropicAPIKey not loaded from environment")
+	}
+}
+
+func TestLoad_ClaudeModelSelection(t *testing.T) {
+	for _, tt := range []struct {
+		name, envModel, fileModel, want string
+	}{
+		{"default", "", "", "claude-haiku-5-5"},
+		{"environment override", "claude-haiku-4-5-20251001", "", "claude-haiku-4-5-20251001"},
+		{"dotenv override", "", "claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001"},
+		{"environment precedes dotenv", "claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-sonnet-4-6"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			viper.Reset()
+			t.Cleanup(viper.Reset)
+			t.Chdir(t.TempDir())
+			t.Setenv("LLM_PROVIDER", "anthropic")
+			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-1234567890")
+			t.Setenv("TELEGRAM_BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+			t.Setenv("TELEGRAM_CHANNEL_ARCHIVE_ID", "-1001234567890")
+			t.Setenv("CLAUDE_MODEL", tt.envModel)
+			if tt.envModel == "" {
+				if err := os.Unsetenv("CLAUDE_MODEL"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.fileModel != "" {
+				if err := os.WriteFile(".env", []byte("CLAUDE_MODEL="+tt.fileModel+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ClaudeModel != tt.want || cfg.GetLLMModel() != tt.want {
+				t.Errorf("loaded model = %q, provider model = %q, want %q", cfg.ClaudeModel, cfg.GetLLMModel(), tt.want)
+			}
+		})
 	}
 }
 
