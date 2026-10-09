@@ -309,11 +309,45 @@ curl https://api.anthropic.com/v1/messages \
   -H "x-api-key: $ANTHROPIC_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "content-type: application/json" \
-  -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1024,"messages":[{"role":"user","content":"test"}]}'
+  -d '{"model":"claude-haiku-5-5","max_tokens":8000,"messages":[{"role":"user","content":"test"}]}'
 
 # If invalid, get new key from https://console.anthropic.com/
 # Update .env with new key
 ```
+
+### Upgrading to Haiku 5.5
+
+Upgrade the binary through the [existing-install deployment workflow](DEPLOYMENT.md#upgrading-an-existing-install)
+before changing production `.env`, so cost tracking includes the new rates.
+Back up `.env` and set:
+
+```dotenv
+CLAUDE_MODEL=claude-haiku-5-5
+AI_MAX_TOKENS=8000
+```
+
+Existing explicit `CLAUDE_MODEL` values remain effective after a binary
+upgrade. The new default applies only when no model is configured. OS
+environment values take precedence over `.env` values, so check the job's
+environment if the initialized model differs from the file.
+
+Haiku 5.5 runs adaptive thinking by default. The client selects response
+blocks by type and parses only text, so thinking blocks do not become the
+analysis. Thinking shares `AI_MAX_TOKENS` with the response: a small budget
+can end before the JSON is complete, causing `failed to parse analysis`.
+Start at 8,000; if output is truncated, increase the setting up to 16,000
+and retry. If a report still does not fit, reduce its scope. The client
+does not expose an effort setting or automatic model fallback.
+
+The same text produces approximately 30% more tokens than Haiku 4.5;
+token-counting requests use the selected model. The analyzer retains its
+conservative 200,000-token context cap even though Haiku 5.5 supports 1M.
+Prompts over 100,000 tokens use higher rates for the entire request, including
+output; see [the cost guide](COST_OPTIMIZATION.md).
+
+API requests must omit non-default sampling parameters and assistant prefill.
+The current client already omits these. See
+[Anthropic's migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).
 
 ### Claude API: "Rate Limit Exceeded"
 

@@ -12,6 +12,11 @@ type ModelPricing struct {
 	Output     float64
 	CacheWrite float64 // 5-minute cache write
 	CacheRead  float64
+
+	// LongPrompt applies to the entire request when total input tokens,
+	// including cache writes and reads, exceed LongPromptThreshold.
+	LongPromptThreshold int
+	LongPrompt          *ModelPricing
 }
 
 // modelPricingTable maps model family prefixes to pricing. Dated model IDs
@@ -27,6 +32,13 @@ var modelPricingTable = map[string]ModelPricing{
 	"claude-sonnet-4-6": {Input: 3.0, Output: 15.0, CacheWrite: 3.75, CacheRead: 0.30},
 	"claude-sonnet-4-5": {Input: 3.0, Output: 15.0, CacheWrite: 3.75, CacheRead: 0.30},
 	"claude-haiku-4-5":  {Input: 1.0, Output: 5.0, CacheWrite: 1.25, CacheRead: 0.10},
+	"claude-haiku-5-5": {
+		Input: 0.10, Output: 0.50, CacheWrite: 0.125, CacheRead: 0.01,
+		LongPromptThreshold: 100_000,
+		LongPrompt: &ModelPricing{
+			Input: 0.50, Output: 2.50, CacheWrite: 0.625, CacheRead: 0.05,
+		},
+	},
 }
 
 // fallbackPricing is used for unknown models. Sonnet-tier rates avoid
@@ -62,6 +74,10 @@ func (p ModelPricing) Cost(inputTokens, outputTokens, cacheWriteTokens, cacheRea
 	outputTokens = max(outputTokens, 0)
 	cacheWriteTokens = max(cacheWriteTokens, 0)
 	cacheReadTokens = max(cacheReadTokens, 0)
+
+	if p.LongPrompt != nil && inputTokens+cacheWriteTokens+cacheReadTokens > p.LongPromptThreshold {
+		p = *p.LongPrompt
+	}
 
 	const perMillion = 1_000_000.0
 	return float64(inputTokens)/perMillion*p.Input +

@@ -107,6 +107,9 @@ func (c *Client) Analyze(ctx context.Context, systemPrompt, userPrompt string) (
 	if err != nil {
 		return nil, nil, err
 	}
+	if response.StopReason == anthropic.MessagesStopRefusal {
+		return nil, nil, fmt.Errorf("analysis refused by Claude (stop_reason=refusal); review the log content before retrying")
+	}
 
 	// Extract response content
 	if len(response.Content) == 0 {

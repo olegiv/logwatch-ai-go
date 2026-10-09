@@ -25,12 +25,17 @@ You are a cost optimization specialist for the logwatch-ai-go project. This appl
 
 | Model                         | Input | Output | Cache write (5m) | Cache read |
 |-------------------------------|------:|-------:|-----------------:|-----------:|
-| claude-haiku-4-5-20251001 ★   | $1    | $5     | $1.25            | $0.10      |
+| claude-haiku-5-5 ★ (prompt ≤100K) | $0.10 | $0.50 | $0.125       | $0.01      |
+| claude-haiku-5-5 (prompt >100K) | $0.50 | $2.50 | $0.625         | $0.05      |
+| claude-haiku-4-5-20251001     | $1    | $5     | $1.25            | $0.10      |
 | claude-sonnet-4-6             | $3    | $15    | $3.75            | $0.30      |
 | claude-sonnet-4-5-20250929    | $3    | $15    | $3.75            | $0.30      |
 | claude-opus-4-7               | $5    | $25    | $6.25            | $0.50      |
 
 ★ = project default.
+
+For Haiku 5.5, select one rate tier for the entire request using input plus
+cache-write plus cache-read tokens; output tokens do not select the tier.
 
 **Cost Calculation Formula (per model):**
 ```
@@ -41,23 +46,21 @@ cost_usd = (input_tokens  / 1,000,000 × input_rate)
 ```
 
 **With Prompt Caching:**
+The current client does not send cache control. The following describes API
+pricing if caching is enabled in a separate client change, not current jobs:
 - First run: Cache creation (slightly higher cost due to cache-write premium)
 - Subsequent runs (within 5 min): Cache hits at ~10% of input price (90% savings)
 
-## Expected Costs (Haiku 4.5 default)
+## Cost Examples (Haiku 5.5 default)
 
-**Typical Daily Analysis:**
-- **First run (cache creation)**: ~$0.005 - $0.007
-- **Cached runs**: ~$0.003 - $0.005
-- **Monthly (30 days)**: ~$0.15
-- **Yearly (365 days)**: ~$1.80
+For one uncached daily run with 10,000 input and 2,000 output tokens:
+$0.002 per run, $0.06 for 30 runs, $0.73 for 365 runs. A 150,000-input /
+2,000-output request costs $0.08 because it uses the higher tier. These are
+examples, not measured production averages; see `docs/COST_OPTIMIZATION.md`.
 
-(Switching to Sonnet 4.6 multiplies these by ~3; Opus 4.7 by ~5.)
-
-**Breakdown:**
-- Input tokens: 4,000-6,000 (includes prompt + historical context + log content)
-- Cached input: 2,000-3,000 (system prompt cached after first run)
-- Output tokens: 800-1,200 (analysis response)
+Output counts include adaptive thinking. The new tokenizer produces roughly
+30% more tokens for the same text than Haiku 4.5; use selected-model counts
+and actual usage rather than multiplying older model costs by a fixed ratio.
 
 ## Cost Tracking in Database
 
@@ -272,16 +275,17 @@ If responses consistently short:
 - Monitor output quality
 
 **D. Model Selection**
-Default: `claude-haiku-4-5-20251001` ($1/$5) — optimal cost/quality for log triage.
+Default: `claude-haiku-5-5` ($0.10/$0.50 up to 100K prompt tokens;
+$0.50/$2.50 above). Retain the default 8,000-token output budget initially;
+thinking and JSON share it, so check for complete analysis before reducing it.
 
 Upgrade path (if extraction quality slips):
-- `claude-sonnet-4-6` ($3/$15) — ~3× cost for stronger reasoning
+- `claude-sonnet-4-6` ($3/$15) — compare actual usage and findings before switching
 - `claude-opus-4-7` ($5/$25) — usually overkill for this workload
 
 **E. Prompt Optimization**
-- Ensure prompt caching is working (check logs for cache hits)
-- Keep system prompt stable (changes invalidate cache)
-- Cache TTL: 5 minutes (nothing we can change)
+- Budget for uncached requests; cache activation requires a separate client change
+- If caching is added, keep system prompts stable and check reported cache usage
 
 ### 4. Forecasting Costs
 
@@ -334,11 +338,11 @@ LIMIT 30;
 
 ### Immediate Actions (No Quality Impact)
 
-1. **Verify prompt caching is working:**
+1. **Inspect reported cache usage:**
    ```bash
    grep "cache_read_input_tokens" ./logs/analyzer.log
    ```
-   Should see cache hits after first run.
+   The current client does not request caching; zero cache hits are expected.
 
 2. **Monitor preprocessing:**
    ```bash
@@ -502,10 +506,10 @@ FROM summaries;"
 6. **Document findings**: Record insights for future reference
 
 Remember:
-- Typical daily cost: $0.011-0.022
-- Monthly budget: ~$0.47
-- Yearly budget: ~$5.64
-- Prompt caching saves 90% on cached portions
+- Example daily cost: $0.002 for 10K input / 2K output tokens, uncached
+- Example monthly/yearly cost: $0.06 / $0.73 for that one daily job
+- Forecast from actual usage; prompts over 100K use the higher pricing tier
+- Prompt caching is not requested by the current client
 - Preprocessing critical for large logs (saves significant costs)
 - Quality matters - don't over-optimize at expense of analysis quality
 - Monitor trends, not just absolute costs

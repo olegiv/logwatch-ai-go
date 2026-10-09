@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Haiku 5.5 pricing support, including the higher rates for prompts over
+  100,000 tokens. Tier selection includes cached input and applies to all
+  request usage so database costs and Telegram reports stay accurate.
 - `deploy/` — binary deployment to the production host: `deploy.sh`
   (build, stage, verify on the target, atomic symlink swap under the cron
   runner's own flock, auto-revert if the new binary fails its smoke test),
@@ -18,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builds the exact production target.
 
 ### Changed
+- Default Anthropic model and configuration samples now use
+  `claude-haiku-5-5`; explicit model overrides remain supported.
+- README and cost/troubleshooting guides document Haiku 5.5 pricing,
+  tokenizer changes and adaptive-thinking output budgets. Cost examples
+  use uncached calls, matching the current client's request behavior.
 - `docs/DEPLOYMENT.md` separates first-time bootstrap from upgrades.
   `scripts/install.sh` is for bootstrap only — it expects the host-arch
   binary name, overwrites repository-managed scripts, and recursively chowns

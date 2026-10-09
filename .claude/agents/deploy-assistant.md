@@ -114,9 +114,9 @@ sudo cp configs/.env.example /opt/logwatch-ai/.env
 ```bash
 # AI Provider Configuration
 ANTHROPIC_API_KEY=sk-ant-xxxxx                    # REQUIRED: Get from console.anthropic.com
-CLAUDE_MODEL=claude-haiku-4-5-20251001            # Default: Haiku 4.5 (also: claude-sonnet-4-6, claude-opus-4-7)
+CLAUDE_MODEL=claude-haiku-5-5                    # Default: Haiku 5.5; explicit older-model overrides remain supported
 AI_TIMEOUT_SECONDS=120                             # Range: 30-600
-AI_MAX_TOKENS=8000                                 # Range: 1000-16000
+AI_MAX_TOKENS=8000                              # Range: 1000-16000; includes Haiku 5.5 thinking and response text
 
 # Telegram Notifications
 TELEGRAM_BOT_TOKEN=1234567890:ABC-DEF...          # REQUIRED: From @BotFather

@@ -235,6 +235,36 @@ func TestCalculateStats(t *testing.T) {
 	}
 }
 
+// Exercise the real client-to-Stats path consumed by storage and Telegram.
+func TestCalculateStats_Haiku55(t *testing.T) {
+	client, err := NewClient("sk-ant-test-key", "claude-haiku-5-5", "", 120, 8000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name      string
+		cacheRead int
+		wantCost  float64
+	}{
+		{"standard tier", 50_000, 0.007225},
+		{"long prompt tier", 50_001, 0.03612505},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			response := anthropic.MessagesResponse{Usage: anthropic.MessagesUsage{
+				InputTokens: 1000, OutputTokens: 1000,
+				CacheCreationInputTokens: 49_000, CacheReadInputTokens: tt.cacheRead,
+			}}
+			stats := client.calculateStats(response, 2)
+			if delta := stats.CostUSD - tt.wantCost; delta < -1e-10 || delta > 1e-10 {
+				t.Errorf("CostUSD = %.12f, want %.12f", stats.CostUSD, tt.wantCost)
+			}
+			if stats.Model != "claude-haiku-5-5" || stats.CacheReadTokens != tt.cacheRead || stats.DurationSeconds != 2 {
+				t.Errorf("unexpected stats: %+v", stats)
+			}
+		})
+	}
+}
+
 func TestGetModelInfo(t *testing.T) {
 	tests := []struct {
 		name  string

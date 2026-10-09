@@ -64,7 +64,7 @@ CREATE TABLE summaries (
 - **metrics**: JSON object, e.g., `{"cpu_usage": "high", "disk_space": "85%"}`
 - **input_tokens**: Tokens sent to Claude (includes prompt + context)
 - **output_tokens**: Tokens received from Claude
-- **cost_usd**: Calculated per-model via `ModelPricing.Cost()` in `internal/ai/pricing.go`; Haiku 4.5 (default) is $1/$5 per MTok input/output, Sonnet 4.6 is $3/$15
+- **cost_usd**: Calculated per-model via `ModelPricing.Cost()` in `internal/ai/pricing.go`; Haiku 5.5 (default) is $0.10/$0.50 per MTok input/output for prompts up to 100,000 tokens, or $0.50/$2.50 above that threshold. Prompt length includes cached input; the tier applies to the whole request.
 
 ## Common Queries
 
