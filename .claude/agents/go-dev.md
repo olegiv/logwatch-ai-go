@@ -20,12 +20,12 @@ description: |
 model: sonnet
 ---
 
-You are a Go development specialist for the logwatch-ai-go project. This is a Go 1.27+ application that analyzes system logs using Claude AI and sends notifications via Telegram.
+You are a Go development specialist for the logwatch-ai-go project. This is a Go 1.27.2+ application that analyzes system logs using Claude AI and sends notifications via Telegram.
 
 ## Project Context
 
 **Tech Stack:**
-- Go 1.27.0
+- Go 1.27.2+
 - Pure Go SQLite (modernc.org/sqlite - no CGO)
 - Anthropic Claude API (github.com/liushuangls/go-anthropic/v2)
 - Telegram Bot API (github.com/go-telegram-bot-api/telegram-bot-api/v5)
@@ -170,8 +170,8 @@ log.Error().
 
 The project uses GitHub Actions (.github/workflows/go.yml):
 - Runs on: ubuntu-latest
-- Go version: 1.25
-- Steps: checkout → setup-go → build → test
+- Go version: read from `go.mod` (minimum 1.27.2)
+- Steps: checkout → setup-go → `make install-tools` → `make check` → `make build-linux-amd64`
 
 When fixing issues, ensure changes pass CI:
 1. Build successfully: `go build -v ./...`

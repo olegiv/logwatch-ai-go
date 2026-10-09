@@ -83,7 +83,7 @@ Build a specific release rather than the worktree — this stamps the artifact
 with that version instead of whatever you have checked out:
 
 ```bash
-REF=v0.15.0 ./deploy/deploy.sh
+REF=v0.16.0 ./deploy/deploy.sh
 ```
 
 `deploy.sh` runs the fail-closed `make check` gate, builds a static Linux

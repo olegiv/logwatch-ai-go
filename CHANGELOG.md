@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-09
+
 ### Added
 - Haiku 5.5 pricing support, including the higher rates for prompts over
   100,000 tokens. Tier selection includes cached input and applies to all
@@ -34,7 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binary name, overwrites repository-managed scripts, and recursively chowns
   `.env` and `data/summaries.db`.
 
+### Fixed
+- Claude refusal responses return an explicit error before analysis parsing.
+
 ### Dependencies
+- `golangci-lint` v2.13.1 → v2.14.0 so fresh CI tool installations can read
+  Go 1.27.2 export data.
 - `github.com/olegiv/go-logger` v0.2.2 → v0.3.0.
 - `golang.org/x/text` v0.41.0 → v0.42.0.
 - `modernc.org/sqlite` v1.57.0 → v1.60.1, with its required
@@ -939,7 +946,8 @@ This change is transparent for binary users (no action required).
 - Monthly (daily runs): ~$0.47/month
 - Yearly: ~$5.64/year
 
-[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/olegiv/logwatch-ai-go/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.12.0...v0.14.0
 [0.12.0]: https://github.com/olegiv/logwatch-ai-go/compare/v0.11.0...v0.12.0
