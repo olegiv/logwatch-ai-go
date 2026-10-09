@@ -221,8 +221,9 @@ Development (macOS) → Build Linux binary → Transfer to server → Install
 
 **GitHub Actions (.github/workflows/go.yml):**
 - Builds on: ubuntu-latest
-- Go version: 1.25
-- Simple build: `go build -v ./...`
+- Go version: read from `go.mod` (minimum 1.27.2)
+- Quality gate: `make check` after `make install-tools`
+- Production build: `make build-linux-amd64`
 
 **Enhancement suggestions:**
 - Add matrix builds for multiple platforms
