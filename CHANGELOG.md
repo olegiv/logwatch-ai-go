@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builds the exact production target.
 
 ### Changed
+- Minimum Go version is now 1.27.2; CI continues to resolve its toolchain
+  from `go.mod`. Source-build requirements and Linux installation examples
+  use the same minimum.
 - Default Anthropic model and configuration samples now use
   `claude-haiku-5-5`; explicit model overrides remain supported.
 - README and cost/troubleshooting guides document Haiku 5.5 pricing,
@@ -30,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/install.sh` is for bootstrap only — it expects the host-arch
   binary name, overwrites repository-managed scripts, and recursively chowns
   `.env` and `data/summaries.db`.
+
+### Dependencies
+- `github.com/olegiv/go-logger` v0.2.2 → v0.3.0.
+- `golang.org/x/text` v0.41.0 → v0.42.0.
+- `modernc.org/sqlite` v1.57.0 → v1.60.1, with its required
+  `modernc.org/libc` v1.77.1 and `modernc.org/memory` v1.12.1.
+- Refresh indirect dependencies to their latest stable releases:
+  `go-humanize` v1.1.0, `go-colorable` v0.1.16, `go-strftime` v1.1.0,
+  `go-internal` v1.16.0 and `golang.org/x/sys` v0.48.0.
 
 ## [0.15.0] - 2026-08-27
 
