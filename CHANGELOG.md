@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Minimum Go version is now 1.27.3, which includes security fixes to
+  `crypto/x509` (used for TLS to the Anthropic and Telegram APIs). CI
+  continues to resolve its toolchain from `go.mod`. Source-build
+  requirements and Linux installation examples use the same minimum.
+
+### Changed
+- Dependency refresh:
+  - `golang.org/x/text` v0.42.0 -> v0.43.0
+  - `modernc.org/sqlite` v1.60.1 -> v1.61.1
+  - `modernc.org/libc` v1.77.1 -> v1.79.0
+  - `golang.org/x/sys` v0.48.0 -> v0.49.0
+  - `go.yaml.in/yaml/v3` v3.0.5 -> v3.0.6
+
+  `modernc.org/libc` stays at the version `modernc.org/sqlite` v1.61.1
+  requires (v1.79.0, not the latest v1.80.0), and `modernc.org/memory`
+  stays at v1.12.1 for the same reason.
+
 ## [0.16.0] - 2026-10-09
 
 ### Added
