@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requires (v1.79.0, not the latest v1.80.0), and `modernc.org/memory`
   stays at v1.12.1 for the same reason.
 
+### Fixed
+- `scripts/generate-drupal-watchdog.sh` works with drush 13 again. Since
+  0.8.0's switch to epoch timestamps it required a numeric `timestamp`
+  field that `drush watchdog:show` does not return, so every export
+  failed with "Failed to convert drush output format". Entries without a
+  timestamp are now matched on drush's `DD/Mon HH:MM` date for yesterday
+  and get an epoch rebuilt from their time of day. Entries that do carry
+  a timestamp are filtered on it as before.
+
 ## [0.16.0] - 2026-10-09
 
 ### Added

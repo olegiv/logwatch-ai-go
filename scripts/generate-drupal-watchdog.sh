@@ -394,6 +394,16 @@ fi
 YESTERDAY_START=$((TODAY_START - 86400))
 YESTERDAY_END=$((TODAY_START - 1))
 
+# Yesterday in drush's "date" format ("DD/Mon", e.g. "02/Nov"). Drush 13
+# returns only this formatted date and no numeric timestamp, so such entries
+# are matched on it. LC_ALL=C keeps the month name English, as PHP's
+# date('M') always is.
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    YESTERDAY_DATE=$(LC_ALL=C date -v-1d +"%d/%b")
+else
+    YESTERDAY_DATE=$(LC_ALL=C date -d "yesterday" +"%d/%b")
+fi
+
 log "Starting Drupal watchdog export"
 log "Configuration:"
 log "  Site: $DRUPAL_SITE"
@@ -404,7 +414,7 @@ log "  Format: $FORMAT"
 log "  Count: $COUNT (max entries to fetch)"
 log "  Limit: $LIMIT (max entries in output)"
 log "  Min severity: $MIN_SEVERITY (0=emergency to 7=debug)"
-log "  Time filter: yesterday only"
+log "  Time filter: yesterday only ($YESTERDAY_DATE)"
 [ -n "$LOG_TYPE" ] && log "  Type filter: $LOG_TYPE"
 
 # Check if Drupal root exists
@@ -464,10 +474,21 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
             fi
 
             # Drush outputs object {wid: entry, ...} - convert to array and sort by wid (higher = newer)
-            # Convert severity string to number and filter by severity and yesterday's time range
+            # Convert severity string to number and filter by severity and yesterday's time range.
+            # Entries without a numeric timestamp (drush 13) are matched on yesterday's
+            # "DD/Mon HH:MM" date instead, and get an epoch rebuilt from their time of day,
+            # because the analyzer sorts and reports on the timestamp.
             if ! CONVERTED=$(echo "$OUTPUT" | jq --argjson minSev "$MIN_SEVERITY" \
                 --argjson yesterdayStart "$YESTERDAY_START" \
-                --argjson yesterdayEnd "$YESTERDAY_END" '
+                --argjson yesterdayEnd "$YESTERDAY_END" \
+                --arg yesterday "$YESTERDAY_DATE" '
+                def entry_timestamp:
+                    if .timestamp != null then (.timestamp | tonumber)
+                    elif ((.date // "") | startswith($yesterday + " ")) then
+                        ((.date | capture(" (?<h>[0-9]{1,2}):(?<m>[0-9]{2})$")) // null) as $t
+                        | if $t == null then null
+                          else $yesterdayStart + ($t.h | tonumber) * 3600 + ($t.m | tonumber) * 60 end
+                    else null end;
                 [to_entries | .[].value] |
                 map(
                     {
@@ -490,12 +511,12 @@ if OUTPUT=$("${DRUSH_CMD[@]}" 2>&1); then
                         severity_label: .severity,
                         location: .location,
                         hostname: .hostname,
-                        timestamp: (.timestamp | tonumber),
+                        timestamp: entry_timestamp,
                         date: .date
                     }
                 ) |
                 [.[] | select(.severity <= $minSev)] |
-                [.[] | select(.timestamp >= $yesterdayStart and .timestamp <= $yesterdayEnd)] |
+                [.[] | select(.timestamp != null and .timestamp >= $yesterdayStart and .timestamp <= $yesterdayEnd)] |
                 sort_by(-.wid)
             ' 2>/dev/null) || [ -z "$CONVERTED" ]; then
                 log_error "Failed to convert drush output format"
